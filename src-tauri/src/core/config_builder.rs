@@ -19,7 +19,7 @@ impl ConfigBuilder {
         Self { outbounds }
     }
 
-    /// 生成完整的 sing-box 1.13.14 config.json
+    /// 生成完整的 sing-box 1.11+ / 1.13+ / 1.14+ 兼容 config.json
     pub fn build(&self) -> Result<Value, AppError> {
         if self.outbounds.is_empty() {
             return Err(AppError::Config("没有可用节点，无法生成 config.json".to_string()));
@@ -104,9 +104,7 @@ impl ConfigBuilder {
                         "detour": "direct"
                     }
                 ],
-                "rules": [
-                    { "clash_mode": "direct", "server": "local" }
-                ],
+                "rules": [],
                 "final": "remote"
             },
             "inbounds": [

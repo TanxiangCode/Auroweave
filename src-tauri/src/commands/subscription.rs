@@ -7,10 +7,9 @@ use crate::core::sidecar::SidecarManager;
 use crate::error::{ApiResponse, AppError};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tracing::info;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -26,6 +25,7 @@ pub struct Subscription {
 /// 导入订阅并生成/热重载/拉起 sing-box
 #[tauri::command]
 pub async fn subscription_import(
+    app_handle: AppHandle,
     name: String,
     url: String,
     _auto_group: bool,
@@ -71,16 +71,10 @@ pub async fn subscription_import(
         Err(e) => return Ok(ApiResponse::err(e, 500)),
     };
 
-    // 保存 config.json 到项目根目录 config/ 文件夹 (位于 src-tauri 外部，避免触发 Cargo watcher 重新构建)
-    let config_path = if PathBuf::from("Cargo.toml").exists() && PathBuf::from("../package.json").exists() {
-        PathBuf::from("../config/config.json")
-    } else {
-        PathBuf::from("config/config.json")
-    };
-
-    if let Some(parent) = config_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
+    // 保存 config.json 到系统应用数据配置目录 (如 Windows %APPDATA%/auroweave/config.json)
+    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
+    let _ = fs::create_dir_all(&config_dir);
+    let config_path = config_dir.join("config.json");
     let config_path_str = config_path.to_string_lossy().to_string();
 
     if let Err(e) = fs::write(&config_path, serde_json::to_string_pretty(&config_json).unwrap_or_default()) {

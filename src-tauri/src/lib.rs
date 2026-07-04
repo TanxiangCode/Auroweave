@@ -5,7 +5,6 @@ pub mod commands;
 pub mod core;
 
 use core::sidecar::SidecarManager;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -54,23 +53,20 @@ pub fn run() {
 
             tracing::info!("Tauri 窗口已创建");
 
-            // 如果已有 config.json，使用 Tauri 内置 async runtime 异步拉起 sing-box
-            let candidates = vec![
-                PathBuf::from("config/config.json"),
-                PathBuf::from("../config/config.json"),
-            ];
-            let found_config = candidates.into_iter().find(|p| p.exists());
+            // 从系统应用配置目录寻找 config.json (如 %APPDATA%/auroweave/config.json)
+            let config_dir = app.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
+            let config_path = config_dir.join("config.json");
 
-            if let Some(cfg_path) = found_config {
+            if config_path.exists() {
                 let sm = sidecar_manager.clone();
-                let path_str = cfg_path.to_string_lossy().to_string();
+                let path_str = config_path.to_string_lossy().to_string();
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) = sm.start(&path_str).await {
                         tracing::warn!("启动 sing-box 失败: {}", e);
                     }
                 });
             } else {
-                tracing::info!("尚未检测到 config/config.json，等待用户导入订阅后拉起");
+                tracing::info!("尚未检测到系统配置目录中的 config.json，等待用户导入订阅后拉起");
             }
 
             Ok(())
