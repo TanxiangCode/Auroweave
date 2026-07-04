@@ -1,3 +1,6 @@
 /// core 模块索引
 /// 作者: TanXiang
 pub mod sidecar;
+pub mod parser;
+pub mod config_builder;
+pub mod clash_api;

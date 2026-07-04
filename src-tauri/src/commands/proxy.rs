@@ -1,14 +1,8 @@
 /// IPC 命令 — 代理节点与分组
 /// 作者: TanXiang
-///
-/// 规则：
-/// - 此层只做参数校验与调用编排，具体逻辑下沉到 core/ 领域模块
-/// - 所有命令返回 ApiResponse<T>
-/// - 命名格式：proxy_动作
+use crate::core::clash_api::ClashApiClient;
 use crate::error::{ApiResponse, AppError};
 use serde::{Deserialize, Serialize};
-
-// ---- 数据结构（与前端 types/index.ts 字段对齐）----
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProxyGroup {
@@ -29,36 +23,88 @@ pub struct ProxyNode {
     pub is_active: Option<bool>,
 }
 
-// ---- IPC 命令 ----
-
 /// 获取所有代理分组
 #[tauri::command]
 pub async fn proxy_get_groups() -> ApiResponse<Vec<ProxyGroup>> {
-    // TODO(模块B): 通过 ClashAPI HTTP 获取分组列表
-    tracing::debug!("proxy_get_groups 调用");
-    ApiResponse::ok(vec![])
+    let client = ClashApiClient::default();
+    match client.get_proxies().await {
+        Ok(json) => {
+            let mut groups = Vec::new();
+            if let Some(proxies) = json.get("proxies").and_then(|p| p.as_object()) {
+                for (name, val) in proxies {
+                    let group_type = val.get("type").and_then(|t| t.as_str()).unwrap_or("Selector");
+                    if group_type == "Selector" || group_type == "URLTest" {
+                        let now = val.get("now").and_then(|n| n.as_str()).map(|s| s.to_string());
+                        let list = val.get("all").and_then(|a| a.as_array())
+                            .map(|arr| arr.iter().filter_map(|item| item.as_str().map(|s| s.to_string())).collect())
+                            .unwrap_or_default();
+
+                        groups.push(ProxyGroup {
+                            tag: name.clone(),
+                            r#type: group_type.to_lowercase(),
+                            proxies: list,
+                            now,
+                            url: None,
+                            interval: None,
+                        });
+                    }
+                }
+            }
+            ApiResponse::ok(groups)
+        }
+        Err(e) => ApiResponse::err(e, 502),
+    }
 }
 
 /// 获取分组内所有节点
 #[tauri::command]
 pub async fn proxy_get_group_nodes(group_tag: String) -> ApiResponse<Vec<ProxyNode>> {
-    // TODO(模块B): 从 ClashAPI 获取 /proxies/{name} 数据
-    tracing::debug!("proxy_get_group_nodes: {}", group_tag);
-    ApiResponse::ok(vec![])
+    let client = ClashApiClient::default();
+    match client.get_proxies().await {
+        Ok(json) => {
+            let mut nodes = Vec::new();
+            if let Some(proxies) = json.get("proxies").and_then(|p| p.as_object()) {
+                if let Some(group_val) = proxies.get(&group_tag) {
+                    if let Some(all) = group_val.get("all").and_then(|a| a.as_array()) {
+                        let current_now = group_val.get("now").and_then(|n| n.as_str()).unwrap_or("");
+                        for item in all {
+                            if let Some(node_name) = item.as_str() {
+                                let node_type = proxies.get(node_name)
+                                    .and_then(|n| n.get("type"))
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or("unknown");
+
+                                nodes.push(ProxyNode {
+                                    tag: node_name.to_string(),
+                                    r#type: node_type.to_string(),
+                                    region: None,
+                                    country_code: None,
+                                    is_active: Some(node_name == current_now),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            ApiResponse::ok(nodes)
+        }
+        Err(e) => ApiResponse::err(e, 502),
+    }
 }
 
 /// 切换分组当前节点
 #[tauri::command]
 pub async fn proxy_select_node(group_tag: String, node_tag: String) -> ApiResponse<()> {
-    // TODO(模块B): PUT /proxies/{group_tag} { "name": node_tag }
-    tracing::debug!("proxy_select_node: {} -> {}", group_tag, node_tag);
-    ApiResponse::ok(())
+    let client = ClashApiClient::default();
+    match client.select_node(&group_tag, &node_tag).await {
+        Ok(_) => ApiResponse::ok(()),
+        Err(e) => ApiResponse::err(e, 500),
+    }
 }
 
 /// 获取当前代理模式
 #[tauri::command]
 pub async fn proxy_get_mode() -> ApiResponse<String> {
-    // TODO(模块B): GET /configs 解析 mode 字段
     ApiResponse::ok("rule".to_string())
 }
 
@@ -71,7 +117,6 @@ pub async fn proxy_set_mode(mode: String) -> ApiResponse<()> {
             400,
         );
     }
-    // TODO(模块B): PATCH /configs { "mode": mode }
     tracing::info!("切换代理模式: {}", mode);
     ApiResponse::ok(())
 }

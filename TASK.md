@@ -10,7 +10,7 @@
 | 模块 | 名称 | 状态 | 里程碑 | 详细计划 |
 |---|---|---|---|---|
 | A | 技术预研 | 🔄 进行中 | M0 | [plan-A-research.md](plans/plan-A-research.md) |
-| B | 基础骨架与代理闭环 | 🔄 进行中 | M1 | [plan-B-core-proxy.md](plans/plan-B-core-proxy.md) |
+| B | 基础骨架与代理闭环 | ✅ 已完成 | M1 | [plan-B-core-proxy.md](plans/plan-B-core-proxy.md) |
 | C | 实时状态与快捷交互 | ⏳ 待开始 | M2 | [plan-C-realtime.md](plans/plan-C-realtime.md) |
 | D | 规则合并与内核管理 | ⏳ 待开始 | M2 | [plan-D-rules.md](plans/plan-D-rules.md) |
 | E | 智能测速与负载均衡 | ⏳ 待开始 | M3 | [plan-E-speedtest.md](plans/plan-E-speedtest.md) |
@@ -31,10 +31,9 @@
 - Git 提交：`2368e3c` — `chore: init project scaffold`
 - 交付物：工程骨架、Design Tokens、类型系统、Store、路由、Rust 命令骨架
 
-### 🔄 M1 — 代理闭环（进行中）
+### ✅ M1 — 代理闭环（已完成 2026-07-04）
 - **目标**：导入真实机场订阅 → 成功翻墙
-- **关键路径**：B-1（sidecar）→ B-3（订阅解析）→ B-4（config 生成）→ B-5（ClashAPI）
-- **预计提交**：`feat(core): complete proxy pipeline end-to-end`
+- **交付物**：sidecar 生命周期管理、Clash/V2ray/Singbox 订阅多格式解析器、ConfigBuilder 动态配置生成器、ClashAPI HTTP 客户端、订阅与代理节点前端交互界面
 
 ### ⏳ M2 — 基础体验完整
 - **依赖**：M1 完成后并行启动 C + D + K（主体）

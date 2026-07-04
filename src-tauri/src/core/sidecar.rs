@@ -7,8 +7,9 @@
 /// - 响应系统挂起（Sleep）与唤醒（Wake）信号，自动重连
 /// - 提供停止接口（应用退出时调用）
 use crate::error::AppError;
-use std::process::Child;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::process::Child;
 use tracing::{info, warn, error};
 
 /// sing-box 锁定版本
@@ -49,21 +50,29 @@ impl SidecarManager {
         *status = SidecarStatus::Starting;
         drop(status);
 
-        // TODO(模块B): 查找 sidecar-bin/ 下对应平台的二进制路径
         let binary_path = Self::resolve_binary_path()?;
-        info!("启动 sing-box: {} --config {}", binary_path, config_path);
+        if !binary_path.exists() {
+            let err_msg = format!("找不到 sing-box 二进制文件: {:?}", binary_path);
+            error!("{}", err_msg);
+            *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? = SidecarStatus::Error(err_msg.clone());
+            return Err(AppError::Sidecar(err_msg));
+        }
 
-        // TODO(模块B): 使用 tokio::process::Command 启动子进程
-        // let child = tokio::process::Command::new(&binary_path)
-        //     .arg("run")
-        //     .arg("--config")
-        //     .arg(config_path)
-        //     .spawn()
-        //     .map_err(|e| AppError::Sidecar(e.to_string()))?;
+        info!("启动 sing-box: {:?} run -c {}", binary_path, config_path);
 
-        *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? =
-            SidecarStatus::Running;
+        let child = tokio::process::Command::new(&binary_path)
+            .arg("run")
+            .arg("-c")
+            .arg(config_path)
+            .spawn()
+            .map_err(|e| AppError::Sidecar(format!("拉起 sing-box 失败: {}", e)))?;
 
+        let mut proc_guard = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
+        *proc_guard = Some(child);
+
+        *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? = SidecarStatus::Running;
+
+        info!("sing-box 子进程启动成功");
         Ok(())
     }
 
@@ -71,11 +80,12 @@ impl SidecarManager {
     pub async fn stop(&self) -> Result<(), AppError> {
         let mut proc = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
         if let Some(mut child) = proc.take() {
-            child.kill().map_err(|e| AppError::Sidecar(e.to_string()))?;
+            if let Err(e) = child.kill().await {
+                warn!("停止 sing-box 进程时出现警告: {}", e);
+            }
             info!("sing-box 进程已停止");
         }
-        *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? =
-            SidecarStatus::Stopped;
+        *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? = SidecarStatus::Stopped;
         Ok(())
     }
 
@@ -90,22 +100,20 @@ impl SidecarManager {
     pub async fn handle_wake(&self, config_path: &str) -> Result<(), AppError> {
         warn!("系统从睡眠唤醒，重启 sing-box...");
         self.stop().await?;
-        // 等待端口释放
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         self.start(config_path).await
     }
 
     /// 解析当前平台对应的 sing-box 二进制路径
-    fn resolve_binary_path() -> Result<String, AppError> {
-        // TODO(模块B): 从 Tauri resource_dir 或 sidecar-bin/ 解析
+    fn resolve_binary_path() -> Result<PathBuf, AppError> {
         #[cfg(target_os = "windows")]
-        let path = format!("sidecar-bin/windows-x64/sing-box-{}.exe", SINGBOX_VERSION);
+        let rel_path = format!("src-tauri/sidecar-bin/windows-x64/sing-box-{}.exe", SINGBOX_VERSION);
         #[cfg(target_os = "macos")]
-        let path = format!("sidecar-bin/macos-universal/sing-box-{}", SINGBOX_VERSION);
+        let rel_path = format!("src-tauri/sidecar-bin/macos-universal/sing-box-{}", SINGBOX_VERSION);
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        let path = format!("sidecar-bin/sing-box-{}", SINGBOX_VERSION);
+        let rel_path = format!("src-tauri/sidecar-bin/sing-box-{}", SINGBOX_VERSION);
 
-        Ok(path)
+        Ok(PathBuf::from(rel_path))
     }
 }
 
