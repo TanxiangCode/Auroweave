@@ -19,7 +19,7 @@ impl ConfigBuilder {
         Self { outbounds }
     }
 
-    /// 生成完整的 sing-box 1.25.4 config.json
+    /// 生成完整的 sing-box 1.13.14 config.json
     pub fn build(&self) -> Result<Value, AppError> {
         if self.outbounds.is_empty() {
             return Err(AppError::Config("没有可用节点，无法生成 config.json".to_string()));

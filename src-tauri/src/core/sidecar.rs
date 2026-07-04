@@ -2,7 +2,7 @@
 /// 作者: TanXiang
 ///
 /// 职责：
-/// - 以独立子进程拉起 sing-box 二进制（版本：1.25.4）
+/// - 以独立子进程拉起 sing-box 二进制（版本：1.13.14）
 /// - 监听进程退出，自动重启
 /// - 响应系统挂起（Sleep）与唤醒（Wake）信号，自动重连
 /// - 提供停止接口（应用退出时调用）
@@ -13,7 +13,7 @@ use tokio::process::Child;
 use tracing::{info, warn, error};
 
 /// sing-box 锁定版本
-pub const SINGBOX_VERSION: &str = "1.11.4";
+pub const SINGBOX_VERSION: &str = "1.13.14";
 
 /// Sidecar 状态
 #[derive(Debug, Clone, PartialEq)]

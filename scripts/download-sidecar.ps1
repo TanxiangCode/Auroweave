@@ -1,7 +1,7 @@
-# Download sing-box 1.25.4 binary for Windows x64
+# Download sing-box 1.13.14 binary for Windows x64
 # Author: TanXiang
 
-$Version = "1.11.4"
+$Version = "1.13.14"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $TargetDir = Join-Path $ScriptDir "..\src-tauri\sidecar-bin\windows-x64"
 $ZipName = "sing-box-$Version-windows-amd64.zip"

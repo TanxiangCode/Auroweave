@@ -119,7 +119,7 @@ pub async fn run_single_speed_test(
 - [ ] 支持生成 `loadbalance` 类型出站
 - [ ] 默认关闭，Settings → RouteModePanel 中提供开关
 - [ ] 开启前弹窗：「负载均衡模式下 IP 会在多个节点间跳变，可能影响需要固定 IP 的服务（如银行、流媒体）」
-- [ ] 兼容性测试：验证 sing-box 1.25.4 的 `loadbalance` 出站 JSON 格式（参考模块 A-2）
+- [ ] 兼容性测试：验证 sing-box 1.13.14 的 `loadbalance` 出站 JSON 格式（参考模块 A-2）
 
 ---
 

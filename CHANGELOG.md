@@ -9,7 +9,7 @@
 
 ### Added
 - **M1 里程碑**：完成代理核心闭环（Core Proxy Pipeline）
-- `scripts/download-sidecar.ps1` & `scripts/download-sidecar.sh` 跨平台 sing-box 1.25.4 二进制下载提取脚本
+- `scripts/download-sidecar.ps1` & `scripts/download-sidecar.sh` 跨平台 sing-box 1.13.14 二进制下载提取脚本
 - Rust 多格式订阅解析器（支持 Clash YAML, V2Ray Base64/URI, Singbox JSON）
 - `ConfigBuilder` 动态配置生成器（地区识别、urltest 自动分组、DNS & ClashAPI 监听生成）
 - `ClashApiClient` HTTP 客户端（与 127.0.0.1:9090 对接）

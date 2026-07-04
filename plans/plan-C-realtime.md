@@ -20,7 +20,7 @@
 
 **文件**：`src/stores/connection.store.ts`（升级为真实接入）
 
-- [ ] 确认 sing-box 1.25.4 `/traffic` 推送的字段格式（参考模块 A 兼容性报告）
+- [ ] 确认 sing-box 1.13.14 `/traffic` 推送的字段格式（参考模块 A 兼容性报告）
 - [ ] 接入 `subscribeTraffic()`，将 `download_speed` / `upload_speed` 实时写入 store
 - [ ] EMA 平滑算法验证（`α=0.15`，测试不同网速下的平滑效果）
 - [ ] 接入 `subscribeConnections()`，更新 `connections[]` 列表
