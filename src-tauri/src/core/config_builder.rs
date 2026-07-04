@@ -106,8 +106,9 @@ impl ConfigBuilder {
                     }
                 ],
                 "rules": [
-                    { "outbound": "any", "server": "local" }
-                ]
+                    { "outbound": ["any"], "server": "local" }
+                ],
+                "final": "remote"
             },
             "inbounds": [
                 {
