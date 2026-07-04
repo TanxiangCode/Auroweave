@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>🧪 高级设置与性能模式</h2>
+    <h2>🧪 高级设置与测速/超时配置</h2>
     <div class="setting-group">
       <!-- 拓扑图开关 (具有反向锚定高亮) -->
       <div
@@ -31,6 +31,51 @@
           v-model="settingsStore.settings.performance_mode"
           class="switch"
           @change="handlePerfModeChange"
+        />
+      </div>
+
+      <!-- 测速目标 URL -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>吞吐量测速目标 URL</span>
+          <span class="sub-label">单节点/批量测速时使用的下载测试数据源</span>
+        </div>
+        <input
+          type="text"
+          v-model="settingsStore.settings.speed_test_url"
+          class="text-input"
+          placeholder="https://..."
+          @change="save"
+        />
+      </div>
+
+      <!-- 测速超时时间 -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>单节点测速限时 (秒)</span>
+          <span class="sub-label">单节点吞吐量测试的最大持续秒数 (默认: 5 秒)</span>
+        </div>
+        <input
+          type="number"
+          v-model.number="settingsStore.settings.speed_test_timeout_secs"
+          class="num-input"
+          placeholder="5"
+          @change="save"
+        />
+      </div>
+
+      <!-- 网络连接超时时间 -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>订阅网络请求超时 (秒)</span>
+          <span class="sub-label">拉取远程订阅与规则时的网络超时阈值 (默认: 15 秒)</span>
+        </div>
+        <input
+          type="number"
+          v-model.number="settingsStore.settings.connection_timeout_secs"
+          class="num-input"
+          placeholder="15"
+          @change="save"
         />
       </div>
 
@@ -81,7 +126,7 @@ onMounted(() => {
 
 async function save() {
   await settingsStore.updateSettings(settingsStore.settings);
-  toast.success("高级设置已保存");
+  toast.success("高级与超时设置已保存");
 }
 
 async function handlePerfModeChange() {
@@ -110,6 +155,8 @@ h2 { font-size: 18px; font-weight: 700; }
 .item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
 .sub-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: normal; }
 .switch { width: 18px; height: 18px; cursor: pointer; }
+.text-input { padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; font-size: 12px; width: 260px; outline: none; }
+.num-input { padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; width: 100px; outline: none; }
 .version-tag { font-size: 12px; padding: 4px 8px; background: rgba(0, 242, 254, 0.1); border-radius: 6px; color: #00f2fe; font-weight: 600; }
 .btn-restore { padding: 6px 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; font-size: 12px; cursor: pointer; }
 </style>

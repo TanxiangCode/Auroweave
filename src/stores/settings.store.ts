@@ -21,6 +21,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     "https://fast.com",
   ],
   auto_group_on_import: true,
+
+  mixed_port: 7890,
+  clash_api_port: 9090,
+  speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000",
+  speed_test_timeout_secs: 5,
+  connection_timeout_secs: 15,
 };
 
 export const useSettingsStore = defineStore("settings", () => {

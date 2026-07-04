@@ -3,8 +3,8 @@
 ///
 /// 职责：
 /// 1. 整理出站节点（去重、自动按地区分类成 urltest 分组）
-/// 2. 构建 DNS 路由、RuleSet 和 Inbounds（Mixed 7890 端口）
-/// 3. 配置 ClashAPI (127.0.0.1:9090)
+/// 2. 构建 DNS 路由、RuleSet 和 Inbounds（Mixed 动态监听端口）
+/// 3. 配置 ClashAPI 动态监听端口
 use super::parser::ParsedOutbound;
 use crate::error::AppError;
 use serde_json::{json, Value};
@@ -12,11 +12,27 @@ use std::collections::HashMap;
 
 pub struct ConfigBuilder {
     outbounds: Vec<ParsedOutbound>,
+    mixed_port: u16,
+    clash_api_port: u16,
 }
 
 impl ConfigBuilder {
     pub fn new(outbounds: Vec<ParsedOutbound>) -> Self {
-        Self { outbounds }
+        Self {
+            outbounds,
+            mixed_port: 7890,
+            clash_api_port: 9090,
+        }
+    }
+
+    pub fn with_ports(mut self, mixed_port: u16, clash_api_port: u16) -> Self {
+        if mixed_port > 0 {
+            self.mixed_port = mixed_port;
+        }
+        if clash_api_port > 0 {
+            self.clash_api_port = clash_api_port;
+        }
+        self
     }
 
     /// 生成完整的 sing-box 1.11+ / 1.13+ / 1.14+ 兼容 config.json
@@ -35,7 +51,6 @@ impl ConfigBuilder {
             node_tags.push(out.tag.clone());
             raw_outbounds.push(out.raw_json.clone());
 
-            // 识别节点地区并分类
             let region = detect_region(&out.tag);
             region_map.entry(region).or_default().push(out.tag.clone());
         }
@@ -111,7 +126,7 @@ impl ConfigBuilder {
                     "type": "mixed",
                     "tag": "mixed-in",
                     "listen": "127.0.0.1",
-                    "listen_port": 7890
+                    "listen_port": self.mixed_port
                 }
             ],
             "outbounds": final_outbounds,
@@ -127,7 +142,7 @@ impl ConfigBuilder {
             },
             "experimental": {
                 "clash_api": {
-                    "external_controller": "127.0.0.1:9090",
+                    "external_controller": format!("127.0.0.1:{}", self.clash_api_port),
                     "secret": ""
                 }
             }
