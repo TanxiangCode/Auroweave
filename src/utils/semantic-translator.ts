@@ -14,18 +14,18 @@ export interface SemanticAuditRecord {
   type: "proxied" | "direct" | "blocked";
 }
 
-/** 预置规则语义翻译字典 */
+/** 预置规则语义翻译字典 (按规则优先级排序) */
 const SEMANTIC_RULES: Array<{
   pattern: RegExp;
   icon: string;
   text: string;
 }> = [
+  { pattern: /adservice|doubleclick|analytics|telemetry|track/i, icon: "🚫", text: "安全拦截 · 广告/追踪拦截" },
   { pattern: /google|gstatic|youtube/i, icon: "🚀", text: "谷歌服务 · 节点加密加速" },
   { pattern: /github|microsoft|vscode/i, icon: "💻", text: "开发者服务 · 极速通道" },
   { pattern: /telegram|twitter|x\.com|facebook|instagram/i, icon: "💬", text: "社交网络 · 专线加速" },
   { pattern: /netflix|disney|spotify/i, icon: "🎬", text: "流媒体解锁 · 高清通道" },
   { pattern: /baidu|qq|wechat|bilibili|taobao|jd\.com|163\.com|\.cn$/i, icon: "🎯", text: "绕过大陆 · 国内直连" },
-  { pattern: /adservice|doubleclick|analytics|telemetry|track/i, icon: "🚫", text: "安全拦截 · 广告/追踪拦截" },
 ];
 
 /** 将原始连接/DNS 数据转化为语义化 Audit 记录 */

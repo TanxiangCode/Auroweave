@@ -1,294 +1,187 @@
 <script setup lang="ts">
 /**
- * 设置视图 — 包含订阅管理面板
+ * 设置视图 — 九大面板控制中心
  * 作者: TanXiang
  */
 import { ref, onMounted } from "vue";
-import { useSubscriptionStore } from "@/stores/subscription.store";
-import { storeToRefs } from "pinia";
+import { useRoute, useRouter } from "vue-router";
+import GeneralPanel from "./panels/GeneralPanel.vue";
+import SubscriptionPanel from "./panels/SubscriptionPanel.vue";
+import RouteModePanel from "./panels/RouteModePanel.vue";
+import DnsPanel from "./panels/DnsPanel.vue";
+import TunPanel from "./panels/TunPanel.vue";
+import AutomationPanel from "./panels/AutomationPanel.vue";
+import HotkeyPanel from "./panels/HotkeyPanel.vue";
+import PrivacyPanel from "./panels/PrivacyPanel.vue";
+import AdvancedPanel from "./panels/AdvancedPanel.vue";
 
-const subStore = useSubscriptionStore();
-const { subscriptions, importing, importError } = storeToRefs(subStore);
+const route = useRoute();
+const router = useRouter();
 
-const nameInput = ref("");
-const urlInput = ref("");
-const successMsg = ref<string | null>(null);
+type PanelKey =
+  | "general"
+  | "subscription"
+  | "routemode"
+  | "dns"
+  | "tun"
+  | "automation"
+  | "hotkey"
+  | "privacy"
+  | "advanced";
+
+const activePanel = ref<PanelKey>("general");
+const highlightTarget = ref<string>("");
+
+const navItems: Array<{ key: PanelKey; icon: string; label: string }> = [
+  { key: "general", icon: "⚙️", label: "通用设置" },
+  { key: "subscription", icon: "📦", label: "订阅管理" },
+  { key: "routemode", icon: "🔀", label: "代理模式" },
+  { key: "dns", icon: "📡", label: "DNS 配置" },
+  { key: "tun", icon: "🔌", label: "TUN 网卡" },
+  { key: "automation", icon: "⚡", label: "场景自动化" },
+  { key: "hotkey", icon: "⌨️", label: "全局热键" },
+  { key: "privacy", icon: "🛡️", label: "隐私与日志" },
+  { key: "advanced", icon: "🧪", label: "高级与性能" },
+];
 
 onMounted(() => {
-  subStore.fetchAll();
-});
-
-async function handleImport() {
-  if (!nameInput.value.trim() || !urlInput.value.trim()) return;
-  successMsg.value = null;
-
-  const res = await subStore.importSub(nameInput.value.trim(), urlInput.value.trim());
-  if (res.success) {
-    successMsg.value = `成功导入订阅 "${nameInput.value}"，共 ${res.data?.node_count ?? 0} 个节点！`;
-    nameInput.value = "";
-    urlInput.value = "";
+  if (route.query.panel) {
+    const p = route.query.panel as PanelKey;
+    if (navItems.some((n) => n.key === p)) {
+      activePanel.value = p;
+    }
   }
-}
-
-async function handleRemove(id: string) {
-  await subStore.removeSub(id);
-}
+  if (route.query.highlight) {
+    highlightTarget.value = route.query.highlight as string;
+  }
+});
 </script>
 
 <template>
   <div class="settings-view">
-    <header class="settings-header">
-      <h1>⚙️ 应用设置与订阅</h1>
-    </header>
-
-    <div class="settings-grid">
-      <!-- 订阅导入卡片 -->
-      <div class="panel-card">
-        <h2>📥 导入新订阅</h2>
-        <p class="panel-desc">支持 Clash (YAML)、V2Ray (Base64) 及 Sing-box (JSON) 格式订阅链接</p>
-
-        <form class="import-form" @submit.prevent="handleImport">
-          <div class="field-group">
-            <label for="sub-name">订阅名称</label>
-            <input
-              id="sub-name"
-              v-model="nameInput"
-              type="text"
-              placeholder="例如：极客机场 主订阅"
-              required
-            />
-          </div>
-
-          <div class="field-group">
-            <label for="sub-url">订阅 URL</label>
-            <input
-              id="sub-url"
-              v-model="urlInput"
-              type="url"
-              placeholder="https://example.com/api/v1/client/subscribe?token=..."
-              required
-            />
-          </div>
-
-          <button type="submit" class="btn-primary" :disabled="importing">
-            <span v-if="importing">⏳ 正在解析并生成配置...</span>
-            <span v-else>🚀 开始导入</span>
-          </button>
-        </form>
-
-        <div v-if="importError" class="alert error">
-          ⚠️ 导入失败: {{ importError }}
-        </div>
-        <div v-if="successMsg" class="alert success">
-          ✅ {{ successMsg }}
-        </div>
+    <!-- 侧边栏导航 -->
+    <aside class="settings-sidebar glass-effect">
+      <div class="sidebar-header">
+        <button class="btn-back" @click="router.push('/')">🔙 返回主舱</button>
       </div>
+      <nav class="nav-list">
+        <button
+          v-for="item in navItems"
+          :key="item.key"
+          class="nav-item"
+          :class="{ active: activePanel === item.key }"
+          @click="activePanel = item.key"
+        >
+          <span class="nav-icon">{{ item.icon }}</span>
+          <span class="nav-label">{{ item.label }}</span>
+        </button>
+      </nav>
+    </aside>
 
-      <!-- 已保存订阅列表 -->
-      <div class="panel-card">
-        <h2>📋 已保存的订阅 ({{ subscriptions.length }})</h2>
-
-        <div v-if="subscriptions.length === 0" class="empty-tip">
-          暂无本地订阅，请在左侧表单中粘贴订阅链接导入。
-        </div>
-
-        <div v-else class="sub-list">
-          <div v-for="sub in subscriptions" :key="sub.id" class="sub-item">
-            <div class="sub-info">
-              <span class="sub-title">{{ sub.name }}</span>
-              <span class="sub-meta">
-                格式: {{ sub.format.toUpperCase() }} · 节点数: {{ sub.node_count ?? 0 }}
-              </span>
-              <span class="sub-url-preview">{{ sub.url }}</span>
-            </div>
-            <button class="btn-danger" @click="handleRemove(sub.id)">删除</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- 主面板渲染区域 -->
+    <main class="settings-main glass-effect">
+      <GeneralPanel v-if="activePanel === 'general'" />
+      <SubscriptionPanel v-else-if="activePanel === 'subscription'" />
+      <RouteModePanel v-else-if="activePanel === 'routemode'" />
+      <DnsPanel v-else-if="activePanel === 'dns'" />
+      <TunPanel v-else-if="activePanel === 'tun'" />
+      <AutomationPanel v-else-if="activePanel === 'automation'" />
+      <HotkeyPanel v-else-if="activePanel === 'hotkey'" />
+      <PrivacyPanel v-else-if="activePanel === 'privacy'" />
+      <AdvancedPanel
+        v-else-if="activePanel === 'advanced'"
+        :highlight-target="highlightTarget"
+      />
+    </main>
   </div>
 </template>
 
 <style scoped>
 .settings-view {
-  padding: var(--space-6);
+  display: flex;
   height: 100%;
-  overflow-y: auto;
+  gap: 16px;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.settings-sidebar {
+  width: 220px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 16px;
 }
 
-.settings-header h1 {
-  font-size: var(--text-xl);
-  font-weight: var(--weight-bold);
-  color: var(--text-primary);
+.sidebar-header {
+  margin-bottom: 6px;
 }
 
-.settings-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-6);
-}
-
-@media (max-width: 800px) {
-  .settings-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.panel-card {
-  background: var(--layer-1);
-  backdrop-filter: var(--blur-panel);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.panel-card h2 {
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-}
-
-.panel-desc {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.import-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.field-group label {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.field-group input {
-  padding: var(--space-2) var(--space-3);
-  background: var(--layer-2);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-md);
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-  outline: none;
-  transition: border-color var(--duration-fast);
-}
-
-.field-group input:focus {
-  border-color: var(--accent-blue);
-}
-
-.btn-primary {
-  padding: var(--space-3);
-  background: var(--accent-blue);
+.btn-back {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  font-weight: var(--weight-medium);
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  transition: opacity var(--duration-fast);
+  transition: all 0.2s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
+.btn-back:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: #00f2fe;
 }
 
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.alert {
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  font-size: var(--text-xs);
-}
-
-.alert.error {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid var(--accent-red);
-  color: var(--accent-red);
-}
-
-.alert.success {
-  background: rgba(16, 185, 129, 0.15);
-  border: 1px solid var(--accent-green);
-  color: var(--accent-green);
-}
-
-.empty-tip {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  text-align: center;
-  padding: var(--space-6);
-}
-
-.sub-list {
+.nav-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 6px;
+  overflow-y: auto;
 }
 
-.sub-item {
+.nav-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3);
-  background: var(--layer-2);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-md);
-}
-
-.sub-info {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.sub-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-}
-
-.sub-meta {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.sub-url-preview {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.btn-danger {
-  padding: var(--space-1) var(--space-3);
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
   background: transparent;
-  border: 1px solid var(--accent-red);
-  color: var(--accent-red);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
+  border: 1px solid transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 13px;
   cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
 }
 
-.btn-danger:hover {
-  background: rgba(239, 68, 68, 0.15);
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.nav-item.active {
+  background: rgba(0, 242, 254, 0.12);
+  border-color: rgba(0, 242, 254, 0.3);
+  color: #00f2fe;
+  font-weight: 600;
+}
+
+.nav-icon {
+  font-size: 16px;
+}
+
+.settings-main {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 24px;
+  overflow-y: auto;
 }
 </style>

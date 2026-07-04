@@ -5,9 +5,16 @@
 
 ---
 
-## [Unreleased]
+## [0.1.0] — 2026-07-04
+
+> **Auroweave v0.1.0 正式版全量交付**：完成全链路翻墙代理、Spotlight 命令框、测速大厅、App-Matrix 进程分流与安全审计看板。
 
 ### Added
+- **M5 里程碑**：完成设置页面九大面板与发布打包 (Nine Settings Panels & Production Release)
+- 九大分类设置面板组件（`General`, `Subscription`, `RouteMode`, `Dns`, `Tun`, `Automation`, `Hotkey`, `Privacy`, `Advanced`）
+- `data-perf-mode="reduced"` 性能模式总开关（一键取消模糊滤镜与低配 GPU 降级）
+- 反向精准高亮锚定（从 Routing 页点击高亮跳转至拓扑开关）
+- 前端 Vitest 单元测试集（`semantic-translator.test.ts` / `speed-formatter.test.ts`）
 - **M4 里程碑**：完成 App-Matrix 应用矩阵与语义化 Audit 看板 (App-Matrix & Semantic Audit Engine)
 - `process.rs` Rust 进程枚举器与 `routing.rs` IPC 规则持久化服务
 - `AppMatrixList.vue` 进程级出站分流绑定矩阵（搜索过滤与已自定义规则筛选）

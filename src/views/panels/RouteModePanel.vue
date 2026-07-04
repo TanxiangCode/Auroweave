@@ -1,0 +1,57 @@
+<template>
+  <div class="panel-container">
+    <h2>🔀 代理模式与 TUN</h2>
+    <div class="setting-group">
+      <div class="setting-item">
+        <div class="item-label">
+          <span>代理模式</span>
+          <span class="sub-label">切换当前全局路由分流规则</span>
+        </div>
+        <select v-model="settingsStore.settings.proxy_mode" class="select-input" @change="saveMode">
+          <option value="rule">🔀 规则模式 (Rule)</option>
+          <option value="global">🌐 全局代理 (Global)</option>
+          <option value="direct">⚡ 直连模式 (Direct)</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <div class="item-label">
+          <span>TUN 虚拟网卡接管</span>
+          <span class="sub-label">全局接管操作系统所有 UDP/TCP 流量 (需要管理员/UAC 权限)</span>
+        </div>
+        <input type="checkbox" v-model="settingsStore.settings.tun_enabled" class="switch" @change="save" />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { useSettingsStore } from "@/stores/settings.store";
+import { useProxyStore } from "@/stores/proxy.store";
+import { useToast } from "@/composables/useToast";
+
+const settingsStore = useSettingsStore();
+const proxyStore = useProxyStore();
+const toast = useToast();
+
+async function save() {
+  await settingsStore.updateSettings(settingsStore.settings);
+  toast.success("代理模式设置已保存");
+}
+
+async function saveMode() {
+  await proxyStore.changeProxyMode(settingsStore.settings.proxy_mode);
+  await save();
+}
+</script>
+
+<style scoped>
+.panel-container { display: flex; flex-direction: column; gap: 16px; }
+h2 { font-size: 18px; font-weight: 700; }
+.setting-group { display: flex; flex-direction: column; gap: 12px; }
+.setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
+.item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
+.sub-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: normal; }
+.select-input { padding: 6px 12px; background: #121622; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; outline: none; }
+.switch { width: 18px; height: 18px; cursor: pointer; }
+</style>

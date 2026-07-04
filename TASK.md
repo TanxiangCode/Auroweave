@@ -16,8 +16,8 @@
 | E | 智能测速与负载均衡 | ✅ 已完成 | M3 | [plan-E-speedtest.md](plans/plan-E-speedtest.md) |
 | F | Routing · App-Matrix | ✅ 已完成 | M4 | [plan-F-routing.md](plans/plan-F-routing.md) |
 | G | Audit 语义化看板 | ✅ 已完成 | M4 | [plan-G-audit.md](plans/plan-G-audit.md) |
-| H | 设置页面九大面板 | ⏳ 待开始 | M5 | [plan-H-settings.md](plans/plan-H-settings.md) |
-| I | 联调、测试与打包 | ⏳ 待开始 | M5 | [plan-I-release.md](plans/plan-I-release.md) |
+| H | 设置页面九大面板 | ✅ 已完成 | M5 | [plan-H-settings.md](plans/plan-H-settings.md) |
+| I | 联调、测试与打包 | ✅ 已完成 | M5 | [plan-I-release.md](plans/plan-I-release.md) |
 | J | Routing · 拓扑画布 | 🔵 低优先级 | M6 | [plan-J-topology.md](plans/plan-J-topology.md) |
 | K | 视觉设计系统 | ✅ 已完成 | M2 | [plan-K-visual.md](plans/plan-K-visual.md) |
 
@@ -46,6 +46,10 @@
 ### ✅ M4 — 分流矩阵与语义化审计看板（已完成 2026-07-04）
 - **目标**：进程级分流矩阵 (App-Matrix) 与 语义化 Audit 安全审计看板
 - **交付物**：Rust 系统进程枚举 (`process.rs`)、`routing.rs` 进程规则持久化、`OutboundSelector.vue` 出站选择菜单、`AppMatrixList.vue` 进程路由矩阵、`semantic-translator.ts` 规则归一翻译器、`SemanticRuleCard.vue` 规则卡片、`RawLogStream.vue` 极客内核日志流、`AuditView.vue` 统计与动态时间流。
+
+### ✅ M5 — 设置页面九大面板与发布打包（已完成 2026-07-04）
+- **目标**：完成九大分类设置面板、性能模式全局动效降级、反向精准锚定与全量打包发布
+- **交付物**：九大分类设置面板 (`General`, `Subscription`, `RouteMode`, `Dns`, `Tun`, `Automation`, `Hotkey`, `Privacy`, `Advanced`)、`data-perf-mode="reduced"` 性能模式总开关、`vitest` 单元测试用例集、`v0.1.0` 生产环境全量编译。
 
 ---
 

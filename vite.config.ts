@@ -43,7 +43,7 @@ export default defineConfig(async () => ({
 
   // 测试配置（vitest）
   test: {
-    environment: "jsdom",
+    environment: "node",
     include: ["tests/unit/**/*.{test,spec}.ts"],
   },
 }));
