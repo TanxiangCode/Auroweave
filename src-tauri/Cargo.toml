@@ -34,7 +34,7 @@ url = "2.5"
 tokio = { version = "1", features = ["full"] }
 
 # HTTP 客户端（订阅拉取、测速）
-reqwest = { version = "0.12", features = ["json", "stream"], default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
 
 # 进程信息（App-Matrix）
 sysinfo = "0.31"
