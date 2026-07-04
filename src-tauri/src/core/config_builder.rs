@@ -42,7 +42,11 @@ impl ConfigBuilder {
 
         let mut final_outbounds = Vec::new();
 
-        // 1. Selector "proxy" (主出站)
+        // 1. Direct 与 Block 基础出站
+        final_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
+        final_outbounds.push(json!({ "type": "block", "tag": "block" }));
+
+        // 2. Selector "proxy" (主出站)
         let mut proxy_group_list = vec!["auto".to_string()];
         for (region, _) in &region_map {
             proxy_group_list.push(format!("{}-auto", region));
@@ -55,7 +59,7 @@ impl ConfigBuilder {
             "outbounds": proxy_group_list
         }));
 
-        // 2. 全局 "auto" urltest 出站
+        // 3. 全局 "auto" urltest 出站
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "auto",
@@ -64,7 +68,7 @@ impl ConfigBuilder {
             "interval": "5m"
         }));
 
-        // 3. 地区 urltest 出站
+        // 4. 地区 urltest 出站
         for (region, tags) in region_map {
             final_outbounds.push(json!({
                 "type": "urltest",
@@ -75,12 +79,8 @@ impl ConfigBuilder {
             }));
         }
 
-        // 4. 节点具体出站
+        // 5. 节点具体出站
         final_outbounds.extend(raw_outbounds);
-
-        // 5. 补全直连和拦截
-        final_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
-        final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
         let config = json!({
             "log": {
@@ -100,8 +100,7 @@ impl ConfigBuilder {
                     {
                         "tag": "local",
                         "type": "udp",
-                        "server": "223.5.5.5",
-                        "detour": "direct"
+                        "server": "223.5.5.5"
                     }
                 ],
                 "rules": [],
