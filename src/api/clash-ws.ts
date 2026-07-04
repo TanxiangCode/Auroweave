@@ -1,11 +1,6 @@
 /**
- * WebSocket 客户端封装
+ * WebSocket 客户端封装 (兼容 Sing-box / ClashAPI 接口规范)
  * 作者: TanXiang
- *
- * 功能：
- * - 自动重连（指数退避）
- * - 连接状态管理
- * - 消息类型化分发
  */
 import {
   WS_PATH_TRAFFIC,
@@ -18,10 +13,6 @@ import {
 import type { TrafficSnapshot, Connection } from "@/types";
 
 export type WsConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
-
-// ============================================================
-// 泛型 WebSocket 客户端
-// ============================================================
 
 interface WsClientOptions<T> {
   url: string;
@@ -44,35 +35,38 @@ class WsClient<T> {
     if (this.stopped) return;
     this.options.onStatusChange?.("connecting");
 
-    const ws = new WebSocket(this.options.url);
-    this.ws = ws;
+    try {
+      const ws = new WebSocket(this.options.url);
+      this.ws = ws;
 
-    ws.onopen = () => {
-      this.retryCount = 0;
-      this.options.onStatusChange?.("connected");
-    };
+      ws.onopen = () => {
+        this.retryCount = 0;
+        this.options.onStatusChange?.("connected");
+      };
 
-    ws.onmessage = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data as string) as T;
-        this.options.onMessage(data);
-      } catch {
-        // 忽略非 JSON 消息
-      }
-    };
+      ws.onmessage = (event: MessageEvent) => {
+        try {
+          const raw = JSON.parse(event.data as string);
+          this.options.onMessage(raw as T);
+        } catch {
+          // 忽略格式解析异常
+        }
+      };
 
-    ws.onclose = () => {
-      if (this.stopped) return;
-      this.options.onStatusChange?.("disconnected");
+      ws.onclose = () => {
+        if (this.stopped) return;
+        this.options.onStatusChange?.("disconnected");
+        this.scheduleReconnect();
+      };
+
+      ws.onerror = () => {
+        this.options.onStatusChange?.("error");
+      };
+    } catch {
       this.scheduleReconnect();
-    };
-
-    ws.onerror = () => {
-      this.options.onStatusChange?.("error");
-    };
+    }
   }
 
-  /** 主动断开，不再自动重连 */
   disconnect(): void {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
@@ -80,7 +74,6 @@ class WsClient<T> {
     this.ws = null;
   }
 
-  /** 恢复自动重连 */
   resume(): void {
     this.stopped = false;
     if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
@@ -93,7 +86,6 @@ class WsClient<T> {
       this.options.onStatusChange?.("error");
       return;
     }
-    // 指数退避
     const delay = Math.min(
       WS_RECONNECT_DELAY_MS * Math.pow(2, this.retryCount),
       WS_RECONNECT_MAX_DELAY_MS
@@ -103,10 +95,9 @@ class WsClient<T> {
   }
 }
 
-// ============================================================
-// 具体数据流实例（单例，全局共用）
-// ============================================================
-
+// ------------------------------------------------------------
+// 单例管理
+// ------------------------------------------------------------
 type TrafficCallback = (data: TrafficSnapshot) => void;
 type ConnectionsCallback = (data: { connections: Connection[] }) => void;
 type LogCallback = (line: string) => void;
@@ -115,17 +106,26 @@ let trafficCallbacks: TrafficCallback[] = [];
 let connectionsCallbacks: ConnectionsCallback[] = [];
 let logCallbacks: LogCallback[] = [];
 
-let trafficClient: WsClient<TrafficSnapshot> | null = null;
+let trafficClient: WsClient<any> | null = null;
 let connectionsClient: WsClient<{ connections: Connection[] }> | null = null;
 let logClient: WsClient<{ type: string; payload: string }> | null = null;
 
-/** 订阅实时流量数据 */
 export function subscribeTraffic(cb: TrafficCallback): () => void {
   trafficCallbacks.push(cb);
   if (!trafficClient) {
-    trafficClient = new WsClient<TrafficSnapshot>({
+    trafficClient = new WsClient<any>({
       url: WS_PATH_TRAFFIC,
-      onMessage: (data) => trafficCallbacks.forEach((fn) => fn(data)),
+      onMessage: (raw) => {
+        // 兼容 Sing-box 的 { up: number, down: number } 与标准的 TrafficSnapshot 格式
+        const snapshot: TrafficSnapshot = {
+          download_speed: raw.down ?? raw.download_speed ?? 0,
+          upload_speed: raw.up ?? raw.upload_speed ?? 0,
+          total_download: raw.total_download ?? 0,
+          total_upload: raw.total_upload ?? 0,
+          active_connections: raw.active_connections ?? 0,
+        };
+        trafficCallbacks.forEach((fn) => fn(snapshot));
+      },
     });
     trafficClient.connect();
   }
@@ -134,10 +134,7 @@ export function subscribeTraffic(cb: TrafficCallback): () => void {
   };
 }
 
-/** 订阅活动连接列表 */
-export function subscribeConnections(
-  cb: ConnectionsCallback
-): () => void {
+export function subscribeConnections(cb: ConnectionsCallback): () => void {
   connectionsCallbacks.push(cb);
   if (!connectionsClient) {
     connectionsClient = new WsClient({
@@ -151,7 +148,6 @@ export function subscribeConnections(
   };
 }
 
-/** 订阅内核日志流（原始日志，Audit 极客后门） */
 export function subscribeLog(cb: LogCallback): () => void {
   logCallbacks.push(cb);
   if (!logClient) {
@@ -166,14 +162,12 @@ export function subscribeLog(cb: LogCallback): () => void {
   };
 }
 
-/** 断开所有 WebSocket 连接（应用最小化到托盘时调用） */
 export function disconnectAll(): void {
   trafficClient?.disconnect();
   connectionsClient?.disconnect();
   logClient?.disconnect();
 }
 
-/** 恢复所有 WebSocket 连接（应用从托盘恢复时调用） */
 export function resumeAll(): void {
   trafficClient?.resume();
   connectionsClient?.resume();

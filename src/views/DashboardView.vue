@@ -1,47 +1,72 @@
 <script setup lang="ts">
 /**
- * Dashboard 首页 — 中央能量核 + 三张启动卡片
+ * Dashboard 首页 — 中央能量核 + 实时折线图 + 三张快捷卡片
  * 作者: TanXiang
- *
- * TODO(模块K): 接入 ControlCapsule、能量核动画（useFluidWave）
- * TODO(模块B): 接入真实连接状态数据
  */
 import { useConnectionStore } from "@/stores/connection.store";
+import { useProxyStore } from "@/stores/proxy.store";
+import { useFluidWave } from "@/composables/useFluidWave";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
+import SpeedChart from "@/components/charts/SpeedChart.vue";
 
 const router = useRouter();
 const connectionStore = useConnectionStore();
-const { smoothDownloadSpeed, activeConnectionCount } = storeToRefs(connectionStore);
+const proxyStore = useProxyStore();
 
-/** 格式化速度显示 */
-function formatSpeed(bps: number): string {
-  if (bps < 1024) return `${bps.toFixed(0)} B/s`;
-  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
-  return `${(bps / (1024 * 1024)).toFixed(2)} MB/s`;
-}
+const { smoothDownloadSpeed, activeConnectionCount, totalDownload, totalUpload } = storeToRefs(connectionStore);
+const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
 
 const cards = [
-  { id: "proxies", icon: "🌐", label: "代理节点", desc: "选择出站节点", route: "/proxies" },
-  { id: "routing", icon: "🛠️", label: "分流配置", desc: "应用级流量规则", route: "/routing" },
-  { id: "audit",   icon: "🔍", label: "安全审计", desc: "DNS 解析与连接监控", route: "/audit" },
+  { id: "proxies", icon: "🚀", label: "代理节点", desc: "节点大厅与切换", route: "/proxies" },
+  { id: "routing", icon: "🛠️", label: "分流配置", desc: "应用级规则与矩阵", route: "/routing" },
+  { id: "audit",   icon: "🔍", label: "安全审计", desc: "实时抓包与 DNS 状态", route: "/audit" },
 ];
 </script>
 
 <template>
   <div class="dashboard">
-    <!-- 中央能量核（TODO 模块K：替换为真实动画组件） -->
-    <div class="energy-core" :class="{ connected: activeConnectionCount > 0 }">
-      <div class="energy-ring">
-        <div class="energy-inner">
-          <span class="energy-status">
-            {{ activeConnectionCount > 0 ? "🟢 运行中" : "⚫ 未连接" }}
-          </span>
-          <span class="energy-speed">
-            ⚡ {{ formatSpeed(smoothDownloadSpeed) }}
-          </span>
+    <!-- 中央动态能量核 (Fluid Wave 驱动) -->
+    <div class="energy-section">
+      <div class="energy-core" :class="{ connected: connectionStore.isConnected }">
+        <div
+          class="energy-ring"
+          :style="{ transform: `rotate(${rotationDeg}deg)` }"
+        >
+          <div class="energy-inner">
+            <span class="energy-status">
+              {{ connectionStore.isConnected ? "🟢 运行中" : "⚫ 未重连" }}
+            </span>
+            <span class="energy-speed">
+              ⚡ {{ connectionStore.formatSpeed(smoothDownloadSpeed) }}
+            </span>
+            <span class="energy-node">
+              当前模式: {{ proxyStore.proxyMode.toUpperCase() }}
+            </span>
+          </div>
         </div>
       </div>
+
+      <!-- 快速统计面板 -->
+      <div class="stats-overview">
+        <div class="stat-pill">
+          <span class="pill-label">活动连接</span>
+          <span class="pill-val">{{ activeConnectionCount }} 条</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">累计下载</span>
+          <span class="pill-val">{{ connectionStore.formatBytes(totalDownload) }}</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">累计上传</span>
+          <span class="pill-val">{{ connectionStore.formatBytes(totalUpload) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 实时网速折线图 -->
+    <div class="chart-section">
+      <SpeedChart />
     </div>
 
     <!-- 三张启动卡片 -->
@@ -64,11 +89,17 @@ const cards = [
 .dashboard {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
   height: 100%;
-  gap: var(--space-10);
-  padding: var(--space-8);
+  gap: 20px;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.energy-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
 }
 
 /* ---- 能量核 ---- */
@@ -79,113 +110,127 @@ const cards = [
 }
 
 .energy-ring {
-  width: 180px;
-  height: 180px;
+  width: 170px;
+  height: 170px;
   border-radius: 50%;
   padding: 4px;
   background: conic-gradient(
     from 0deg,
-    var(--accent-blue),
-    var(--accent-cyan),
-    var(--accent-green),
-    var(--accent-blue)
+    #00f2fe,
+    #4facfe,
+    #a855f7,
+    #00f2fe
   );
-  animation: ring-spin 4s linear infinite;
-  box-shadow: var(--shadow-glow-cyan);
+  box-shadow: 0 0 32px rgba(0, 242, 254, 0.35);
+  transition: box-shadow 0.3s ease;
 }
 
 .energy-core:not(.connected) .energy-ring {
   background: conic-gradient(from 0deg, #2d2d2d, #3f3f46, #2d2d2d);
   box-shadow: none;
-  animation: ring-breathe 3s ease-in-out infinite;
 }
 
 .energy-inner {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: var(--layer-0);
+  background: rgba(18, 22, 34, 0.95);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
+  gap: 6px;
+  padding: 12px;
 }
 
 .energy-status {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  font-weight: var(--weight-medium);
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
 }
 
 .energy-speed {
-  font-size: var(--text-md);
-  color: var(--text-primary);
-  font-weight: var(--weight-semibold);
+  font-size: 18px;
+  color: #00f2fe;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(0, 242, 254, 0.4);
+}
+
+.energy-node {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.stats-overview {
+  display: flex;
+  gap: 16px;
+}
+
+.stat-pill {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.pill-label {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.pill-val {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+}
+
+.chart-section {
+  width: 100%;
 }
 
 /* ---- 启动卡片 ---- */
 .launch-cards {
-  display: flex;
-  gap: var(--space-4);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
 }
 
 .launch-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-5) var(--space-6);
-  background: var(--layer-1);
-  backdrop-filter: var(--blur-panel);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-lg);
+  gap: 8px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg, 14px);
   color: var(--text-primary);
   cursor: pointer;
-  min-width: 140px;
-  transition:
-    background var(--duration-fast) var(--ease-default),
-    border-color var(--duration-fast) var(--ease-default),
-    transform var(--duration-fast) var(--ease-default);
+  transition: all 0.2s ease;
 }
 
 .launch-card:hover {
-  background: var(--layer-2);
-  border-color: var(--border-strong);
-}
-
-.launch-card:active {
-  transform: scale(0.98);
+  background: rgba(0, 242, 254, 0.08);
+  border-color: rgba(0, 242, 254, 0.3);
+  transform: translateY(-2px);
 }
 
 .card-icon {
-  font-size: 28px;
+  font-size: 26px;
   line-height: 1;
 }
 
 .card-label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .card-desc {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
   text-align: center;
-}
-
-/* ---- 动画 ---- */
-@keyframes ring-spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes ring-breathe {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.7; }
-}
-
-/* 性能模式降级 */
-[data-perf-mode="reduced"] .energy-ring {
-  animation: none;
 }
 </style>

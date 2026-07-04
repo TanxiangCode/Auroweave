@@ -2,18 +2,14 @@
 /**
  * 根组件 App.vue
  * 作者: TanXiang
- *
- * 职责：
- * - 无边框窗口拖拽区域（data-tauri-drag-region）
- * - 初始化加载设置（主题、性能模式）
- * - 全局控制胶囊 (ControlCapsule) 挂载
- * - RouterView 承载五个主视图
  */
 import { onMounted, ref } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { RouterView } from "vue-router";
 import ControlCapsule from "@/components/chrome/ControlCapsule.vue";
 import TrafficLights from "@/components/chrome/TrafficLights.vue";
+import CommandPalette from "@/components/command-palette/CommandPalette.vue";
+import Toast from "@/components/common/Toast.vue";
 
 const settingsStore = useSettingsStore();
 const isMac = ref(false);
@@ -40,6 +36,12 @@ onMounted(async () => {
         </Transition>
       </RouterView>
     </main>
+
+    <!-- 全局 Spotlight 快捷命令框 -->
+    <CommandPalette />
+
+    <!-- 全局消息 Toast 提示框 -->
+    <Toast />
   </div>
 </template>
 
@@ -106,9 +108,6 @@ button, a {
 </style>
 
 <style scoped>
-/* ====================================================
-   无边框窗口外壳
-   ==================================================== */
 .app-shell {
   position: relative;
   width: 100vw;
@@ -119,19 +118,17 @@ button, a {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  -webkit-app-region: drag; /* 顶层区域支持窗口拖拽 */
+  -webkit-app-region: drag;
 }
 
 .app-main {
   flex: 1;
   overflow: hidden;
   position: relative;
-  -webkit-app-region: no-drag; /* 内容区域解除拖拽拦截 */
+  -webkit-app-region: no-drag;
 }
 
-/* ====================================================
-   路由切换过渡动画
-   ==================================================== */
+/* 路由切换过渡动画 */
 .page-enter-active,
 .page-leave-active {
   transition:

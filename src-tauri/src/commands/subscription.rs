@@ -71,11 +71,17 @@ pub async fn subscription_import(
         Err(e) => return Ok(ApiResponse::err(e, 500)),
     };
 
-    // 保存 config.json 到系统应用数据配置目录 (如 Windows %APPDATA%/auroweave/config.json)
+    // 确定系统配置目录
     let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
     let _ = fs::create_dir_all(&config_dir);
     let config_path = config_dir.join("config.json");
     let config_path_str = config_path.to_string_lossy().to_string();
+    let backup_path = config_dir.join("config.backup.json");
+
+    // 备份当前配置文件到 config.backup.json
+    if config_path.exists() {
+        let _ = fs::copy(&config_path, &backup_path);
+    }
 
     if let Err(e) = fs::write(&config_path, serde_json::to_string_pretty(&config_json).unwrap_or_default()) {
         return Ok(ApiResponse::err(AppError::Io(format!("保存 config.json 失败: {}", e)), 500));
@@ -83,12 +89,17 @@ pub async fn subscription_import(
 
     info!("成功导入订阅 {}，解析出 {} 个节点，配置已保存至 {:?}", name, node_count, config_path);
 
-    // 4. 拉起/热重载 sing-box 进程
+    // 4. 拉起/热重载 sing-box 进程 (失败自动安全回滚)
     let clash_client = ClashApiClient::default();
     if let Err(_) = clash_client.reload_config(&config_path_str).await {
         info!("ClashAPI 未响应，尝试拉起 sing-box 子进程...");
         if let Err(e) = sidecar_manager.start(&config_path_str).await {
-            info!("sing-box 启动提示: {}", e);
+            info!("新配置拉起 sing-box 失败 ({})，尝试自动回滚备份...", e);
+            if backup_path.exists() {
+                let _ = fs::copy(&backup_path, &config_path);
+                let _ = sidecar_manager.start(&config_path_str).await;
+            }
+            return Ok(ApiResponse::err(AppError::Sidecar(format!("启动核心失败，已自动回滚备份: {}", e)), 500));
         }
     } else {
         info!("sing-box 已成功热重载配置");

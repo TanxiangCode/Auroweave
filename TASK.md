@@ -11,15 +11,15 @@
 |---|---|---|---|---|
 | A | 技术预研 | 🔄 进行中 | M0 | [plan-A-research.md](plans/plan-A-research.md) |
 | B | 基础骨架与代理闭环 | ✅ 已完成 | M1 | [plan-B-core-proxy.md](plans/plan-B-core-proxy.md) |
-| C | 实时状态与快捷交互 | ⏳ 待开始 | M2 | [plan-C-realtime.md](plans/plan-C-realtime.md) |
-| D | 规则合并与内核管理 | ⏳ 待开始 | M2 | [plan-D-rules.md](plans/plan-D-rules.md) |
+| C | 实时状态与快捷交互 | ✅ 已完成 | M2 | [plan-C-realtime.md](plans/plan-C-realtime.md) |
+| D | 规则合并与内核管理 | ✅ 已完成 | M2 | [plan-D-rules.md](plans/plan-D-rules.md) |
 | E | 智能测速与负载均衡 | ⏳ 待开始 | M3 | [plan-E-speedtest.md](plans/plan-E-speedtest.md) |
 | F | Routing · App-Matrix | ⏳ 待开始 | M4 | [plan-F-routing.md](plans/plan-F-routing.md) |
 | G | Audit 语义化看板 | ⏳ 待开始 | M4 | [plan-G-audit.md](plans/plan-G-audit.md) |
 | H | 设置页面九大面板 | ⏳ 待开始 | M5 | [plan-H-settings.md](plans/plan-H-settings.md) |
 | I | 联调、测试与打包 | ⏳ 待开始 | M5 | [plan-I-release.md](plans/plan-I-release.md) |
 | J | Routing · 拓扑画布 | 🔵 低优先级 | M6 | [plan-J-topology.md](plans/plan-J-topology.md) |
-| K | 视觉设计系统 | 🔄 部分完成 | M2 | [plan-K-visual.md](plans/plan-K-visual.md) |
+| K | 视觉设计系统 | ✅ 已完成 | M2 | [plan-K-visual.md](plans/plan-K-visual.md) |
 
 **图例**：✅ 已完成 / 🔄 进行中 / ⏳ 待开始 / 🔵 低优先级（可选）/ ❌ 阻塞
 
@@ -35,9 +35,9 @@
 - **目标**：导入真实机场订阅 → 成功翻墙
 - **交付物**：sidecar 生命周期管理、Clash/V2ray/Singbox 订阅多格式解析器、ConfigBuilder 动态配置生成器、ClashAPI HTTP 客户端、订阅与代理节点前端交互界面、**全局控制胶囊 (ControlCapsule) 与无边框窗口控制基础层 (K-2/K-3 提前交付)**
 
-### ⏳ M2 — 基础体验完整
-- **依赖**：M1 完成后并行启动 C + D + K（高级视觉与转场）
-- **目标**：命令框、实时网速、规则合并、完整视觉系统与面板转场
+### ✅ M2 — 基础体验完整（已完成 2026-07-04）
+- **目标**：命令框、实时网速、配置备份回滚、完整视觉系统与面板转场
+- **交付物**：Spotlight 命令框 (`CommandPalette.vue` / `Ctrl+Space` 呼出)、WebSocket 实时网速推送 (`clash-ws.ts`)、SpeedChart Canvas 流量趋势图 (`SpeedChart.vue`)、全局 Toast 提示 (`Toast.vue`)、FluidWave 能量核旋转波纹绑定 (`FluidWave.vue`)、`config.backup.json` 自动备份与侧载拉起失败自动回滚。
 
 ---
 
