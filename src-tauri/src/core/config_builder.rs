@@ -91,8 +91,19 @@ impl ConfigBuilder {
             },
             "dns": {
                 "servers": [
-                    { "tag": "remote", "address": "https://1.1.1.1/dns-query", "detour": "proxy" },
-                    { "tag": "local", "address": "223.5.5.5", "detour": "direct" }
+                    {
+                        "tag": "remote",
+                        "type": "https",
+                        "server": "1.1.1.1",
+                        "path": "/dns-query",
+                        "detour": "proxy"
+                    },
+                    {
+                        "tag": "local",
+                        "type": "udp",
+                        "server": "223.5.5.5",
+                        "detour": "direct"
+                    }
                 ],
                 "rules": [
                     { "outbound": "any", "server": "local" }
