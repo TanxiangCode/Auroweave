@@ -13,7 +13,7 @@
 | B | 基础骨架与代理闭环 | ✅ 已完成 | M1 | [plan-B-core-proxy.md](plans/plan-B-core-proxy.md) |
 | C | 实时状态与快捷交互 | ✅ 已完成 | M2 | [plan-C-realtime.md](plans/plan-C-realtime.md) |
 | D | 规则合并与内核管理 | ✅ 已完成 | M2 | [plan-D-rules.md](plans/plan-D-rules.md) |
-| E | 智能测速与负载均衡 | ⏳ 待开始 | M3 | [plan-E-speedtest.md](plans/plan-E-speedtest.md) |
+| E | 智能测速与负载均衡 | ✅ 已完成 | M3 | [plan-E-speedtest.md](plans/plan-E-speedtest.md) |
 | F | Routing · App-Matrix | ⏳ 待开始 | M4 | [plan-F-routing.md](plans/plan-F-routing.md) |
 | G | Audit 语义化看板 | ⏳ 待开始 | M4 | [plan-G-audit.md](plans/plan-G-audit.md) |
 | H | 设置页面九大面板 | ⏳ 待开始 | M5 | [plan-H-settings.md](plans/plan-H-settings.md) |
@@ -38,6 +38,10 @@
 ### ✅ M2 — 基础体验完整（已完成 2026-07-04）
 - **目标**：命令框、实时网速、配置备份回滚、完整视觉系统与面板转场
 - **交付物**：Spotlight 命令框 (`CommandPalette.vue` / `Ctrl+Space` 呼出)、WebSocket 实时网速推送 (`clash-ws.ts`)、SpeedChart Canvas 流量趋势图 (`SpeedChart.vue`)、全局 Toast 提示 (`Toast.vue`)、FluidWave 能量核旋转波纹绑定 (`FluidWave.vue`)、`config.backup.json` 自动备份与侧载拉起失败自动回滚。
+
+### ✅ M3 — 智能测速与负载均衡（已完成 2026-07-04）
+- **目标**：多档测速引擎、串行批量调度、测速大厅与节点卡片交互
+- **交付物**：Rust 流式 HTTP 吞吐量测速引擎 (`throughput.rs`)、串行批量调度器 (`scheduler.rs` / `speedtest-progress` 事件)、Pinia 测速 Store (`speedtest.store.ts`)、`NodeCard.vue` 独立延迟与速度响应按钮、`SpeedtestView.vue` 测速大厅与流量预估确认 Modal。
 
 ---
 

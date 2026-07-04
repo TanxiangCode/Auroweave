@@ -3,8 +3,10 @@
 pub mod error;
 pub mod commands;
 pub mod core;
+pub mod speedtest;
 
 use core::sidecar::SidecarManager;
+use speedtest::scheduler::SpeedTestScheduler;
 use std::sync::Arc;
 use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -21,9 +23,11 @@ pub fn run() {
     tracing::info!("Auroweave 启动中...");
 
     let sidecar_manager = Arc::new(SidecarManager::new());
+    let speedtest_scheduler = Arc::new(SpeedTestScheduler::new());
 
     tauri::Builder::default()
         .manage(sidecar_manager.clone())
+        .manage(speedtest_scheduler.clone())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

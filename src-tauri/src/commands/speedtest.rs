@@ -1,60 +1,71 @@
-/// IPC 命令 — 测速
+/// IPC 命令 — 智能测速
 /// 作者: TanXiang
-use crate::error::ApiResponse;
-use serde::{Deserialize, Serialize};
+use crate::core::clash_api::ClashApiClient;
+use crate::error::{ApiResponse, AppError};
+use crate::speedtest::scheduler::SpeedTestScheduler;
+use crate::speedtest::throughput::run_single_throughput_test;
+use crate::speedtest::ThroughputResult;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tauri::{AppHandle, State};
+use tracing::info;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ThroughputResult {
-    pub download_bps: u64,
-    pub upload_bps: u64,
-    pub tested_at: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SpeedTestTask {
-    pub node_tag: String,
-    pub status: String, // idle | testing_latency | testing_speed | done | error
-    pub progress: Option<u8>,
-    pub download_bps: Option<u64>,
-    pub upload_bps: Option<u64>,
-    pub latency: Option<i64>,
-    pub error: Option<String>,
-}
-
-/// 触发延迟测速（批量，使用 urltest 机制）
+/// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试）
 #[tauri::command]
-pub async fn speedtest_run_latency(node_tags: Vec<String>) -> ApiResponse<()> {
-    // TODO(模块E): 调用 speedtest::latency::run_latency_test()
-    tracing::info!("延迟测速节点数: {}", node_tags.len());
-    ApiResponse::ok(())
+pub async fn speedtest_run_latency(
+    _group_tag: String,
+    node_tags: Vec<String>,
+) -> Result<ApiResponse<HashMap<String, u16>>, AppError> {
+    info!("触发共 {} 个节点的延迟测试", node_tags.len());
+    let clash_client = ClashApiClient::default();
+    let mut results = HashMap::new();
+
+    for tag in node_tags {
+        if let Ok(delay) = clash_client.get_node_delay(&tag, "https://www.gstatic.com/generate_204", 5000).await {
+            results.insert(tag, delay);
+        }
+    }
+
+    Ok(ApiResponse::ok(results))
 }
 
 /// 单节点吞吐量测速
 #[tauri::command]
-pub async fn speedtest_run_single(node_tag: String) -> ApiResponse<ThroughputResult> {
-    // TODO(模块E): 调用 speedtest::throughput::run_single()
-    tracing::info!("单节点测速: {}", node_tag);
-    ApiResponse::err("测速功能开发中（模块E）", 501)
+pub async fn speedtest_run_single(node_tag: String) -> Result<ApiResponse<ThroughputResult>, AppError> {
+    info!("开始对节点 [{}] 运行单体吞吐量测速...", node_tag);
+    match run_single_throughput_test(&node_tag, 5).await {
+        Ok(res) => Ok(ApiResponse::ok(res)),
+        Err(e) => Ok(ApiResponse::err(format!("单节点测速失败: {}", e), 500)),
+    }
 }
 
-/// 批量测速（串行）
+/// 批量测速（串行调度）
 #[tauri::command]
-pub async fn speedtest_run_batch(group_tag: String) -> ApiResponse<()> {
-    // TODO(模块E): 调用 speedtest::scheduler::run_batch()
-    tracing::info!("批量测速分组: {}", group_tag);
-    ApiResponse::err("批量测速功能开发中（模块E）", 501)
+pub async fn speedtest_run_batch(
+    app_handle: AppHandle,
+    scheduler: State<'_, Arc<SpeedTestScheduler>>,
+    group_tag: String,
+    node_tags: Vec<String>,
+) -> Result<ApiResponse<()>, AppError> {
+    info!("启动批量测速队列，分组: {}, 节点数量: {}", group_tag, node_tags.len());
+    scheduler.run_batch(app_handle, group_tag, node_tags).await;
+    Ok(ApiResponse::ok(()))
 }
 
 /// 取消批量测速
 #[tauri::command]
-pub async fn speedtest_cancel_batch() -> ApiResponse<()> {
-    // TODO(模块E): 发送取消信号给 scheduler
-    ApiResponse::ok(())
+pub async fn speedtest_cancel_batch(
+    scheduler: State<'_, Arc<SpeedTestScheduler>>,
+) -> Result<ApiResponse<()>, AppError> {
+    info!("取消正在运行的批量测速任务");
+    scheduler.cancel();
+    Ok(ApiResponse::ok(()))
 }
 
-/// 获取测速结果列表
+/// 获取已缓存的测速结果
 #[tauri::command]
-pub async fn speedtest_get_results() -> ApiResponse<Vec<SpeedTestTask>> {
-    // TODO(模块E): 从内存缓存或本地存储读取
-    ApiResponse::ok(vec![])
+pub async fn speedtest_get_results(
+    scheduler: State<'_, Arc<SpeedTestScheduler>>,
+) -> Result<ApiResponse<HashMap<String, ThroughputResult>>, AppError> {
+    Ok(ApiResponse::ok(scheduler.get_results()))
 }

@@ -8,6 +8,12 @@
 ## [Unreleased]
 
 ### Added
+- **M3 里程碑**：完成智能测速引擎与负载均衡 (Speed Test Engine & Load Balancer)
+- `throughput.rs` Rust 限定时长流式 HTTP 分块下载与上传吞吐量测速引擎
+- `scheduler.rs` 串行批量测速调度器（结合 `speedtest-progress` Tauri Event 实时进度推送与取消令牌）
+- `speedtest.store.ts` Pinia 测速 Store，实现延迟与速率多维度缓存管理
+- `NodeCard.vue` 节点卡片组件增加独立 `⚡延迟` 与 `📶测速` 响应按钮及动态 spinner 动画
+- `SpeedtestView.vue` 智能测速大厅（一键批量测试、串行进度显示、预计时间与流量消耗确认 Modal）
 - **M2 里程碑**：完成实时状态、Spotlight 命令框、内核自愈与能量核光效绑定 (Realtime & Interactive Engine)
 - `CommandPalette.vue` Spotlight 全局快捷命令框（支持 `Ctrl+Space` 呼出、节点/模式/功能模糊搜索与键盘导航）
 - `SpeedChart.vue` Canvas 实时网速历史趋势双线图（下载/上传实时平滑描绘）

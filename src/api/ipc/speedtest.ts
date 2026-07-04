@@ -1,41 +1,56 @@
 /**
- * IPC 封装层 — 测速命令
+ * IPC 客户端 API — 智能测速
  * 作者: TanXiang
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { ApiResponse, SpeedTestTask, ThroughputResult } from "@/types";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ApiResponse, ThroughputResult } from "@/types";
 
-/** 运行单节点延迟测速 */
-export async function runLatencyTest(
-  nodeTags: string[]
-): Promise<ApiResponse<void>> {
-  return invoke<ApiResponse<void>>("speedtest_run_latency", { nodeTags });
+export interface BatchProgressPayload {
+  current_index: number;
+  total: number;
+  current_node: string;
+  result?: ThroughputResult;
 }
 
-/** 运行单节点吞吐量测速 */
-export async function runSingleSpeedTest(
+/** 对节点组执行延迟测速 */
+export async function runLatencyTest(
+  groupTag: string,
+  nodeTags: string[]
+): Promise<ApiResponse<Record<string, number>>> {
+  return await invoke("speedtest_run_latency", { groupTag, nodeTags });
+}
+
+/** 针对单个节点触发吞吐量测速 */
+export async function runSingleThroughputTest(
   nodeTag: string
 ): Promise<ApiResponse<ThroughputResult>> {
-  return invoke<ApiResponse<ThroughputResult>>("speedtest_run_single", {
-    nodeTag,
-  });
+  return await invoke("speedtest_run_single", { nodeTag });
 }
 
-/** 批量测速（串行，需用户二次确认后调用） */
+/** 启动批量串行测速 */
 export async function runBatchSpeedTest(
-  groupTag: string
+  groupTag: string,
+  nodeTags: string[]
 ): Promise<ApiResponse<void>> {
-  return invoke<ApiResponse<void>>("speedtest_run_batch", { groupTag });
+  return await invoke("speedtest_run_batch", { groupTag, nodeTags });
 }
 
-/** 取消正在进行的批量测速 */
+/** 取消当前正在运行的批量测速 */
 export async function cancelBatchSpeedTest(): Promise<ApiResponse<void>> {
-  return invoke<ApiResponse<void>>("speedtest_cancel_batch");
+  return await invoke("speedtest_cancel_batch");
 }
 
-/** 获取测速任务状态列表 */
-export async function getSpeedTestResults(): Promise<
-  ApiResponse<SpeedTestTask[]>
-> {
-  return invoke<ApiResponse<SpeedTestTask[]>>("speedtest_get_results");
+/** 获取已缓存的测速结果映射 */
+export async function getSpeedTestResults(): Promise<ApiResponse<Record<string, ThroughputResult>>> {
+  return await invoke("speedtest_get_results");
+}
+
+/** 监听批量测速实时进度事件 */
+export async function listenSpeedTestProgress(
+  callback: (payload: BatchProgressPayload) => void
+): Promise<UnlistenFn> {
+  return await listen<BatchProgressPayload>("speedtest-progress", (event) => {
+    callback(event.payload);
+  });
 }
