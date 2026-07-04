@@ -54,11 +54,11 @@ pub fn run() {
 
             tracing::info!("Tauri 窗口已创建");
 
-            // 如果已有 config/config.json，自动拉起 sing-box 子进程
+            // 如果已有 config/config.json，使用 Tauri 内置 async runtime 异步拉起 sing-box
             let config_path = PathBuf::from("config/config.json");
             if config_path.exists() {
                 let sm = sidecar_manager.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     if let Err(e) = sm.start("config/config.json").await {
                         tracing::warn!("启动 sing-box 失败: {}", e);
                     }
