@@ -8,21 +8,15 @@
 ## [Unreleased]
 
 ### Added
-- 项目初始化：Tauri 2.0 + Vue 3 + TypeScript 工程骨架
-- Design Tokens 双主题 CSS 变量系统（深色 + 浅色独立设计）
-- 全局 TypeScript 类型定义（与 Rust serde struct 字段对齐）
-- 五个 Pinia Store 骨架（proxy / subscription / settings / connection / speedtest）
-- WebSocket 客户端封装（指数退避自动重连）
-- 四个 IPC 封装层（proxy / subscription / settings / speedtest）
-- Vue Router 配置（五个主视图，全部懒加载）
-- 核心 Composable：`useReducedMotion` / `useFluidWave`
-- Rust 端统一 `AppError` + `ApiResponse<T>` 结构
-- Rust IPC 命令骨架（proxy / subscription / settings / speedtest）
-- Rust `SidecarManager` sing-box 生命周期管理器骨架
-- Tauri 无边框透明窗口配置（960×640，最小 960×600）
-- Dashboard 视图（能量核骨架动画 + 三张启动卡片）
-- 四个视图占位（Proxies / Routing / Audit / Settings）
-- 项目文档体系（README / CHANGELOG / CONTRIBUTING / TASK / plans/ / docs/）
+- **M1 里程碑**：完成代理核心闭环（Core Proxy Pipeline）
+- `scripts/download-sidecar.ps1` & `scripts/download-sidecar.sh` 跨平台 sing-box 1.25.4 二进制下载提取脚本
+- Rust 多格式订阅解析器（支持 Clash YAML, V2Ray Base64/URI, Singbox JSON）
+- `ConfigBuilder` 动态配置生成器（地区识别、urltest 自动分组、DNS & ClashAPI 监听生成）
+- `ClashApiClient` HTTP 客户端（与 127.0.0.1:9090 对接）
+- `SidecarManager` sing-box 子进程生命周期异步管理器（启动/停止/唤醒重连）
+- 订阅导入 UI：`SettingsView.vue` 内置多格式订阅解析导入与管理
+- 代理节点 UI：`ProxiesView.vue` 支持分组切换与节点点击选择
+
 
 ### Changed
 - `.gitignore` 覆盖完整 Rust 构建产物、sidecar 二进制、平台缓存
