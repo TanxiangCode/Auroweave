@@ -71,10 +71,16 @@ pub async fn subscription_import(
         Err(e) => return Ok(ApiResponse::err(e, 500)),
     };
 
-    // 写入 app 运行目录中的 config/config.json
-    let config_dir = PathBuf::from("config");
-    let _ = fs::create_dir_all(&config_dir);
-    let config_path = config_dir.join("config.json");
+    // 保存 config.json 到项目根目录 config/ 文件夹 (位于 src-tauri 外部，避免触发 Cargo watcher 重新构建)
+    let config_path = if PathBuf::from("Cargo.toml").exists() && PathBuf::from("../package.json").exists() {
+        PathBuf::from("../config/config.json")
+    } else {
+        PathBuf::from("config/config.json")
+    };
+
+    if let Some(parent) = config_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     let config_path_str = config_path.to_string_lossy().to_string();
 
     if let Err(e) = fs::write(&config_path, serde_json::to_string_pretty(&config_json).unwrap_or_default()) {

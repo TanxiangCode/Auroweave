@@ -105,7 +105,7 @@ impl ConfigBuilder {
                     }
                 ],
                 "rules": [
-                    { "outbound": ["any"], "server": "local" }
+                    { "clash_mode": "direct", "server": "local" }
                 ],
                 "final": "remote"
             },

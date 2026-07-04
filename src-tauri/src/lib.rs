@@ -54,12 +54,18 @@ pub fn run() {
 
             tracing::info!("Tauri 窗口已创建");
 
-            // 如果已有 config/config.json，使用 Tauri 内置 async runtime 异步拉起 sing-box
-            let config_path = PathBuf::from("config/config.json");
-            if config_path.exists() {
+            // 如果已有 config.json，使用 Tauri 内置 async runtime 异步拉起 sing-box
+            let candidates = vec![
+                PathBuf::from("config/config.json"),
+                PathBuf::from("../config/config.json"),
+            ];
+            let found_config = candidates.into_iter().find(|p| p.exists());
+
+            if let Some(cfg_path) = found_config {
                 let sm = sidecar_manager.clone();
+                let path_str = cfg_path.to_string_lossy().to_string();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = sm.start("config/config.json").await {
+                    if let Err(e) = sm.start(&path_str).await {
                         tracing::warn!("启动 sing-box 失败: {}", e);
                     }
                 });
