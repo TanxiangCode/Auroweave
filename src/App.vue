@@ -6,25 +6,31 @@
  * 职责：
  * - 无边框窗口拖拽区域（data-tauri-drag-region）
  * - 初始化加载设置（主题、性能模式）
+ * - 全局控制胶囊 (ControlCapsule) 挂载
  * - RouterView 承载五个主视图
- * - 全局控制胶囊挂载点
  */
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { RouterView } from "vue-router";
+import ControlCapsule from "@/components/chrome/ControlCapsule.vue";
+import TrafficLights from "@/components/chrome/TrafficLights.vue";
 
 const settingsStore = useSettingsStore();
+const isMac = ref(false);
 
 onMounted(async () => {
-  // 启动时加载设置（主题/性能模式会在 fetchSettings 内自动注入 DOM 属性）
+  isMac.value = navigator.userAgent.toLowerCase().includes("mac");
   await settingsStore.fetchSettings();
 });
 </script>
 
 <template>
   <div class="app-shell" data-tauri-drag-region>
-    <!-- 全局控制胶囊（TODO 模块K：ControlCapsule 组件） -->
-    <div class="control-capsule-placeholder" />
+    <!-- 全局控制胶囊 (设置 + 窗口按钮) -->
+    <ControlCapsule />
+
+    <!-- macOS 专用红绿灯支持层 -->
+    <TrafficLights v-if="isMac" />
 
     <!-- 主内容区 -->
     <main class="app-main">
@@ -39,7 +45,7 @@ onMounted(async () => {
 
 <style>
 /* ====================================================
-   全局基础样式（只有真正全局的规则才放这里）
+   全局基础样式
    ==================================================== */
 
 *,
@@ -59,26 +65,30 @@ body,
   font-family: var(--font-sans);
   font-size: var(--text-base);
   color: var(--text-primary);
-  background: transparent; /* 透明窗口底色由操作系统提供 */
+  background: transparent;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 禁用默认的文字选中（桌面客户端体验） */
+/* 桌面客户端禁止误选文本 */
 body {
   user-select: none;
   cursor: default;
 }
 
-/* 输入框和可编辑区域恢复文字选中 */
+/* 可编辑元素恢复选中 */
 input,
 textarea,
 [contenteditable] {
   user-select: text;
   cursor: text;
+  -webkit-app-region: no-drag;
 }
 
-/* 自定义滚动条（深色主题） */
+button, a {
+  -webkit-app-region: no-drag;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -104,29 +114,19 @@ textarea,
   width: 100vw;
   height: 100vh;
   background: var(--layer-0);
-  /* 窗口边缘高光（暗色桌面下的轮廓感） */
   box-shadow: inset 0 0 0 1px var(--window-edge);
-  border-radius: 12px; /* macOS 窗口圆角 */
+  border-radius: 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}
-
-/* 控制胶囊占位（右上角） */
-.control-capsule-placeholder {
-  position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  width: 120px;
-  height: 32px;
-  z-index: 1000;
-  /* TODO(模块K): 移除此占位，替换为 ControlCapsule 组件 */
+  -webkit-app-region: drag; /* 顶层区域支持窗口拖拽 */
 }
 
 .app-main {
   flex: 1;
   overflow: hidden;
   position: relative;
+  -webkit-app-region: no-drag; /* 内容区域解除拖拽拦截 */
 }
 
 /* ====================================================

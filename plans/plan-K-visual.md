@@ -20,6 +20,8 @@
 - [x] `src/styles/tokens.css` — 深色+浅色双主题 Design Tokens 初稿
 - [x] `src/composables/useReducedMotion.ts` — 动效降级统一判断
 - [x] `src/composables/useFluidWave.ts` — 能量核流体动画 Composable（含 EMA / 可见性暂停 / 降级）
+- [x] `src/components/chrome/ControlCapsule.vue` — 无边框窗口控制胶囊（最小化/最大化/关闭按钮 + 设置入口 + 防误触隔离）
+- [x] `src/components/chrome/TrafficLights.vue` — macOS 原生红绿灯安全支持层
 
 ---
 
