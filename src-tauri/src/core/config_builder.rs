@@ -117,6 +117,7 @@ impl ConfigBuilder {
             ],
             "outbounds": final_outbounds,
             "route": {
+                "default_domain_resolver": "remote",
                 "rules": [
                     { "protocol": "dns", "action": "hijack-dns" },
                     { "ip_is_private": true, "outbound": "direct" }
