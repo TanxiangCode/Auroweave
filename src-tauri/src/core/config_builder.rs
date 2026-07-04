@@ -119,6 +119,7 @@ impl ConfigBuilder {
             "route": {
                 "default_domain_resolver": "remote",
                 "rules": [
+                    { "action": "sniff" },
                     { "protocol": "dns", "action": "hijack-dns" },
                     { "ip_is_private": true, "outbound": "direct" }
                 ],
