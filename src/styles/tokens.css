@@ -1,0 +1,215 @@
+/**
+ * Auroweave Design Tokens
+ * 作者: TanXiang
+ *
+ * 规则：
+ * - 组件内禁止硬编码颜色、圆角、阴影值
+ * - 所有设计决策通过此文件的 CSS 变量注入
+ * - 浅色主题为独立设计，非深色主题的简单减淡
+ */
+
+/* ============================================================
+   深色主题（默认）
+   赛博玻璃风格：深底 + 磨砂玻璃面板 + 全息高亮
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  /* --- 层级背景 --- */
+  --layer-0: #0b0b0c;                        /* 视窗底色 */
+  --layer-1: rgba(24, 24, 27, 0.6);          /* 磨砂玻璃面板（配合 backdrop-filter） */
+  --layer-2: rgba(39, 39, 42, 0.7);          /* 次级面板、卡片悬浮态 */
+  --layer-3: rgba(63, 63, 70, 0.5);          /* 输入框、分割线 */
+
+  /* --- 强调色 --- */
+  --accent-blue: #007aff;                    /* 主强调色（操作按钮、链接） */
+  --accent-blue-glow: rgba(0, 122, 255, 0.3);
+  --accent-cyan: #22d3ee;                    /* 全息高亮（流体动画、进度） */
+  --accent-cyan-glow: rgba(34, 211, 238, 0.2);
+  --accent-green: #34d399;                   /* 成功/连接状态 */
+  --accent-green-glow: rgba(52, 211, 153, 0.2);
+  --accent-red: #ef4444;                     /* 警告/错误 */
+  --accent-red-glow: rgba(239, 68, 68, 0.2);
+  --accent-orange: #f97316;                  /* 负载均衡风险提示 */
+
+  /* --- 文字 --- */
+  --text-primary: rgba(255, 255, 255, 0.92); /* 主要文字 */
+  --text-secondary: rgba(255, 255, 255, 0.55);/* 次要文字、标签 */
+  --text-tertiary: rgba(255, 255, 255, 0.3); /* 占位符、禁用态 */
+  --text-on-accent: #ffffff;                 /* 强调色按钮上的文字 */
+
+  /* --- 边框与分割线 --- */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-normal: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-accent: rgba(0, 122, 255, 0.4);
+
+  /* --- 窗口边缘高光（无边框窗口轮廓感） --- */
+  --window-edge: rgba(255, 255, 255, 0.08);
+
+  /* --- 磨砂玻璃效果参数 --- */
+  --blur-panel: blur(20px);
+  --blur-dialog: blur(40px);
+
+  /* --- 阴影 --- */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 48px rgba(0, 0, 0, 0.6);
+  --shadow-glow-cyan: 0 0 20px rgba(34, 211, 238, 0.15);
+  --shadow-glow-blue: 0 0 20px rgba(0, 122, 255, 0.2);
+
+  /* --- 能量核专属 --- */
+  --energy-idle: conic-gradient(from 0deg, #2d2d2d, #3f3f46, #2d2d2d);
+  --energy-active: conic-gradient(from 0deg, #007aff, #22d3ee, #34d399, #007aff);
+}
+
+/* ============================================================
+   浅色主题（独立设计）
+   清雅磨砂风格：米白底 + 半透明卡片 + 蓝绿强调
+   ============================================================ */
+[data-theme="light"] {
+  /* --- 层级背景 --- */
+  --layer-0: #f4f4f5;
+  --layer-1: rgba(255, 255, 255, 0.7);
+  --layer-2: rgba(244, 244, 245, 0.8);
+  --layer-3: rgba(228, 228, 231, 0.9);
+
+  /* --- 强调色（与深色保持品牌一致，但去掉 glow 效果） --- */
+  --accent-blue: #0071e3;
+  --accent-blue-glow: rgba(0, 113, 227, 0.15);
+  --accent-cyan: #0891b2;
+  --accent-cyan-glow: rgba(8, 145, 178, 0.1);
+  --accent-green: #059669;
+  --accent-green-glow: rgba(5, 150, 105, 0.1);
+  --accent-red: #dc2626;
+  --accent-red-glow: rgba(220, 38, 38, 0.1);
+  --accent-orange: #ea580c;
+
+  /* --- 文字 --- */
+  --text-primary: rgba(0, 0, 0, 0.88);
+  --text-secondary: rgba(0, 0, 0, 0.5);
+  --text-tertiary: rgba(0, 0, 0, 0.28);
+  --text-on-accent: #ffffff;
+
+  /* --- 边框与分割线 --- */
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-normal: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-accent: rgba(0, 113, 227, 0.3);
+
+  /* --- 窗口边缘高光（浅色下用阴影代替） --- */
+  --window-edge: rgba(0, 0, 0, 0.06);
+
+  /* --- 磨砂玻璃（浅色下可适当降低模糊强度） --- */
+  --blur-panel: blur(16px);
+  --blur-dialog: blur(32px);
+
+  /* --- 阴影（浅色下用更浅的阴影） --- */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 48px rgba(0, 0, 0, 0.16);
+  --shadow-glow-cyan: 0 0 20px rgba(8, 145, 178, 0.08);
+  --shadow-glow-blue: 0 0 20px rgba(0, 113, 227, 0.1);
+
+  /* --- 能量核专属（浅色模式去掉全息色，用蓝色渐变） --- */
+  --energy-idle: conic-gradient(from 0deg, #e4e4e7, #d4d4d8, #e4e4e7);
+  --energy-active: conic-gradient(from 0deg, #0071e3, #0891b2, #059669, #0071e3);
+}
+
+/* ============================================================
+   几何圆角系统（iOS 级超椭圆）
+   ============================================================ */
+:root {
+  --radius-xs: 6px;    /* 标签、胶囊小组件 */
+  --radius-sm: 8px;    /* 按钮、输入框 */
+  --radius-md: 12px;   /* 小卡片、下拉菜单 */
+  --radius-lg: 16px;   /* 主卡片、弹窗 */
+  --radius-xl: 24px;   /* 大模态框、能量核外环 */
+  --radius-full: 9999px; /* 胶囊形状 */
+}
+
+/* ============================================================
+   间距系统（4px 基准网格）
+   ============================================================ */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+}
+
+/* ============================================================
+   字体系统
+   ============================================================ */
+:root {
+  /* 字体族 */
+  --font-sans: "Inter", "SF Pro Display", "PingFang SC", "Microsoft YaHei",
+               -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace;
+
+  /* 字号 */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  /* 字重 */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* 行高 */
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.7;
+}
+
+/* ============================================================
+   动效时长（遵循 reduced-motion 时由 useReducedMotion 控制）
+   ============================================================ */
+:root {
+  --duration-instant: 50ms;
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 350ms;
+  --duration-slower: 500ms;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);     /* 进场：快速减速 */
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);      /* 退场：慢速加速 */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* 弹性回弹 */
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);  /* 通用 */
+}
+
+/* ============================================================
+   窗口尺寸约束
+   ============================================================ */
+:root {
+  --window-min-width: 960px;
+  --window-min-height: 600px;
+  --window-default-width: 960px;
+  --window-default-height: 640px;
+}
+
+/* ============================================================
+   性能模式降级（由 JS 在 <html> 上添加 data-perf-mode="reduced" 触发）
+   ============================================================ */
+[data-perf-mode="reduced"] {
+  /* 关闭磨砂玻璃模糊 */
+  --blur-panel: blur(0px);
+  --blur-dialog: blur(0px);
+  /* 阴影简化 */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-glow-cyan: none;
+  --shadow-glow-blue: none;
+}

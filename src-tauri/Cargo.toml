@@ -1,0 +1,57 @@
+[package]
+name = "auroweave"
+version = "0.1.0"
+description = "Auroweave — 下一代极简跨平台代理客户端"
+authors = ["TanXiang"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+# Windows 下 lib 与 bin 同名会冲突，加 _lib 后缀
+name = "auroweave_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri 核心
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-global-shortcut = "2"
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# HTTP 客户端（订阅拉取、测速）
+reqwest = { version = "0.12", features = ["json", "stream"], default-features = false, features = ["rustls-tls"] }
+
+# 进程信息（App-Matrix）
+sysinfo = "0.31"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 错误处理
+thiserror = "1"
+anyhow = "1"
+
+# 时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID（连接计数器等）
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+# 发布构建：优化体积
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
