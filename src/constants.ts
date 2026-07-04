@@ -10,7 +10,7 @@
 // ============================================================
 
 /** 锁定的 sing-box 版本（与 Cargo.toml 保持同步） */
-export const SINGBOX_VERSION = "1.25.4";
+export const SINGBOX_VERSION = "1.11.4";
 
 /** sing-box ClashAPI 监听地址 */
 export const SINGBOX_API_HOST = "127.0.0.1";

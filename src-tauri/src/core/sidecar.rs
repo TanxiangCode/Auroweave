@@ -13,7 +13,7 @@ use tokio::process::Child;
 use tracing::{info, warn, error};
 
 /// sing-box 锁定版本
-pub const SINGBOX_VERSION: &str = "1.25.4";
+pub const SINGBOX_VERSION: &str = "1.11.4";
 
 /// Sidecar 状态
 #[derive(Debug, Clone, PartialEq)]

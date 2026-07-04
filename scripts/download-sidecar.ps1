@@ -1,11 +1,12 @@
 # Download sing-box 1.25.4 binary for Windows x64
 # Author: TanXiang
 
-$Version = "1.25.4"
-$TargetDir = Join-Path $PSScriptRoot "..\src-tauri\sidecar-bin\windows-x64"
+$Version = "1.11.4"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$TargetDir = Join-Path $ScriptDir "..\src-tauri\sidecar-bin\windows-x64"
 $ZipName = "sing-box-$Version-windows-amd64.zip"
 $Url = "https://github.com/SagerNet/sing-box/releases/download/v$Version/$ZipName"
-$TempZip = Join-Path [System.IO.Path]::GetTempPath() $ZipName
+$TempZip = Join-Path $env:TEMP $ZipName
 
 if (-not (Test-Path $TargetDir)) {
     New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
@@ -15,7 +16,7 @@ Write-Host "Downloading sing-box $Version from $Url ..."
 Invoke-WebRequest -Uri $Url -OutFile $TempZip
 
 Write-Host "Extracting sing-box executable..."
-$ExtractPath = Join-Path [System.IO.Path]::GetTempPath() "sing-box-extract"
+$ExtractPath = Join-Path $env:TEMP "sing-box-extract"
 if (Test-Path $ExtractPath) { Remove-Item -Recurse -Force $ExtractPath }
 Expand-Archive -Path $TempZip -DestinationPath $ExtractPath
 

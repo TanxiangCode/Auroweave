@@ -4,7 +4,7 @@
 
 set -e
 
-VERSION="1.25.4"
+VERSION="1.11.4"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
