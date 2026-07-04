@@ -83,9 +83,9 @@
       <div class="setting-item">
         <div class="item-label">
           <span>Sing-box 内核版本</span>
-          <span class="sub-label">系统锁定嵌入侧载核心 v1.13.14 (100% 规则对齐)</span>
+          <span class="sub-label">系统锁定嵌入侧载核心 v{{ SINGBOX_VERSION }} (100% 规则对齐)</span>
         </div>
-        <span class="version-tag">v1.13.14</span>
+        <span class="version-tag">v{{ SINGBOX_VERSION }}</span>
       </div>
 
       <!-- 配置重置 -->
@@ -104,6 +104,7 @@
 import { ref, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
+import { SINGBOX_VERSION } from "@/constants";
 
 const props = defineProps<{
   highlightTarget?: string;

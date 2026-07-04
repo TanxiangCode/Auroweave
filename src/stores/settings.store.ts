@@ -7,6 +7,8 @@ import { ref, watch } from "vue";
 import type { AppSettings } from "@/types";
 import { getSettings, saveSettings } from "@/api/ipc/settings";
 
+import { DEFAULT_SPEED_TEST_URLS } from "@/constants";
+
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   language: "zh-CN",
@@ -16,10 +18,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   topology_enabled: false,
   performance_mode: false,
   command_palette_hotkey: "CommandOrControl+Space",
-  speed_test_urls: [
-    "https://speed.cloudflare.com/__down?bytes=10000000",
-    "https://fast.com",
-  ],
+  speed_test_urls: DEFAULT_SPEED_TEST_URLS,
   auto_group_on_import: true,
 
   mixed_port: 7890,
