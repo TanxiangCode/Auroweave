@@ -14,8 +14,8 @@
 | C | 实时状态与快捷交互 | ✅ 已完成 | M2 | [plan-C-realtime.md](plans/plan-C-realtime.md) |
 | D | 规则合并与内核管理 | ✅ 已完成 | M2 | [plan-D-rules.md](plans/plan-D-rules.md) |
 | E | 智能测速与负载均衡 | ✅ 已完成 | M3 | [plan-E-speedtest.md](plans/plan-E-speedtest.md) |
-| F | Routing · App-Matrix | ⏳ 待开始 | M4 | [plan-F-routing.md](plans/plan-F-routing.md) |
-| G | Audit 语义化看板 | ⏳ 待开始 | M4 | [plan-G-audit.md](plans/plan-G-audit.md) |
+| F | Routing · App-Matrix | ✅ 已完成 | M4 | [plan-F-routing.md](plans/plan-F-routing.md) |
+| G | Audit 语义化看板 | ✅ 已完成 | M4 | [plan-G-audit.md](plans/plan-G-audit.md) |
 | H | 设置页面九大面板 | ⏳ 待开始 | M5 | [plan-H-settings.md](plans/plan-H-settings.md) |
 | I | 联调、测试与打包 | ⏳ 待开始 | M5 | [plan-I-release.md](plans/plan-I-release.md) |
 | J | Routing · 拓扑画布 | 🔵 低优先级 | M6 | [plan-J-topology.md](plans/plan-J-topology.md) |
@@ -42,6 +42,10 @@
 ### ✅ M3 — 智能测速与负载均衡（已完成 2026-07-04）
 - **目标**：多档测速引擎、串行批量调度、测速大厅与节点卡片交互
 - **交付物**：Rust 流式 HTTP 吞吐量测速引擎 (`throughput.rs`)、串行批量调度器 (`scheduler.rs` / `speedtest-progress` 事件)、Pinia 测速 Store (`speedtest.store.ts`)、`NodeCard.vue` 独立延迟与速度响应按钮、`SpeedtestView.vue` 测速大厅与流量预估确认 Modal。
+
+### ✅ M4 — 分流矩阵与语义化审计看板（已完成 2026-07-04）
+- **目标**：进程级分流矩阵 (App-Matrix) 与 语义化 Audit 安全审计看板
+- **交付物**：Rust 系统进程枚举 (`process.rs`)、`routing.rs` 进程规则持久化、`OutboundSelector.vue` 出站选择菜单、`AppMatrixList.vue` 进程路由矩阵、`semantic-translator.ts` 规则归一翻译器、`SemanticRuleCard.vue` 规则卡片、`RawLogStream.vue` 极客内核日志流、`AuditView.vue` 统计与动态时间流。
 
 ---
 

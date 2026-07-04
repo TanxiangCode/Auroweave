@@ -8,6 +8,14 @@
 ## [Unreleased]
 
 ### Added
+- **M4 里程碑**：完成 App-Matrix 应用矩阵与语义化 Audit 看板 (App-Matrix & Semantic Audit Engine)
+- `process.rs` Rust 进程枚举器与 `routing.rs` IPC 规则持久化服务
+- `AppMatrixList.vue` 进程级出站分流绑定矩阵（搜索过滤与已自定义规则筛选）
+- `OutboundSelector.vue` 统一出站选择下拉组件
+- `semantic-translator.ts` 规则翻译映射器（自然语言归一解毒）
+- `SemanticRuleCard.vue` 语义化安全审计时间流卡片
+- `RawLogStream.vue` Sing-box 极客原始日志流查看器（日志级别高亮与自动滚动）
+- `AuditView.vue` 安全审计看板主舞台（真实连接数统计 banner 与动态时间流）
 - **M3 里程碑**：完成智能测速引擎与负载均衡 (Speed Test Engine & Load Balancer)
 - `throughput.rs` Rust 限定时长流式 HTTP 分块下载与上传吞吐量测速引擎
 - `scheduler.rs` 串行批量测速调度器（结合 `speedtest-progress` Tauri Event 实时进度推送与取消令牌）

@@ -4,6 +4,7 @@ pub mod error;
 pub mod commands;
 pub mod core;
 pub mod speedtest;
+pub mod system;
 
 use core::sidecar::SidecarManager;
 use speedtest::scheduler::SpeedTestScheduler;
@@ -50,6 +51,9 @@ pub fn run() {
             commands::speedtest::speedtest_run_batch,
             commands::speedtest::speedtest_cancel_batch,
             commands::speedtest::speedtest_get_results,
+            commands::routing::routing_get_processes,
+            commands::routing::routing_get_app_rules,
+            commands::routing::routing_save_app_rule,
         ])
         .setup(move |app| {
             let _window = app.get_webview_window("main")
@@ -57,7 +61,6 @@ pub fn run() {
 
             tracing::info!("Tauri 窗口已创建");
 
-            // 从系统应用配置目录寻找 config.json (如 %APPDATA%/auroweave/config.json)
             let config_dir = app.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
             let config_path = config_dir.join("config.json");
 
