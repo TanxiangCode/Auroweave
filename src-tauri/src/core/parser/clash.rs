@@ -2,7 +2,7 @@
 /// 作者: TanXiang
 use super::ParsedOutbound;
 use crate::error::AppError;
-use serde_json::{json, Value};
+use serde_json::json;
 use serde_yaml::Value as YamlValue;
 
 pub fn parse_clash_yaml(content: &str) -> Result<Vec<ParsedOutbound>, AppError> {
