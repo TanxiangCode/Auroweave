@@ -1,0 +1,209 @@
+# 贡献指南
+
+感谢你对 Auroweave 的兴趣！本文档说明参与开发所需了解的所有规范。
+
+---
+
+## 目录
+
+- [行为准则](#行为准则)
+- [开发环境搭建](#开发环境搭建)
+- [分支与工作流](#分支与工作流)
+- [提交规范](#提交规范)
+- [代码规范](#代码规范)
+- [测试要求](#测试要求)
+- [Pull Request 流程](#pull-request-流程)
+
+---
+
+## 行为准则
+
+- 保持尊重与建设性
+- 优先考虑用户利益与产品一致性
+- 涉及平台权限、系统 API 的代码，必须在真实设备上验证
+
+---
+
+## 开发环境搭建
+
+### 必备工具
+
+| 工具 | 版本要求 | 用途 |
+|---|---|---|
+| Node.js | 20+ | 前端构建 |
+| Rust | 1.77+ (stable) | Tauri 后端 |
+| rustup | 最新 | Rust 工具链管理 |
+| Git | 2.x+ | 版本控制 |
+
+### Windows 额外要求
+
+```powershell
+# 安装 Visual Studio C++ 构建工具（含 MSVC + Windows SDK）
+winget install Microsoft.VisualStudio.2022.BuildTools
+```
+
+### macOS 额外要求
+
+```bash
+xcode-select --install
+```
+
+### 初始化项目
+
+```bash
+git clone https://github.com/auroweave/auroweave.git
+cd auroweave
+npm install
+```
+
+### 开发命令速查
+
+```bash
+npm run tauri dev      # 启动完整 Tauri 开发环境
+npm run dev            # 仅启动前端（无 Tauri，用于 UI 快速迭代）
+npm run lint           # ESLint 检查并自动修复
+npm run test:unit      # 运行前端单元测试（vitest）
+cargo test             # 运行 Rust 单元测试（在 src-tauri/ 目录下执行）
+```
+
+---
+
+## 分支与工作流
+
+```
+main          ← 稳定版本，只接受来自 develop 的 PR
+  └── develop ← 日常集成分支
+        ├── feature/xxx   ← 新功能
+        ├── fix/xxx       ← Bug 修复
+        └── chore/xxx     ← 工具链、文档、配置变更
+```
+
+**规则：**
+- 永远不要直接推送到 `main`
+- 功能分支从 `develop` 创建，完成后 PR 回 `develop`
+- 涉及核心逻辑的改动，PR 必须附带对应测试用例
+
+---
+
+## 提交规范
+
+遵循 [Conventional Commits](https://www.conventionalcommits.org)，**提交信息使用英文**：
+
+```
+<类型>(<范围>): <简短描述>
+
+[正文（可选，用中文描述技术细节）]
+
+[页脚（可选，关联 issue）]
+```
+
+### 类型列表
+
+| 类型 | 用途 |
+|---|---|
+| `feat` | 新功能 |
+| `fix` | Bug 修复 |
+| `chore` | 构建工具、依赖、配置变更 |
+| `docs` | 仅文档变更 |
+| `style` | 代码格式（不影响逻辑） |
+| `refactor` | 重构（非新功能、非 Bug 修复） |
+| `test` | 添加或修改测试 |
+| `perf` | 性能优化 |
+
+### 示例
+
+```
+feat(speedtest): add single-node throughput test command
+
+- 实现 speedtest_run_single IPC 命令
+- 通过对应出站代理向测速服务器发起分块请求
+- 限定测试时长 8 秒，计算平均速率
+```
+
+---
+
+## 代码规范
+
+### 通用原则
+
+- **语言**：源码标识符（变量名、函数名、类型名）用**英文**；代码注释、文档用**中文**
+- **单一职责**：一个函数/组件只做一件事；超过 300 行须拆分
+- **禁止魔法值**：端口、超时、版本号等常量统一在 `src/constants.ts` / `constants.rs` 中定义
+
+### 前端（Vue 3 + TypeScript）
+
+- 统一使用 `<script setup lang="ts">`，禁止 Options API
+- 开启 TypeScript `strict` 模式，**禁止使用 `any`**
+- 样式只使用 Tailwind 原子类 + Design Tokens CSS 变量，**禁止在组件内硬编码颜色/圆角/阴影**
+- 禁止在组件内直接调用 `invoke()`，必须通过 `src/api/ipc/` 封装层
+- 所有装饰性动画必须通过 `useReducedMotion()` 判断后再决定是否播放
+
+### 命名约定（前端）
+
+| 对象 | 规范 |
+|---|---|
+| 组件文件 | `PascalCase.vue` |
+| Composable | `use` 前缀 + camelCase，如 `useFluidWave.ts` |
+| Pinia Store | `xxx.store.ts` |
+| IPC 封装函数 | camelCase，如 `getProxyGroups` |
+
+### 后端（Rust）
+
+- 强制使用 `rustfmt` 格式化，`clippy` 检查为 CI 阻断项
+- **禁止** `unwrap()` / `expect()` 用于可能失败的业务逻辑，统一使用 `Result<T, AppError>`
+- I/O 密集型操作一律使用 `tokio` 异步
+- 日志使用 `tracing` 库，按模块设置 target，**禁止** `println!`
+- IPC 命令命名格式：`模块_动作`，如 `speedtest_run_single`
+
+### IPC 边界约定
+
+- 先在 `src/types/index.ts` 定义 TypeScript 接口，再在 Rust 端定义对应 `serde` struct
+- 双方字段命名保持一致（均用 `snake_case`）
+- 所有命令返回统一的 `ApiResponse<T>` 结构
+
+---
+
+## 测试要求
+
+### 前端单元测试（vitest）
+
+必须覆盖：
+- 订阅解析器（多格式兼容性）
+- 语义化规则翻译（含兜底逻辑）
+- 工具函数（速度格式化等）
+
+### Rust 单元测试
+
+必须覆盖：
+- 连接计数器 `connection_counter.rs`
+- 测速调度器串行逻辑
+- `ApiResponse` 序列化正确性
+
+### AI 辅助开发约定
+
+- 每次让 AI 生成涉及 IPC 边界的代码时，先明确双方数据结构再生成实现
+- AI 生成的核心解析/测速/规则合并逻辑，要求同步生成对应单元测试
+- 涉及权限、系统 API、窗口原生样式的代码，生成后必须在真实设备上验证
+
+---
+
+## Pull Request 流程
+
+1. Fork 仓库并创建功能分支
+2. 完成功能开发与测试
+3. 运行 `npm run lint` 确保无 lint 错误
+4. 运行 `npm run test:unit` 确保测试全部通过
+5. 提交 PR 到 `develop` 分支
+6. 在 PR 描述中说明：
+   - 解决的问题
+   - 技术实现简述
+   - 测试方式
+   - 平台验证情况（Windows / macOS）
+
+### PR 代码评审清单
+
+- [ ] 是否有硬编码常量（颜色、端口、版本号）
+- [ ] 是否有裸露的 `unwrap()` / `any`
+- [ ] 动效代码是否接入 `useReducedMotion()`
+- [ ] IPC 边界是否有类型定义
+- [ ] 新增功能是否有对应测试
