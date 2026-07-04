@@ -93,7 +93,7 @@ async function handleNodeSelect(nodeTag: string) {
 
 <style scoped>
 .proxies-view {
-  padding: var(--space-6);
+  padding: 48px 24px 24px 24px;
   height: 100%;
   overflow-y: auto;
   display: flex;

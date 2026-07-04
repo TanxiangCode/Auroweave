@@ -101,7 +101,7 @@ onMounted(() => {
   display: flex;
   height: 100%;
   gap: 16px;
-  padding: 20px;
+  padding: 48px 20px 20px 20px;
   overflow: hidden;
 }
 

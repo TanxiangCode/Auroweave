@@ -133,7 +133,7 @@ onUnmounted(() => {
 
 <style scoped>
 .audit-view {
-  padding: 24px;
+  padding: 48px 24px 24px 24px;
   height: 100%;
   overflow-y: auto;
   display: flex;

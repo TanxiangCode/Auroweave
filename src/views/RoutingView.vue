@@ -42,7 +42,7 @@ const activeTab = ref<"matrix" | "topology">("matrix");
 
 <style scoped>
 .routing-view {
-  padding: 24px;
+  padding: 48px 24px 24px 24px;
   height: 100%;
   overflow-y: auto;
   display: flex;
