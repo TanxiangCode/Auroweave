@@ -81,7 +81,6 @@ impl ConfigBuilder {
         // 5. 补全直连和拦截
         final_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
-        final_outbounds.push(json!({ "type": "dns", "tag": "dns-out" }));
 
         let config = json!({
             "log": {
@@ -121,7 +120,7 @@ impl ConfigBuilder {
             "outbounds": final_outbounds,
             "route": {
                 "rules": [
-                    { "protocol": "dns", "outbound": "dns-out" },
+                    { "protocol": "dns", "action": "hijack-dns" },
                     { "ip_is_private": true, "outbound": "direct" }
                 ],
                 "final": "proxy",
