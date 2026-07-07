@@ -10,6 +10,8 @@ import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import SpeedChart from "@/components/charts/SpeedChart.vue";
 
+import { DASHBOARD_CARD_COUNT } from "@/constants";
+
 const router = useRouter();
 const connectionStore = useConnectionStore();
 const proxyStore = useProxyStore();
@@ -21,7 +23,7 @@ const cards = [
   { id: "proxies", icon: "🚀", label: "代理节点", desc: "节点大厅与切换", route: "/proxies" },
   { id: "routing", icon: "🛠️", label: "分流配置", desc: "应用级规则与矩阵", route: "/routing" },
   { id: "audit",   icon: "🔍", label: "安全审计", desc: "实时抓包与 DNS 状态", route: "/audit" },
-];
+].slice(0, DASHBOARD_CARD_COUNT);
 </script>
 
 <template>

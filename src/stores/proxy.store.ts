@@ -6,6 +6,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import type { ProxyGroup, ProxyNode } from "@/types";
 import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode } from "@/api/ipc/proxy";
+import { RECENT_GROUPS_MAX } from "@/constants";
 
 export const useProxyStore = defineStore("proxy", () => {
   // ---- 状态 ----
@@ -15,6 +16,9 @@ export const useProxyStore = defineStore("proxy", () => {
   const proxyMode = ref<"global" | "rule" | "direct">("rule");
   const loading = ref(false);
   const error = ref<string | null>(null);
+
+  // 最近选择的分组列表，上限为 RECENT_GROUPS_MAX
+  const recentGroups = ref<string[]>([]);
 
   // ---- 计算属性 ----
   const activeGroup = computed(() =>
@@ -28,6 +32,11 @@ export const useProxyStore = defineStore("proxy", () => {
     const res = await getProxyGroups();
     if (res.success && res.data) {
       groups.value = res.data;
+      // 默认将初始活跃分组载入最近列表作为兜底展示
+      const primary = res.data.find((g) => g.type === "selector");
+      if (primary && recentGroups.value.length === 0) {
+        recentGroups.value.push(primary.tag);
+      }
     } else {
       error.value = res.error ?? "获取分组失败";
     }
@@ -47,6 +56,16 @@ export const useProxyStore = defineStore("proxy", () => {
       // 乐观更新本地状态
       const group = groups.value.find((g) => g.tag === groupTag);
       if (group) group.now = nodeTag;
+
+      // 更新最近选择的分组列表并限制长度为 RECENT_GROUPS_MAX
+      const index = recentGroups.value.indexOf(groupTag);
+      if (index !== -1) {
+        recentGroups.value.splice(index, 1);
+      }
+      recentGroups.value.unshift(groupTag);
+      if (recentGroups.value.length > RECENT_GROUPS_MAX) {
+        recentGroups.value = recentGroups.value.slice(0, RECENT_GROUPS_MAX);
+      }
     }
     return res;
   }
@@ -66,6 +85,7 @@ export const useProxyStore = defineStore("proxy", () => {
     loading,
     error,
     activeGroup,
+    recentGroups,
     fetchGroups,
     fetchGroupNodes,
     selectNode,

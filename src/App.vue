@@ -10,6 +10,7 @@ import ControlCapsule from "@/components/chrome/ControlCapsule.vue";
 import TrafficLights from "@/components/chrome/TrafficLights.vue";
 import CommandPalette from "@/components/command-palette/CommandPalette.vue";
 import Toast from "@/components/common/Toast.vue";
+import { WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@/constants";
 
 const settingsStore = useSettingsStore();
 const isMac = ref(false);
@@ -17,6 +18,14 @@ const isMac = ref(false);
 onMounted(async () => {
   isMac.value = navigator.userAgent.toLowerCase().includes("mac");
   await settingsStore.fetchSettings();
+
+  try {
+    const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
+    await appWindow.setMinSize(new LogicalSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT));
+  } catch {
+    // 浏览器预览模式跳过
+  }
 });
 </script>
 

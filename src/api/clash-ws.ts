@@ -3,19 +3,17 @@
  * 作者: TanXiang
  */
 import {
-  WS_PATH_TRAFFIC,
-  WS_PATH_CONNECTIONS,
-  WS_PATH_LOGS,
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
   WS_RECONNECT_MAX_RETRIES,
 } from "@/constants";
 import type { TrafficSnapshot, Connection } from "@/types";
+import { useSettingsStore } from "@/stores/settings.store";
 
 export type WsConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
 interface WsClientOptions<T> {
-  url: string;
+  url: string | (() => string);
   onMessage: (data: T) => void;
   onStatusChange?: (status: WsConnectionStatus) => void;
 }
@@ -36,7 +34,8 @@ class WsClient<T> {
     this.options.onStatusChange?.("connecting");
 
     try {
-      const ws = new WebSocket(this.options.url);
+      const targetUrl = typeof this.options.url === "function" ? this.options.url() : this.options.url;
+      const ws = new WebSocket(targetUrl);
       this.ws = ws;
 
       ws.onopen = () => {
@@ -96,6 +95,20 @@ class WsClient<T> {
 }
 
 // ------------------------------------------------------------
+// 动态获取最新的 WebSocket URL，以在设置端口变化时生效
+// ------------------------------------------------------------
+function getDynamicWsUrl(path: string): string {
+  try {
+    const store = useSettingsStore();
+    const port = store.settings.clash_api_port || 9090;
+    return `ws://127.0.0.1:${port}${path}`;
+  } catch {
+    // 降级兜底
+    return `ws://127.0.0.1:9090${path}`;
+  }
+}
+
+// ------------------------------------------------------------
 // 单例管理
 // ------------------------------------------------------------
 type TrafficCallback = (data: TrafficSnapshot) => void;
@@ -114,7 +127,7 @@ export function subscribeTraffic(cb: TrafficCallback): () => void {
   trafficCallbacks.push(cb);
   if (!trafficClient) {
     trafficClient = new WsClient<any>({
-      url: WS_PATH_TRAFFIC,
+      url: () => getDynamicWsUrl("/traffic"),
       onMessage: (raw) => {
         // 兼容 Sing-box 的 { up: number, down: number } 与标准的 TrafficSnapshot 格式
         const snapshot: TrafficSnapshot = {
@@ -138,7 +151,7 @@ export function subscribeConnections(cb: ConnectionsCallback): () => void {
   connectionsCallbacks.push(cb);
   if (!connectionsClient) {
     connectionsClient = new WsClient({
-      url: WS_PATH_CONNECTIONS,
+      url: () => getDynamicWsUrl("/connections"),
       onMessage: (data) => connectionsCallbacks.forEach((fn) => fn(data)),
     });
     connectionsClient.connect();
@@ -152,7 +165,7 @@ export function subscribeLog(cb: LogCallback): () => void {
   logCallbacks.push(cb);
   if (!logClient) {
     logClient = new WsClient({
-      url: WS_PATH_LOGS,
+      url: () => getDynamicWsUrl("/logs"),
       onMessage: (data) => logCallbacks.forEach((fn) => fn(data.payload)),
     });
     logClient.connect();

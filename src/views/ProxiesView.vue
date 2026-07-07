@@ -36,6 +36,16 @@ const currentNodes = computed(() => {
 async function handleGroupSelect(groupTag: string) {
   selectedGroupTag.value = groupTag;
   await proxyStore.fetchGroupNodes(groupTag);
+
+  // 记录到最近列表，采用 store 定义的限制规则
+  const index = proxyStore.recentGroups.indexOf(groupTag);
+  if (index !== -1) {
+    proxyStore.recentGroups.splice(index, 1);
+  }
+  proxyStore.recentGroups.unshift(groupTag);
+  if (proxyStore.recentGroups.length > 4) {
+    proxyStore.recentGroups = proxyStore.recentGroups.slice(0, 4);
+  }
 }
 
 async function handleNodeSelect(nodeTag: string) {
@@ -133,6 +143,22 @@ async function confirmBatchSpeedTest() {
     </div>
 
     <div v-else class="proxies-container">
+      <!-- 最近使用快捷切换 -->
+      <div v-if="proxyStore.recentGroups.length > 1" class="recent-groups-bar">
+        <span class="recent-label">⏱️ 最近常用:</span>
+        <div class="recent-tags">
+          <button
+            v-for="tag in proxyStore.recentGroups"
+            :key="tag"
+            class="recent-tag"
+            :class="{ active: tag === selectedGroupTag }"
+            @click="handleGroupSelect(tag)"
+          >
+            {{ tag }}
+          </button>
+        </div>
+      </div>
+
       <!-- 分组 Tabs 切换 -->
       <div class="group-bar">
         <div class="group-tabs">
@@ -197,8 +223,8 @@ async function confirmBatchSpeedTest() {
           <h3>⚠️ 批量吞吐量测速确认</h3>
           <p>将对分组 <strong>「{{ selectedGroupTag }}」</strong> 的 <strong>{{ currentNodes.length }}</strong> 个节点依次进行带宽测试。</p>
           <div class="estimate-box">
-            <div>⏱️ 预计耗时: 约 {{ Math.ceil(currentNodes.length * 3 / 60) }} 分钟</div>
-            <div>📉 预计流量消耗: 约 {{ currentNodes.length * 15 }} MB</div>
+            <div>⏱️ 预计耗时: 约 {{ Math.ceil(currentNodes.length * speedtestStore.THROUGHPUT_TEST_DURATION_SEC / 60) }} 分钟</div>
+            <div>📉 预计流量消耗: 约 {{ Math.ceil(currentNodes.length * (speedtestStore.THROUGHPUT_TEST_CHUNK_BYTES / (1024 * 1024))) }} MB</div>
           </div>
           <p class="warning-tip">测速过程将以串行队列运行，以确保带宽测试结果精准无干扰。</p>
           <div class="modal-actions">
@@ -414,5 +440,49 @@ async function confirmBatchSpeedTest() {
   justify-content: center;
   padding: 40px;
   color: rgba(255, 255, 255, 0.4);
+}
+.recent-groups-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 14px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+
+.recent-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 600;
+}
+
+.recent-tags {
+  display: flex;
+  gap: 8px;
+}
+
+.recent-tag {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.recent-tag:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: rgba(0, 242, 254, 0.2);
+}
+
+.recent-tag.active {
+  background: rgba(0, 242, 254, 0.12);
+  border-color: rgba(0, 242, 254, 0.4);
+  color: #00f2fe;
 }
 </style>

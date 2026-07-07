@@ -10,6 +10,11 @@
  */
 import { ref, onMounted, computed } from "vue";
 import { useRouter, useRoute } from "vue-router";
+import {
+  SETTINGS_CLOSE_MIN_GAP_PX,
+  WINDOW_DEFAULT_WIDTH,
+  WINDOW_DEFAULT_HEIGHT,
+} from "@/constants";
 
 const router = useRouter();
 const route = useRoute();
@@ -33,6 +38,17 @@ onMounted(async () => {
     // 浏览器预览模式兜底
   }
 });
+
+async function handleResetSize() {
+  try {
+    const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
+    await appWindow.setSize(new LogicalSize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT));
+    await appWindow.center();
+  } catch {
+    console.log(`Reset size to: ${WINDOW_DEFAULT_WIDTH}x${WINDOW_DEFAULT_HEIGHT}`);
+  }
+}
 
 async function handleMinimize() {
   try {
@@ -78,7 +94,11 @@ function handleSettingsClick() {
 
 <template>
   <div class="control-capsule-container">
-    <div class="control-capsule glass-effect">
+    <div
+      class="control-capsule glass-effect"
+      title="双击控制胶囊：重置窗口为 960x640 黄金尺寸并居中"
+      @dblclick="handleResetSize"
+    >
       <!-- 1. 非首页状态下展示 🏠 返回主舱按钮 -->
       <button
         v-if="!isHomePage"
@@ -99,9 +119,12 @@ function handleSettingsClick() {
         <span>⚙️</span>
       </button>
 
-      <!-- 3. 非 macOS 平台下的窗口控制按钮群 -->
+      <!-- 3. 非 macOS 平台下的窗口控制按钮群 (设置与关闭分割间距遵循 SETTINGS_CLOSE_MIN_GAP_PX 防误触) -->
       <template v-if="!isMac">
-        <div class="capsule-divider" />
+        <div
+          class="capsule-divider"
+          :style="{ margin: `0 ${Math.max(6, SETTINGS_CLOSE_MIN_GAP_PX / 10)}px` }"
+        />
 
         <div class="window-controls">
           <button class="capsule-btn minimize-btn" title="最小化" @click="handleMinimize">

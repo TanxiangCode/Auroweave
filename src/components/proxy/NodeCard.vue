@@ -51,8 +51,15 @@ defineEmits<{
 
 const speedtestStore = useSpeedtestStore();
 
+function getLatencyColor(ms?: number): string {
+  if (!ms || ms <= 0) return "#94a3b8";
+  if (ms < 100) return "#4ade80";
+  if (ms < 300) return "#fbbf24";
+  return "#f87171";
+}
+
 const isTesting = computed(() => speedtestStore.testingNodes.has(props.nodeTag));
-const latencyColor = computed(() => speedtestStore.getLatencyColor(props.latency));
+const latencyColor = computed(() => getLatencyColor(props.latency));
 
 function formatSpeed(bps: number): string {
   if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(0)} KB/s`;

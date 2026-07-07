@@ -14,6 +14,11 @@ import {
   listenSpeedTestProgress,
   type BatchProgressPayload,
 } from "@/api/ipc/speedtest";
+import {
+  THROUGHPUT_TEST_DURATION_SEC,
+  THROUGHPUT_TEST_CHUNK_BYTES,
+  LATENCY_TEST_TIMEOUT_MS,
+} from "@/constants";
 
 export const useSpeedtestStore = defineStore("speedtest", () => {
   // 延迟测速结果映射 nodeTag -> ms
@@ -62,38 +67,30 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     testingNodes.value.add(nodeTag);
     const res = await runSingleThroughputTest(nodeTag);
     testingNodes.value.delete(nodeTag);
-
     if (res.success && res.data) {
-      throughputMap.value = { ...throughputMap.value, [nodeTag]: res.data };
+      throughputMap.value[nodeTag] = res.data;
     }
     return res;
   }
 
-  /** 启动批量测速 */
+  /** 开始批量吞吐量测速 */
   async function startBatchTest(groupTag: string, nodeTags: string[]) {
     isBatchTesting.value = true;
-    batchProgress.value = {
-      current_index: 0,
-      total: nodeTags.length,
-      current_node: "",
-    };
-    return await runBatchSpeedTest(groupTag, nodeTags);
+    batchProgress.value = null;
+    const res = await runBatchSpeedTest(groupTag, nodeTags);
+    if (!res.success) {
+      isBatchTesting.value = false;
+    }
+    return res;
   }
 
   /** 取消批量测速 */
   async function cancelBatch() {
-    await cancelBatchSpeedTest();
+    const res = await cancelBatchSpeedTest();
     isBatchTesting.value = false;
     batchProgress.value = null;
+    return res;
   }
-
-  // 节点按延迟/网速排序 helper
-  const getLatencyColor = (ms?: number): string => {
-    if (!ms || ms <= 0) return "#94a3b8";
-    if (ms < 120) return "#4ade80"; // 绿色 优
-    if (ms < 280) return "#fbbf24"; // 黄色 中
-    return "#f87171"; // 红色 劣
-  };
 
   return {
     latencyMap,
@@ -106,6 +103,8 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     testSingleThroughput,
     startBatchTest,
     cancelBatch,
-    getLatencyColor,
+    THROUGHPUT_TEST_DURATION_SEC,
+    THROUGHPUT_TEST_CHUNK_BYTES,
+    LATENCY_TEST_TIMEOUT_MS,
   };
 });
