@@ -4,6 +4,17 @@ use crate::error::AppError;
 use reqwest::Client;
 use serde_json::Value;
 use std::time::Duration;
+use std::sync::atomic::{AtomicU16, Ordering};
+
+pub static CLASH_API_PORT: AtomicU16 = AtomicU16::new(9090);
+
+pub fn set_clash_api_port(port: u16) {
+    CLASH_API_PORT.store(port, Ordering::Relaxed);
+}
+
+pub fn get_clash_api_port() -> u16 {
+    CLASH_API_PORT.load(Ordering::Relaxed)
+}
 
 pub struct ClashApiClient {
     client: Client,
@@ -12,7 +23,8 @@ pub struct ClashApiClient {
 
 impl ClashApiClient {
     pub fn new(base_url: Option<String>) -> Self {
-        let base = base_url.unwrap_or_else(|| "http://127.0.0.1:9090".to_string());
+        let port = get_clash_api_port();
+        let base = base_url.unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
         let client = Client::builder()
             .timeout(Duration::from_secs(6))
             .build()
@@ -85,6 +97,31 @@ impl ClashApiClient {
 
         if !resp.status().is_success() {
             return Err(AppError::Network(format!("热重载返回错误状态: {}", resp.status())));
+        }
+
+        Ok(())
+    }
+
+    /// 获取当前配置
+    pub async fn get_configs(&self) -> Result<serde_json::Value, AppError> {
+        let url = format!("{}/configs", self.base_url);
+        let resp = self.client.get(&url).send().await
+            .map_err(|e| AppError::Network(format!("获取配置失败: {}", e)))?;
+
+        let val: serde_json::Value = resp.json().await
+            .map_err(|e| AppError::Network(format!("解析配置失败: {}", e)))?;
+
+        Ok(val)
+    }
+
+    /// 更新配置
+    pub async fn patch_configs(&self, body: serde_json::Value) -> Result<(), AppError> {
+        let url = format!("{}/configs", self.base_url);
+        let resp = self.client.patch(&url).json(&body).send().await
+            .map_err(|e| AppError::Network(format!("更新配置请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(AppError::Network(format!("更新配置返回错误状态: {}", resp.status())));
         }
 
         Ok(())

@@ -59,6 +59,10 @@ pub fn run() {
             let _window = app.get_webview_window("main")
                 .expect("找不到主窗口，请检查 tauri.conf.json 中的窗口配置");
 
+            // 初始化全局 ClashAPI 端口
+            let (_, clash_port) = speedtest::get_configured_ports(app.handle());
+            core::clash_api::set_clash_api_port(clash_port);
+
             tracing::info!("Tauri 窗口已创建");
 
             let config_dir = app.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));

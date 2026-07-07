@@ -39,7 +39,7 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
   async function init() {
     const res = await getSpeedTestResults();
     if (res.success && res.data) {
-      throughputMap.value = res.data;
+      throughputMap.value = { ...res.data };
     }
 
     if (!unlistenProgress) {
@@ -47,7 +47,10 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
         batchProgress.value = payload;
         isBatchTesting.value = payload.current_index < payload.total;
         if (payload.result && payload.current_node) {
-          throughputMap.value[payload.current_node] = payload.result;
+          throughputMap.value = {
+            ...throughputMap.value,
+            [payload.current_node]: payload.result,
+          };
         }
       });
     }
@@ -65,10 +68,18 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
   /** 单节点吞吐量测试 */
   async function testSingleThroughput(nodeTag: string) {
     testingNodes.value.add(nodeTag);
+    testingNodes.value = new Set(testingNodes.value); // 触发 Vue Set 响应式更新
+    
     const res = await runSingleThroughputTest(nodeTag);
+    
     testingNodes.value.delete(nodeTag);
+    testingNodes.value = new Set(testingNodes.value); // 触发 Vue Set 响应式更新
+    
     if (res.success && res.data) {
-      throughputMap.value[nodeTag] = res.data;
+      throughputMap.value = {
+        ...throughputMap.value,
+        [nodeTag]: res.data,
+      };
     }
     return res;
   }

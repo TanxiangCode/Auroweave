@@ -7,14 +7,15 @@ use std::time::{Duration, Instant};
 use tokio::time::timeout;
 
 const DEFAULT_TEST_URL: &str = "https://speed.cloudflare.com/__down?bytes=25000000";
-const LOCAL_PROXY_URL: &str = "http://127.0.0.1:7890";
 
 /// 针对单个节点或当前代理，进行限定时长的下载与上传吞吐量测速
 pub async fn run_single_throughput_test(
     _node_tag: &str,
     duration_secs: u64,
+    mixed_port: u16,
 ) -> Result<ThroughputResult, AppError> {
-    let proxy = Proxy::all(LOCAL_PROXY_URL)
+    let proxy_url = format!("http://127.0.0.1:{}", mixed_port);
+    let proxy = Proxy::all(&proxy_url)
         .map_err(|e| AppError::Network(format!("创建本地代理客户端失败: {}", e)))?;
 
     let client = reqwest::Client::builder()
@@ -26,7 +27,7 @@ pub async fn run_single_throughput_test(
     // 1. 下载测速
     let download_bps = measure_download(&client, duration_secs).await.unwrap_or(0);
 
-    // 2. 上传测速 (使用 5MB 随机数据 payload)
+    // 2. 上传测速 (循环上传分块，计算真实平均吞吐率)
     let upload_bps = measure_upload(&client, duration_secs).await.unwrap_or(0);
 
     Ok(ThroughputResult {
@@ -74,26 +75,29 @@ async fn measure_download(client: &reqwest::Client, duration_secs: u64) -> Resul
 async fn measure_upload(client: &reqwest::Client, duration_secs: u64) -> Result<u64, AppError> {
     let start = Instant::now();
     let duration = Duration::from_secs(duration_secs);
-
-    // 生成 2MB 随机测试数据
-    let payload = vec![0u8; 2 * 1024 * 1024];
-
-    let res = client
-        .post("https://speed.cloudflare.com/__up")
-        .body(payload.clone())
-        .send();
-
     let mut uploaded_bytes: u64 = 0;
 
-    let test_future = async {
-        if let Ok(r) = res.await {
+    // 使用 1MB 的块进行循环上传
+    let payload = vec![0u8; 1 * 1024 * 1024];
+
+    while start.elapsed() < duration {
+        let res = client
+            .post("https://speed.cloudflare.com/__up")
+            .body(payload.clone())
+            .send()
+            .await;
+
+        if let Ok(r) = res {
             if r.status().is_success() {
                 uploaded_bytes += payload.len() as u64;
+            } else {
+                break;
             }
+        } else {
+            break;
         }
-    };
+    }
 
-    let _ = timeout(duration, test_future).await;
     let elapsed = start.elapsed().as_secs_f64();
 
     if elapsed > 0.1 && uploaded_bytes > 0 {

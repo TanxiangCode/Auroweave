@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>🧪 高级设置与测速/超时配置</h2>
+    <h2>高级设置与测速/超时配置</h2>
     <div class="setting-group">
       <!-- 拓扑图开关 (具有反向锚定高亮) -->
       <div
@@ -94,7 +94,10 @@
           <span>恢复上一次配置备份</span>
           <span class="sub-label">若当前配置文件出现异常，一键恢复 config.backup.json</span>
         </div>
-        <button class="btn-restore" @click="handleRestore">🔄 恢复备份</button>
+        <button class="btn-restore" @click="handleRestore">
+          <SvgIcon name="refresh" :size="12" style="margin-right: 4px;" />
+          恢复备份
+        </button>
       </div>
     </div>
   </div>
@@ -105,6 +108,7 @@ import { ref, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
 import { SINGBOX_VERSION } from "@/constants";
+import SvgIcon from "@/components/common/SvgIcon.vue";
 
 const props = defineProps<{
   highlightTarget?: string;
@@ -148,16 +152,17 @@ function handleRestore() {
 
 <style scoped>
 .panel-container { display: flex; flex-direction: column; gap: 16px; }
-h2 { font-size: 18px; font-weight: 700; }
+h2 { font-size: var(--text-md); font-weight: var(--weight-bold); }
 .setting-group { display: flex; flex-direction: column; gap: 12px; }
-.setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; transition: all 0.3s ease; }
-.setting-item.highlight { border-color: #00f2fe; box-shadow: 0 0 20px rgba(0, 242, 254, 0.4); animation: breath 1s ease-in-out infinite alternate; }
-@keyframes breath { from { box-shadow: 0 0 10px rgba(0, 242, 254, 0.2); } to { box-shadow: 0 0 24px rgba(0, 242, 254, 0.6); } }
-.item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
-.sub-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: normal; }
+.setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: var(--layer-1); border: 1px solid var(--border-normal); border-radius: var(--radius-lg); transition: all var(--duration-normal) ease; }
+.setting-item.highlight { border-color: var(--accent-cyan); box-shadow: var(--shadow-glow-cyan); animation: breath 1s ease-in-out infinite alternate; }
+@keyframes breath { from { box-shadow: 0 0 10px var(--accent-cyan-glow); } to { box-shadow: 0 0 24px var(--accent-cyan-glow); } }
+.item-label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.sub-label { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: normal; }
 .switch { width: 18px; height: 18px; cursor: pointer; }
-.text-input { padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; font-size: 12px; width: 260px; outline: none; }
-.num-input { padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; width: 100px; outline: none; }
-.version-tag { font-size: 12px; padding: 4px 8px; background: rgba(0, 242, 254, 0.1); border-radius: 6px; color: #00f2fe; font-weight: 600; }
-.btn-restore { padding: 6px 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; font-size: 12px; cursor: pointer; }
+.text-input { padding: 6px 12px; background: var(--layer-2); border: 1px solid var(--border-normal); border-radius: var(--radius-sm); color: var(--text-primary); font-size: var(--text-xs); width: 260px; outline: none; }
+.num-input { padding: 6px 12px; background: var(--layer-2); border: 1px solid var(--border-normal); border-radius: var(--radius-sm); color: var(--text-primary); width: 100px; outline: none; }
+.version-tag { font-size: var(--text-xs); padding: 4px 8px; background: var(--accent-cyan-glow); border-radius: var(--radius-sm); color: var(--accent-cyan); font-weight: var(--weight-bold); }
+.btn-restore { padding: 6px 12px; background: var(--layer-2); border: 1px solid var(--border-normal); border-radius: var(--radius-sm); color: var(--text-primary); font-size: var(--text-xs); cursor: pointer; transition: all var(--duration-fast); }
+.btn-restore:hover { background: var(--border-strong); border-color: var(--border-accent); }
 </style>

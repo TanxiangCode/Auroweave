@@ -25,11 +25,18 @@
   --accent-blue-glow: rgba(0, 122, 255, 0.3);
   --accent-cyan: #22d3ee;                    /* 全息高亮（流体动画、进度） */
   --accent-cyan-glow: rgba(34, 211, 238, 0.2);
+  --accent-cyan-vivid: #00f2fe;              /* 全息青（亮） */
+  --accent-purple: #a855f7;                  /* 紫色强调（测速上传） */
+  --accent-purple-glow: rgba(168, 85, 247, 0.12);
   --accent-green: #34d399;                   /* 成功/连接状态 */
   --accent-green-glow: rgba(52, 211, 153, 0.2);
   --accent-red: #ef4444;                     /* 警告/错误 */
   --accent-red-glow: rgba(239, 68, 68, 0.2);
   --accent-orange: #f97316;                  /* 负载均衡风险提示 */
+  --surface-deep: rgba(18, 22, 34, 0.95);    /* 深色浮层背景 */
+  --status-success: #4ade80;                 /* 直连绿 */
+  --status-warning: #fbbf24;                 /* 暂停黄 */
+  --status-danger: #f87171;                  /* 危险红 */
 
   /* --- 文字 --- */
   --text-primary: rgba(255, 255, 255, 0.92); /* 主要文字 */
@@ -78,11 +85,18 @@
   --accent-blue-glow: rgba(0, 113, 227, 0.15);
   --accent-cyan: #0891b2;
   --accent-cyan-glow: rgba(8, 145, 178, 0.1);
+  --accent-cyan-vivid: #0891b2;
+  --accent-purple: #8b5cf6;
+  --accent-purple-glow: rgba(139, 92, 246, 0.12);
   --accent-green: #059669;
   --accent-green-glow: rgba(5, 150, 105, 0.1);
   --accent-red: #dc2626;
   --accent-red-glow: rgba(220, 38, 38, 0.1);
   --accent-orange: #ea580c;
+  --surface-deep: rgba(255, 255, 255, 0.95);
+  --status-success: #16a34a;
+  --status-warning: #d97706;
+  --status-danger: #dc2626;
 
   /* --- 文字 --- */
   --text-primary: rgba(0, 0, 0, 0.88);

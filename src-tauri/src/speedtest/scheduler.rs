@@ -32,10 +32,11 @@ impl SpeedTestScheduler {
         self.cancel();
 
         let (tx, mut rx) = mpsc::channel::<()>(1);
-        *self.cancel_tx.lock().unwrap() = Some(tx);
+        *self.cancel_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
 
         let cache = self.results_cache.clone();
         let clash_client = ClashApiClient::default();
+        let port = super::get_mixed_port(&app);
 
         tokio::spawn(async move {
             let total = node_tags.len();
@@ -63,14 +64,14 @@ impl SpeedTestScheduler {
                 );
 
                 // 2. 测量 3 秒速度
-                let res = run_single_throughput_test(node_tag, 3).await.unwrap_or(ThroughputResult {
+                let res = run_single_throughput_test(node_tag, 3, port).await.unwrap_or(ThroughputResult {
                     download_bps: 0,
                     upload_bps: 0,
                     tested_at: chrono::Utc::now().timestamp_millis(),
                 });
 
                 // 3. 更新缓存
-                cache.lock().unwrap().insert(node_tag.clone(), res.clone());
+                cache.lock().unwrap_or_else(|e| e.into_inner()).insert(node_tag.clone(), res.clone());
 
                 // 进度推送 (测速完成)
                 let _ = app.emit(
@@ -90,14 +91,14 @@ impl SpeedTestScheduler {
 
     /// 取消当前正在运行的批量测速
     pub fn cancel(&self) {
-        if let Some(tx) = self.cancel_tx.lock().unwrap().take() {
+        if let Some(tx) = self.cancel_tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = tx.try_send(());
         }
     }
 
     /// 获取缓存结果
     pub fn get_results(&self) -> HashMap<String, ThroughputResult> {
-        self.results_cache.lock().unwrap().clone()
+        self.results_cache.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 

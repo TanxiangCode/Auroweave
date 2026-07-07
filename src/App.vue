@@ -3,17 +3,32 @@
  * 根组件 App.vue
  * 作者: TanXiang
  */
-import { onMounted, ref } from "vue";
+import { onMounted, ref, computed } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
-import { RouterView } from "vue-router";
+import { RouterView, useRoute, useRouter } from "vue-router";
 import ControlCapsule from "@/components/chrome/ControlCapsule.vue";
 import TrafficLights from "@/components/chrome/TrafficLights.vue";
+import SvgIcon from "@/components/common/SvgIcon.vue";
 import CommandPalette from "@/components/command-palette/CommandPalette.vue";
 import Toast from "@/components/common/Toast.vue";
 import { WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@/constants";
 
 const settingsStore = useSettingsStore();
+const route = useRoute();
+const router = useRouter();
 const isMac = ref(false);
+
+const showBack = computed(() => {
+  return route.path !== "/" && route.path !== "/dashboard";
+});
+
+const routeTitle = computed(() => {
+  return (route.meta.title as string) || "Auroweave";
+});
+
+function goBack() {
+  router.back();
+}
 
 onMounted(async () => {
   isMac.value = navigator.userAgent.toLowerCase().includes("mac");
@@ -30,9 +45,20 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app-shell" data-tauri-drag-region>
-    <!-- 全局控制胶囊 (设置 + 窗口按钮) -->
-    <ControlCapsule />
+  <div class="app-shell">
+    <!-- 全局顶栏 (Tauri 拖拽区域) -->
+    <header class="app-topbar" :class="{ 'is-mac': isMac }" data-tauri-drag-region>
+      <div class="topbar-left">
+        <button v-if="showBack" class="btn-back-nav" @click="goBack" title="返回">
+          <SvgIcon name="back" :size="14" />
+        </button>
+        <span class="topbar-title">{{ routeTitle }}</span>
+      </div>
+      <div class="topbar-right">
+        <!-- 全局控制胶囊 (设置 + 窗口按钮) -->
+        <ControlCapsule />
+      </div>
+    </header>
 
     <!-- macOS 专用红绿灯支持层 -->
     <TrafficLights v-if="isMac" />
@@ -114,6 +140,44 @@ button, a {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
 }
+
+/* ---- 全局复选框 (Switch) 样式微调，使其在未选中时清晰可见 ---- */
+input[type="checkbox"].switch {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--layer-3, rgba(255, 255, 255, 0.08));
+  border: 1.5px solid var(--border-strong, rgba(255, 255, 255, 0.2));
+  position: relative;
+  outline: none;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+input[type="checkbox"].switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+input[type="checkbox"].switch:checked {
+  background: var(--accent-blue-glow);
+  border-color: var(--accent-blue);
+}
+
+input[type="checkbox"].switch:checked::before {
+  left: 18px;
+  background: var(--accent-blue);
+  box-shadow: var(--shadow-glow-blue);
+}
 </style>
 
 <style scoped>
@@ -127,7 +191,64 @@ button, a {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  -webkit-app-region: drag;
+}
+
+.app-topbar {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--layer-1);
+  backdrop-filter: var(--blur-panel);
+  border-bottom: 1px solid var(--border-subtle);
+  z-index: 9999;
+  -webkit-app-region: drag; /* 解决问题1：拖拽生效 */
+}
+
+.app-topbar.is-mac {
+  padding-left: 115px; /* 避开 macOS 原生左侧红绿灯与设置齿轮 */
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  -webkit-app-region: no-drag;
+}
+
+.btn-back-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  font-size: 16px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.btn-back-nav:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  transform: scale(1.05);
+}
+
+.topbar-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  -webkit-app-region: no-drag;
 }
 
 .app-main {

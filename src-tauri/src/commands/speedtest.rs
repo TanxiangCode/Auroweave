@@ -31,9 +31,13 @@ pub async fn speedtest_run_latency(
 
 /// 单节点吞吐量测速
 #[tauri::command]
-pub async fn speedtest_run_single(node_tag: String) -> Result<ApiResponse<ThroughputResult>, AppError> {
+pub async fn speedtest_run_single(
+    app_handle: tauri::AppHandle,
+    node_tag: String,
+) -> Result<ApiResponse<ThroughputResult>, AppError> {
     info!("开始对节点 [{}] 运行单体吞吐量测速...", node_tag);
-    match run_single_throughput_test(&node_tag, 5).await {
+    let port = crate::speedtest::get_mixed_port(&app_handle);
+    match run_single_throughput_test(&node_tag, 5, port).await {
         Ok(res) => Ok(ApiResponse::ok(res)),
         Err(e) => Ok(ApiResponse::err(format!("单节点测速失败: {}", e), 500)),
     }

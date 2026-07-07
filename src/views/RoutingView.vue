@@ -5,8 +5,19 @@
  */
 import { ref } from "vue";
 import AppMatrixList from "@/components/routing/AppMatrixList.vue";
+import { useRouter } from "vue-router";
+import { useToast } from "@/composables/useToast";
 
 const activeTab = ref<"matrix" | "topology">("matrix");
+const router = useRouter();
+const toast = useToast();
+
+function handleTopologyClick() {
+  toast.info("拓扑画布尚未启用", "正在为您跳转到设置页，请开启「启用拓扑图功能」");
+  setTimeout(() => {
+    router.push({ path: "/settings", query: { panel: "advanced", highlight: "topology" } });
+  }, 1200);
+}
 </script>
 
 <template>
@@ -27,7 +38,8 @@ const activeTab = ref<"matrix" | "topology">("matrix");
         </button>
         <button
           class="tab-btn disabled"
-          title="拓扑图链路由模块 J 解锁"
+          title="点击前往设置开启拓扑图"
+          @click="handleTopologyClick"
         >
           🔒 拓扑画布 (Topology Canvas)
         </button>
@@ -42,7 +54,7 @@ const activeTab = ref<"matrix" | "topology">("matrix");
 
 <style scoped>
 .routing-view {
-  padding: 48px 24px 24px 24px;
+  padding: 24px;
   height: 100%;
   overflow-y: auto;
   display: flex;

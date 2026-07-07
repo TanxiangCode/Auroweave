@@ -1,5 +1,5 @@
 <template>
-  <div class="speed-chart-card">
+  <div class="speed-chart-card" :class="{ compact: compact }">
     <div class="chart-header">
       <div class="chart-title">
         <span class="pulse-dot"></span>
@@ -18,7 +18,7 @@
         </div>
       </div>
     </div>
-    <div class="canvas-wrapper" ref="wrapperRef">
+    <div class="canvas-wrapper" :style="{ height: compact ? '80px' : '140px' }" ref="wrapperRef">
       <canvas ref="canvasRef"></canvas>
     </div>
   </div>
@@ -28,11 +28,25 @@
 import { ref, onMounted, onUnmounted, watch } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 
+withDefaults(
+  defineProps<{
+    compact?: boolean;
+  }>(),
+  {
+    compact: false,
+  }
+);
+
 const connectionStore = useConnectionStore();
 const wrapperRef = ref<HTMLDivElement | null>(null);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 
 let animationFrameId: number | null = null;
+
+const getCssVar = (name: string, fallback: string) => {
+  if (typeof window === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+};
 
 const renderChart = () => {
   const canvas = canvasRef.value;
@@ -77,6 +91,11 @@ const renderChart = () => {
     ctx.stroke();
   }
 
+  const downloadColor = getCssVar("--accent-cyan-glow", "rgba(0, 242, 254, 0.8)");
+  const downloadFill = "rgba(0, 242, 254, 0.15)";
+  const uploadColor = getCssVar("--accent-purple", "#a855f7");
+  const uploadFill = "rgba(168, 85, 247, 0.12)";
+
   // 绘制下载曲线 (Cyan)
   drawCurve(
     ctx,
@@ -85,11 +104,11 @@ const renderChart = () => {
     width,
     height,
     stepX,
-    "#00f2fe",
-    "rgba(0, 242, 254, 0.15)"
+    downloadColor,
+    downloadFill
   );
 
-  // 绘制上传曲线 (Purple/Blue)
+  // 绘制上传曲线 (Purple)
   drawCurve(
     ctx,
     points.map((p) => p.upload),
@@ -97,8 +116,8 @@ const renderChart = () => {
     width,
     height,
     stepX,
-    "#7f00ff",
-    "rgba(127, 0, 255, 0.12)"
+    uploadColor,
+    uploadFill
   );
 };
 
@@ -164,14 +183,28 @@ onUnmounted(() => {
 
 <style scoped>
 .speed-chart-card {
-  background: var(--surface-card, rgba(255, 255, 255, 0.03));
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  background: var(--layer-1);
+  border: 1px solid var(--border-normal);
   border-radius: var(--radius-xl, 16px);
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  backdrop-filter: blur(12px);
+  backdrop-filter: var(--blur-panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.speed-chart-card.compact {
+  background: transparent;
+  border: none;
+  padding: 0;
+  backdrop-filter: none;
+  box-shadow: none;
+  gap: 6px;
+}
+
+.speed-chart-card.compact .chart-title {
+  display: none;
 }
 
 .chart-header {
@@ -184,17 +217,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
 }
 
 .pulse-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #00f2fe;
-  box-shadow: 0 0 10px #00f2fe;
+  background: var(--accent-cyan);
+  box-shadow: var(--shadow-glow-cyan);
   animation: pulse 2s infinite;
 }
 
@@ -213,29 +246,28 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .indicator.download .arrow,
 .indicator.download .val {
-  color: #00f2fe;
-  font-weight: 600;
+  color: var(--accent-cyan);
+  font-weight: var(--weight-bold);
 }
 
 .indicator.upload .arrow,
 .indicator.upload .val {
-  color: #a855f7;
-  font-weight: 600;
+  color: var(--accent-purple, #a855f7);
+  font-weight: var(--weight-bold);
 }
 
 .indicator .label {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
 }
 
 .canvas-wrapper {
   width: 100%;
-  height: 140px;
   position: relative;
 }
 

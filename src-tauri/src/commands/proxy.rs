@@ -105,7 +105,17 @@ pub async fn proxy_select_node(group_tag: String, node_tag: String) -> ApiRespon
 /// 获取当前代理模式
 #[tauri::command]
 pub async fn proxy_get_mode() -> ApiResponse<String> {
-    ApiResponse::ok("rule".to_string())
+    let client = ClashApiClient::default();
+    match client.get_configs().await {
+        Ok(configs) => {
+            let mode = configs.get("mode")
+                .and_then(|m| m.as_str())
+                .unwrap_or("rule")
+                .to_string();
+            ApiResponse::ok(mode)
+        }
+        Err(e) => ApiResponse::err(e, 500),
+    }
 }
 
 /// 切换代理模式
@@ -118,5 +128,10 @@ pub async fn proxy_set_mode(mode: String) -> ApiResponse<()> {
         );
     }
     tracing::info!("切换代理模式: {}", mode);
-    ApiResponse::ok(())
+    let client = ClashApiClient::default();
+    let body = serde_json::json!({ "mode": mode });
+    match client.patch_configs(body).await {
+        Ok(_) => ApiResponse::ok(()),
+        Err(e) => ApiResponse::err(e, 500),
+    }
 }

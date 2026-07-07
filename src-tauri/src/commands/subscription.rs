@@ -65,7 +65,8 @@ pub async fn subscription_import(
     let node_count = outbounds.len() as u32;
 
     // 3. 生成 config.json
-    let config_builder = ConfigBuilder::new(outbounds);
+    let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(&app_handle);
+    let config_builder = ConfigBuilder::new(outbounds).with_ports(mixed_port, clash_api_port);
     let config_json = match config_builder.build() {
         Ok(cfg) => cfg,
         Err(e) => return Ok(ApiResponse::err(e, 500)),

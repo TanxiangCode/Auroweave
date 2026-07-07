@@ -4,7 +4,7 @@
  * 作者: TanXiang
  */
 import { ref, onMounted } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 import GeneralPanel from "./panels/GeneralPanel.vue";
 import SubscriptionPanel from "./panels/SubscriptionPanel.vue";
 import RouteModePanel from "./panels/RouteModePanel.vue";
@@ -16,7 +16,6 @@ import PrivacyPanel from "./panels/PrivacyPanel.vue";
 import AdvancedPanel from "./panels/AdvancedPanel.vue";
 
 const route = useRoute();
-const router = useRouter();
 
 type PanelKey =
   | "general"
@@ -61,9 +60,6 @@ onMounted(() => {
   <div class="settings-view">
     <!-- 侧边栏导航 -->
     <aside class="settings-sidebar glass-effect">
-      <div class="sidebar-header">
-        <button class="btn-back" @click="router.push('/')">🔙 返回主舱</button>
-      </div>
       <nav class="nav-list">
         <button
           v-for="item in navItems"
@@ -101,7 +97,7 @@ onMounted(() => {
   display: flex;
   height: 100%;
   gap: 16px;
-  padding: 48px 20px 20px 20px;
+  padding: 20px;
   overflow: hidden;
 }
 
@@ -114,28 +110,6 @@ onMounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 16px;
-}
-
-.sidebar-header {
-  margin-bottom: 6px;
-}
-
-.btn-back {
-  width: 100%;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-back:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: #00f2fe;
 }
 
 .nav-list {

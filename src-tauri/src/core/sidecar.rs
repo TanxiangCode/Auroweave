@@ -59,8 +59,12 @@ impl SidecarManager {
     }
 
     pub async fn stop(&self) -> Result<(), AppError> {
-        let mut proc = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
-        if let Some(mut child) = proc.take() {
+        let child = {
+            let mut proc = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
+            proc.take()
+        };
+
+        if let Some(mut child) = child {
             if let Err(e) = child.kill().await {
                 warn!("停止 sing-box 进程时出现警告: {}", e);
             }

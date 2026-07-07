@@ -7,8 +7,10 @@ import { ref, computed } from "vue";
 import type { ProxyGroup, ProxyNode } from "@/types";
 import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode } from "@/api/ipc/proxy";
 import { RECENT_GROUPS_MAX } from "@/constants";
+import { useToast } from "@/composables/useToast";
 
 export const useProxyStore = defineStore("proxy", () => {
+  const toast = useToast();
   // ---- 状态 ----
   const groups = ref<ProxyGroup[]>([]);
   /** 各分组的节点缓存 key=groupTag */
@@ -74,6 +76,8 @@ export const useProxyStore = defineStore("proxy", () => {
     const res = await setProxyMode(mode);
     if (res.success) {
       proxyMode.value = mode;
+    } else {
+      toast.error("切换代理模式失败", "请确认 Sing-box 核心是否在正常运行。");
     }
     return res;
   }
