@@ -61,18 +61,90 @@ fn get_settings_path(app_handle: &tauri::AppHandle) -> PathBuf {
     config_dir.join("settings.json")
 }
 
-/// 获取所有设置
-#[tauri::command]
-pub async fn settings_get_all(app_handle: tauri::AppHandle) -> ApiResponse<AppSettings> {
-    let path = get_settings_path(&app_handle);
+/// 内部加载设置函数 (供各 Rust 模块使用)
+pub fn settings_get_internal(app_handle: &tauri::AppHandle) -> AppSettings {
+    let path = get_settings_path(app_handle);
     if path.exists() {
         if let Ok(content) = fs::read_to_string(path) {
             if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
-                return ApiResponse::ok(settings);
+                return settings;
             }
         }
     }
-    ApiResponse::ok(AppSettings::default())
+    AppSettings::default()
+}
+
+/// 核心重构函数：将 AppSettings 中的全部可配置项（端口、TUN、路由等）统一同步到 config.json
+pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(), crate::error::AppError> {
+    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
+    let config_path = config_dir.join("config.json");
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let settings = settings_get_internal(app_handle);
+
+    // 读取当前 config.json
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| crate::error::AppError::Io(format!("读取 config.json 失败: {}", e)))?;
+    let mut config_val: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| crate::error::AppError::Config(format!("解析 config.json 失败: {}", e)))?;
+
+    let mut modified = false;
+
+    // 1. 同步 Inbounds (包括端口 mixed_port 与开关 tun_enabled)
+    if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|i| i.as_array_mut()) {
+        inbounds.clear();
+        // 混合代理入口
+        inbounds.push(serde_json::json!({
+            "type": "mixed",
+            "tag": "mixed-in",
+            "listen": "127.0.0.1",
+            "listen_port": settings.mixed_port
+        }));
+        
+        // TUN 模式入口 (如果启用)
+        if settings.tun_enabled {
+            inbounds.push(serde_json::json!({
+                "type": "tun",
+                "tag": "tun-in",
+                "interface_name": "singbox-tun",
+                "inet4_address": "172.19.0.1/30",
+                "auto_route": true,
+                "strict_route": true,
+                "stack": "system"
+            }));
+        }
+        modified = true;
+    }
+
+    // 2. 同步 ClashAPI 端口
+    if let Some(experimental) = config_val.get_mut("experimental").and_then(|e| e.as_object_mut()) {
+        if let Some(clash_api) = experimental.get_mut("clash_api").and_then(|c| c.as_object_mut()) {
+            clash_api.insert(
+                "external_controller".to_string(),
+                serde_json::json!(format!("127.0.0.1:{}", settings.clash_api_port))
+            );
+            modified = true;
+        }
+    }
+
+    // 3. 未来可扩展：如同步自定义 DNS、分流策略、日志级别等其他设置项
+
+    if modified {
+        let new_content = serde_json::to_string_pretty(&config_val)
+            .map_err(|e| crate::error::AppError::Config(format!("序列化 config.json 失败: {}", e)))?;
+        fs::write(&config_path, new_content)
+            .map_err(|e| crate::error::AppError::Io(format!("写入 config.json 失败: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// 获取所有设置
+#[tauri::command]
+pub async fn settings_get_all(app_handle: tauri::AppHandle) -> ApiResponse<AppSettings> {
+    ApiResponse::ok(settings_get_internal(&app_handle))
 }
 
 /// 保存设置
@@ -109,41 +181,13 @@ pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Valu
         }
     }
 
-    // 更新 config.json 中的 listen_port 和 external_controller
-    let mixed_port = current.get("mixed_port").and_then(|p| p.as_u64()).unwrap_or(7890) as u16;
-    let clash_api_port = current.get("clash_api_port").and_then(|p| p.as_u64()).unwrap_or(9090) as u16;
+    // 调用统一的 rebuild 函数更新 config.json
+    let _ = rebuild_config_from_settings(&app_handle);
 
+    // 重新拉起 sidecar 生效新设置
     let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
     let config_path = config_dir.join("config.json");
     if config_path.exists() {
-        if let Ok(content) = fs::read_to_string(&config_path) {
-            if let Ok(mut config_val) = serde_json::from_str::<serde_json::Value>(&content) {
-                // 1. 更新 mixed_port
-                if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|i| i.as_array_mut()) {
-                    for inbound in inbounds {
-                        if inbound.get("type").and_then(|t| t.as_str()) == Some("mixed") {
-                            inbound["listen_port"] = serde_json::json!(mixed_port);
-                        }
-                    }
-                }
-                // 2. 更新 clash_api_port
-                if let Some(experimental) = config_val.get_mut("experimental").and_then(|e| e.as_object_mut()) {
-                    if let Some(clash_api) = experimental.get_mut("clash_api").and_then(|c| c.as_object_mut()) {
-                        clash_api.insert(
-                            "external_controller".to_string(),
-                            serde_json::json!(format!("127.0.0.1:{}", clash_api_port))
-                        );
-                    }
-                }
-                
-                // 写回
-                if let Ok(new_content) = serde_json::to_string_pretty(&config_val) {
-                    let _ = fs::write(&config_path, new_content);
-                }
-            }
-        }
-
-        // 异步重新拉起 sidecar 核心以让新端口生效
         let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
         let config_path_str = config_path.to_string_lossy().to_string();
         tauri::async_runtime::spawn(async move {

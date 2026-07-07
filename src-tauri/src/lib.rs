@@ -69,38 +69,8 @@ pub fn run() {
             let config_path = config_dir.join("config.json");
 
             if config_path.exists() {
-                // 在启动前，读取 settings.json 最新端口并同步更新 config.json
-                let (mixed_port, clash_api_port) = speedtest::get_configured_ports(app.handle());
-                if let Ok(content) = std::fs::read_to_string(&config_path) {
-                    if let Ok(mut config_val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        let mut modified = false;
-                        // 1. 更新 mixed_port
-                        if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|i| i.as_array_mut()) {
-                            for inbound in inbounds {
-                                if inbound.get("type").and_then(|t| t.as_str()) == Some("mixed") {
-                                    inbound["listen_port"] = serde_json::json!(mixed_port);
-                                    modified = true;
-                                }
-                            }
-                        }
-                        // 2. 更新 clash_api_port
-                        if let Some(experimental) = config_val.get_mut("experimental").and_then(|e| e.as_object_mut()) {
-                            if let Some(clash_api) = experimental.get_mut("clash_api").and_then(|c| c.as_object_mut()) {
-                                clash_api.insert(
-                                    "external_controller".to_string(),
-                                    serde_json::json!(format!("127.0.0.1:{}", clash_api_port))
-                                );
-                                modified = true;
-                            }
-                        }
-                        
-                        if modified {
-                            if let Ok(new_content) = serde_json::to_string_pretty(&config_val) {
-                                let _ = std::fs::write(&config_path, new_content);
-                            }
-                        }
-                    }
-                }
+                // 在启动前，将最新的设置配置项同步到 config.json 中
+                let _ = commands::settings::rebuild_config_from_settings(app.handle());
 
                 let sm = sidecar_manager.clone();
                 let path_str = config_path.to_string_lossy().to_string();
