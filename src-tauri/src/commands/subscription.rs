@@ -64,17 +64,21 @@ pub async fn subscription_import(
 
     let node_count = outbounds.len() as u32;
 
+    // 确定系统配置目录
+    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
+    let _ = fs::create_dir_all(&config_dir);
+    let log_path_str = config_dir.join("box.log").to_string_lossy().to_string();
+
     // 3. 生成 config.json
     let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(&app_handle);
-    let config_builder = ConfigBuilder::new(outbounds).with_ports(mixed_port, clash_api_port);
+    let config_builder = ConfigBuilder::new(outbounds)
+        .with_ports(mixed_port, clash_api_port)
+        .with_log_path(log_path_str);
     let config_json = match config_builder.build() {
         Ok(cfg) => cfg,
         Err(e) => return Ok(ApiResponse::err(e, 500)),
     };
 
-    // 确定系统配置目录
-    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
-    let _ = fs::create_dir_all(&config_dir);
     let config_path = config_dir.join("config.json");
     let config_path_str = config_path.to_string_lossy().to_string();
     let backup_path = config_dir.join("config.backup.json");
@@ -92,7 +96,9 @@ pub async fn subscription_import(
 
     // 4. 拉起/热重载 sing-box 进程 (失败自动安全回滚)
     let clash_client = ClashApiClient::default();
-    if let Err(_) = clash_client.reload_config(&config_path_str).await {
+    let reload_success = clash_client.reload_config(&config_path_str).await.is_ok();
+    
+    if !reload_success {
         info!("ClashAPI 未响应，尝试拉起 sing-box 子进程...");
         if let Err(e) = sidecar_manager.start(&config_path_str).await {
             info!("新配置拉起 sing-box 失败 ({})，尝试自动回滚备份...", e);
@@ -104,6 +110,14 @@ pub async fn subscription_import(
         }
     } else {
         info!("sing-box 已成功热重载配置");
+    }
+
+    // 5. 根据当前的 proxy_mode 同步系统代理状态
+    let settings = crate::commands::settings::settings_get_internal(&app_handle);
+    if settings.proxy_mode != "direct" {
+        let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+    } else {
+        let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
     }
 
     let sub = Subscription {

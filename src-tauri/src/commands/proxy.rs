@@ -3,6 +3,7 @@
 use crate::core::clash_api::ClashApiClient;
 use crate::error::{ApiResponse, AppError};
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProxyGroup {
@@ -120,7 +121,7 @@ pub async fn proxy_get_mode() -> ApiResponse<String> {
 
 /// 切换代理模式
 #[tauri::command]
-pub async fn proxy_set_mode(mode: String) -> ApiResponse<()> {
+pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiResponse<()> {
     if !["global", "rule", "direct"].contains(&mode.as_str()) {
         return ApiResponse::err(
             AppError::Validation(format!("无效的代理模式: {}", mode)),
@@ -128,10 +129,27 @@ pub async fn proxy_set_mode(mode: String) -> ApiResponse<()> {
         );
     }
     tracing::info!("切换代理模式: {}", mode);
+
+    let mut settings = crate::commands::settings::settings_get_internal(&app_handle);
+    settings.proxy_mode = mode.clone();
+    
+    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
+    let settings_path = config_dir.join("settings.json");
+    if let Ok(content) = serde_json::to_string_pretty(&settings) {
+        let _ = std::fs::write(&settings_path, content);
+    }
+
     let client = ClashApiClient::default();
     let body = serde_json::json!({ "mode": mode });
     match client.patch_configs(body).await {
-        Ok(_) => ApiResponse::ok(()),
+        Ok(_) => {
+            if mode == "direct" {
+                let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+            } else {
+                let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+            }
+            ApiResponse::ok(())
+        }
         Err(e) => ApiResponse::err(e, 500),
     }
 }

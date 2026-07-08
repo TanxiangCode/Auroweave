@@ -14,6 +14,7 @@ pub struct ConfigBuilder {
     outbounds: Vec<ParsedOutbound>,
     mixed_port: u16,
     clash_api_port: u16,
+    log_path: Option<String>,
 }
 
 impl ConfigBuilder {
@@ -22,6 +23,7 @@ impl ConfigBuilder {
             outbounds,
             mixed_port: 7890,
             clash_api_port: 9090,
+            log_path: None,
         }
     }
 
@@ -32,6 +34,11 @@ impl ConfigBuilder {
         if clash_api_port > 0 {
             self.clash_api_port = clash_api_port;
         }
+        self
+    }
+
+    pub fn with_log_path(mut self, log_path: String) -> Self {
+        self.log_path = Some(log_path);
         self
     }
 
@@ -97,28 +104,50 @@ impl ConfigBuilder {
         // 5. 节点具体出站
         final_outbounds.extend(raw_outbounds);
 
+        let mut server_domains = Vec::new();
+        for out in &self.outbounds {
+            if let Some(server) = out.raw_json.get("server").and_then(|s| s.as_str()) {
+                if server.parse::<std::net::IpAddr>().is_err() && !server.is_empty() {
+                    server_domains.push(server.to_string());
+                }
+            }
+        }
+        server_domains.sort();
+        server_domains.dedup();
+
+        let dns_rules = if server_domains.is_empty() {
+            json!([])
+        } else {
+            json!([
+                {
+                    "domain": server_domains,
+                    "server": "local"
+                }
+            ])
+        };
+
+        let log_output = self.log_path.clone().unwrap_or_else(|| "box.log".to_string());
         let config = json!({
             "log": {
                 "level": "info",
-                "output": "box.log",
+                "output": log_output,
                 "timestamp": true
             },
             "dns": {
                 "servers": [
-                    {
+                      {
+                        "detour": "proxy",
+                        "server": "8.8.8.8",
                         "tag": "remote",
-                        "type": "https",
-                        "server": "1.1.1.1",
-                        "path": "/dns-query",
-                        "detour": "proxy"
-                    },
-                    {
+                        "type": "udp"
+                      },
+                      {
+                        "server": "223.5.5.5",
                         "tag": "local",
-                        "type": "udp",
-                        "server": "223.5.5.5"
-                    }
+                        "type": "udp"
+                      }
                 ],
-                "rules": [],
+                "rules": dns_rules,
                 "final": "remote"
             },
             "inbounds": [

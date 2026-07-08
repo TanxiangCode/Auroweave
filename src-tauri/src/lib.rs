@@ -74,9 +74,17 @@ pub fn run() {
 
                 let sm = sidecar_manager.clone();
                 let path_str = config_path.to_string_lossy().to_string();
+                let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) = sm.start(&path_str).await {
                         tracing::warn!("启动 sing-box 失败: {}", e);
+                    } else {
+                        let settings = crate::commands::settings::settings_get_internal(&app_handle);
+                        if settings.proxy_mode != "direct" {
+                            let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                        } else {
+                            let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                        }
                     }
                 });
             } else {
@@ -85,6 +93,15 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Tauri 启动失败");
+        .build(tauri::generate_context!())
+        .expect("Tauri 构建失败")
+        .run(move |app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                let _ = system::sysproxy::set_system_proxy(false, 0);
+                let sidecar_manager = app_handle.state::<std::sync::Arc<SidecarManager>>().inner().clone();
+                tauri::async_runtime::block_on(async move {
+                    let _ = sidecar_manager.stop().await;
+                });
+            }
+        });
 }

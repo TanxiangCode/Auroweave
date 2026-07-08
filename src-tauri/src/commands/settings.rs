@@ -129,7 +129,12 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         }
     }
 
-    // 3. 未来可扩展：如同步自定义 DNS、分流策略、日志级别等其他设置项
+    // 3. 保证 log.output 也是正确的绝对路径
+    let log_path_str = config_dir.join("box.log").to_string_lossy().to_string();
+    if let Some(log) = config_val.get_mut("log").and_then(|l| l.as_object_mut()) {
+        log.insert("output".to_string(), serde_json::json!(log_path_str));
+        modified = true;
+    }
 
     if modified {
         let new_content = serde_json::to_string_pretty(&config_val)
@@ -190,10 +195,17 @@ pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Valu
     if config_path.exists() {
         let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
         let config_path_str = config_path.to_string_lossy().to_string();
+        let app_handle_clone = app_handle.clone();
         tauri::async_runtime::spawn(async move {
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
             let _ = sidecar_manager.stop().await;
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            let _ = sidecar_manager.start(&config_path_str).await;
+            if sidecar_manager.start(&config_path_str).await.is_ok() {
+                let settings = settings_get_internal(&app_handle_clone);
+                if settings.proxy_mode != "direct" {
+                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                }
+            }
         });
     }
 
@@ -219,6 +231,22 @@ pub async fn settings_inject_terminal_proxy(
 
 /// 导出诊断日志（返回日志文件路径）
 #[tauri::command]
-pub async fn settings_export_diagnostic_log() -> ApiResponse<String> {
-    ApiResponse::err("诊断日志导出成功", 200)
+pub async fn settings_export_diagnostic_log(app_handle: tauri::AppHandle) -> ApiResponse<String> {
+    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
+    let log_path = config_dir.join("box.log");
+    
+    if !log_path.exists() {
+        return ApiResponse::err("诊断日志不存在，请先运行核心服务", 404);
+    }
+    
+    match app_handle.path().desktop_dir() {
+        Ok(desktop) => {
+            let target_path = desktop.join("Auroweave_diagnostic_log.txt");
+            match fs::copy(&log_path, &target_path) {
+                Ok(_) => ApiResponse::ok(target_path.to_string_lossy().to_string()),
+                Err(e) => ApiResponse::err(format!("复制日志到桌面失败: {}", e), 500),
+            }
+        }
+        Err(e) => ApiResponse::err(format!("获取桌面路径失败: {}", e), 500),
+    }
 }

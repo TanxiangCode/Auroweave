@@ -6,7 +6,6 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import type { ProxyGroup, ProxyNode } from "@/types";
 import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode } from "@/api/ipc/proxy";
-import { RECENT_GROUPS_MAX } from "@/constants";
 import { useToast } from "@/composables/useToast";
 
 export const useProxyStore = defineStore("proxy", () => {
@@ -19,8 +18,26 @@ export const useProxyStore = defineStore("proxy", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  // 最近选择的分组列表，上限为 RECENT_GROUPS_MAX
-  const recentGroups = ref<string[]>([]);
+  // 从 localStorage 获取使用计数，格式为 Record<string, number>
+  const groupUsage = ref<Record<string, number>>(
+    JSON.parse(localStorage.getItem("auroweave_group_usage") || "{}")
+  );
+
+  // 常用分组列表通过计算属性得出：按使用次数从大到小排序，且只包含使用次数 > 1 的分组，限制长度为 4
+  const recentGroups = computed(() => {
+    return Object.entries(groupUsage.value)
+      .filter(([_, count]) => count > 1)
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag]) => tag)
+      .slice(0, 4);
+  });
+
+  // 增加使用次数的方法
+  function recordGroupUsage(groupTag: string) {
+    const current = groupUsage.value[groupTag] || 0;
+    groupUsage.value[groupTag] = current + 1;
+    localStorage.setItem("auroweave_group_usage", JSON.stringify(groupUsage.value));
+  }
 
   // ---- 计算属性 ----
   const activeGroup = computed(() =>
@@ -36,8 +53,9 @@ export const useProxyStore = defineStore("proxy", () => {
       groups.value = res.data;
       // 默认将初始活跃分组载入最近列表作为兜底展示
       const primary = res.data.find((g) => g.type === "selector");
-      if (primary && recentGroups.value.length === 0) {
-        recentGroups.value.push(primary.tag);
+      if (primary && Object.keys(groupUsage.value).length === 0) {
+        groupUsage.value[primary.tag] = 2; // 兜底：主策略组初始有 2 次，算作常用
+        localStorage.setItem("auroweave_group_usage", JSON.stringify(groupUsage.value));
       }
     } else {
       error.value = res.error ?? "获取分组失败";
@@ -55,19 +73,28 @@ export const useProxyStore = defineStore("proxy", () => {
   async function selectNode(groupTag: string, nodeTag: string) {
     const res = await selectGroupNode(groupTag, nodeTag);
     if (res.success) {
-      // 乐观更新本地状态
+      // 乐观更新 groups 中的 now 字段（左侧分组列表的"当前节点"文字）
       const group = groups.value.find((g) => g.tag === groupTag);
       if (group) group.now = nodeTag;
 
-      // 更新最近选择的分组列表并限制长度为 RECENT_GROUPS_MAX
-      const index = recentGroups.value.indexOf(groupTag);
-      if (index !== -1) {
-        recentGroups.value.splice(index, 1);
+      // 修复 Vue 3 Map 响应式缺陷：
+      // 直接修改 Map 内数组元素的属性不会被 Vue 追踪到，
+      // 必须用新数组替换，才能触发依赖此 Map 的组件重新渲染。
+      const nodes = nodeMap.value.get(groupTag);
+      if (nodes) {
+        const updated = nodes.map((n) => ({
+          ...n,
+          is_active: n.tag === nodeTag,
+        }));
+        nodeMap.value.set(groupTag, updated);
       }
-      recentGroups.value.unshift(groupTag);
-      if (recentGroups.value.length > RECENT_GROUPS_MAX) {
-        recentGroups.value = recentGroups.value.slice(0, RECENT_GROUPS_MAX);
-      }
+
+      // 记录使用频次
+      recordGroupUsage(groupTag);
+
+      // 异步从后端重新拉取节点，以同步真实的 is_active 状态
+      // （避免乐观更新与实际状态不一致的问题）
+      await fetchGroupNodes(groupTag);
     }
     return res;
   }
@@ -94,5 +121,6 @@ export const useProxyStore = defineStore("proxy", () => {
     fetchGroupNodes,
     selectNode,
     changeProxyMode,
+    recordGroupUsage,
   };
 });

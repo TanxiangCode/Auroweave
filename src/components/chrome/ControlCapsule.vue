@@ -26,11 +26,11 @@ const isMac = ref(false);
 onMounted(async () => {
   isMac.value = navigator.userAgent.toLowerCase().includes("mac");
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    const appWindow = getCurrentWindow();
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const appWindow = getCurrentWebviewWindow();
     isMaximized.value = await appWindow.isMaximized();
 
-    appWindow.onResized(async () => {
+    await appWindow.onResized(async () => {
       isMaximized.value = await appWindow.isMaximized();
     });
   } catch {
@@ -40,8 +40,9 @@ onMounted(async () => {
 
 async function handleResetSize() {
   try {
-    const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
-    const appWindow = getCurrentWindow();
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const { LogicalSize } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWebviewWindow();
     await appWindow.setSize(new LogicalSize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT));
     await appWindow.center();
   } catch {
@@ -51,8 +52,8 @@ async function handleResetSize() {
 
 async function handleMinimize() {
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().minimize();
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    await getCurrentWebviewWindow().minimize();
   } catch {
     console.log("Minimize window (mock)");
   }
@@ -60,8 +61,8 @@ async function handleMinimize() {
 
 async function handleToggleMaximize() {
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    const appWindow = getCurrentWindow();
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const appWindow = getCurrentWebviewWindow();
     await appWindow.toggleMaximize();
     isMaximized.value = await appWindow.isMaximized();
   } catch {
@@ -71,8 +72,8 @@ async function handleToggleMaximize() {
 
 async function handleClose() {
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().close();
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    await getCurrentWebviewWindow().close();
   } catch {
     console.log("Close window (mock)");
   }
@@ -143,6 +144,9 @@ function handleSettingsClick() {
   border-radius: var(--radius-full);
   box-shadow: var(--shadow-sm);
   transition: all var(--duration-normal) var(--ease-out);
+  /* 无边框模式下：明确声明整个胶囊及其子元素不参与拖拽 */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .control-capsule:hover {
@@ -175,6 +179,9 @@ function handleSettingsClick() {
   font-size: 13px;
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
+  /* 强制覆盖：确保每个按钮都不被拖拽区域拦截 */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .capsule-btn:hover {

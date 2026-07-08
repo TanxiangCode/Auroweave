@@ -28,6 +28,8 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
   // 正在独立测速的节点 Tag
   const testingNodes = ref<Set<string>>(new Set());
+  // 正在独立测试延迟的节点 Tag
+  const testingLatencyNodes = ref<Set<string>>(new Set());
 
   // 批量测速状态
   const isBatchTesting = ref(false);
@@ -58,7 +60,14 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
   /** 单节点延迟测试 */
   async function testLatency(groupTag: string, nodeTags: string[]) {
+    nodeTags.forEach((tag) => testingLatencyNodes.value.add(tag));
+    testingLatencyNodes.value = new Set(testingLatencyNodes.value);
+
     const res = await runLatencyTest(groupTag, nodeTags);
+
+    nodeTags.forEach((tag) => testingLatencyNodes.value.delete(tag));
+    testingLatencyNodes.value = new Set(testingLatencyNodes.value);
+
     if (res.success && res.data) {
       latencyMap.value = { ...latencyMap.value, ...res.data };
     }
@@ -107,6 +116,7 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     latencyMap,
     throughputMap,
     testingNodes,
+    testingLatencyNodes,
     isBatchTesting,
     batchProgress,
     init,

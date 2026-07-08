@@ -42,12 +42,38 @@ impl SidecarManager {
         info!("找到 sing-box 执行文件: {:?}", binary_path);
         info!("启动 sing-box: {:?} run -c {}", binary_path, config_path);
 
-        let child = tokio::process::Command::new(&binary_path)
+        use std::process::Stdio;
+        let mut child = tokio::process::Command::new(&binary_path)
             .arg("run")
             .arg("-c")
             .arg(config_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| AppError::Sidecar(format!("拉起 sing-box 失败: {}", e)))?;
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        if let Some(stdout) = stdout {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut reader = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    info!("[sing-box] {}", line);
+                }
+            });
+        }
+
+        if let Some(stderr) = stderr {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    error!("[sing-box error] {}", line);
+                }
+            });
+        }
 
         let mut proc_guard = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
         *proc_guard = Some(child);

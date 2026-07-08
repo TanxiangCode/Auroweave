@@ -29,14 +29,18 @@
     <div class="node-right">
       <button
         class="action-btn btn-ping"
+        :class="{ testing: isLatencyTesting }"
+        :disabled="isLatencyTesting"
         title="测试延迟"
         @click.stop="$emit('test-latency', nodeTag)"
       >
-        <SvgIcon name="bolt" :size="12" />
+        <span v-if="isLatencyTesting" class="spinner">🌀</span>
+        <SvgIcon v-else name="bolt" :size="12" />
       </button>
       <button
         class="action-btn btn-speed"
         :class="{ testing: isTesting }"
+        :disabled="isTesting"
         title="吞吐量测速"
         @click.stop="$emit('test-speed', nodeTag)"
       >
@@ -98,6 +102,7 @@ function getLatencyColor(ms?: number): string {
 }
 
 const isTesting = computed(() => speedtestStore.testingNodes.has(props.nodeTag));
+const isLatencyTesting = computed(() => speedtestStore.testingLatencyNodes.has(props.nodeTag));
 const latencyColor = computed(() => getLatencyColor(props.latency));
 
 function formatSpeed(bps: number): string {
@@ -246,9 +251,19 @@ function formatSpeed(bps: number): string {
   color: var(--accent-orange);
 }
 
+.action-btn.btn-ping.testing {
+  color: var(--accent-orange);
+  border-color: var(--accent-orange-glow);
+}
+
 .action-btn.btn-speed.testing {
   color: var(--accent-cyan);
   border-color: var(--accent-cyan-glow);
+}
+
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .spinner {

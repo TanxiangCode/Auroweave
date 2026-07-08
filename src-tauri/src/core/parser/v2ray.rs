@@ -290,7 +290,10 @@ mod tests {
     #[test]
     fn test_parse_user_subscription() {
         let sample = "YW55dGxzOi8vYmQ5NDEwZmItZDgyOS00ODI3LWIzYWQtNzAwMzlmMjI4YjVmQHVzYS45OTY2NjkwLnh5ejo1MDAxLz90eXBlPXRjcCZpbnNlY3VyZT0xJmZwPWNocm9tZSZzbmk9aW9zYXBwcy5pdHVuZXMuYXBwbGUuY29tIyVFNSU4OSVBOSVFNCVCRCU5OSVFNiVCNSU4MSVFOSU4NyU4RiVFRiVCQyU5OTk5OTkyNzIuOTUlMjBHQg0KaHlzdGVyaWEyOi8vYmQ5NDEwZmItZDgyOS00ODI3LWIzYWQtNzAwMzlmMjI4YjVmQHVzYS45OTY2Njkw.eHl6OjEwMDAwLz9pbnNlY3VyZT0xJnNuaT1pb3NhcHBzLml0dW5lcy5hcHBsZS5jb20mb2Jmcz1zYWxhbWFuZGVyJm9iZnMtcGFzc3dvcmQ9WXpneU9Ua3dORGs0WlRVMk5UZGlOQSUzRCUzRCZtcG9ydD0xMDAwMC0xOTk5OSMlRjAlOUYlODclQkElRjAlOUYlODclQjglMjAlRTclQkUlOEUlRTUlOUIlQkQtJUU5JTk4JUJGJUU0VCVBQy0wMS0lRjAlOUYlOTMlQjY=";
-        let res = parse_v2ray_base64(sample);
-        assert!(res.is_ok());
+        let res = parse_v2ray_base64(sample).unwrap();
+        for out in &res {
+            println!("Parsed Tag: {}", out.tag);
+        }
+        assert!(!res.is_empty());
     }
 }

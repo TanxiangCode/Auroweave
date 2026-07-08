@@ -41,15 +41,8 @@ async function handleGroupSelect(groupTag: string) {
   selectedGroupTag.value = groupTag;
   await proxyStore.fetchGroupNodes(groupTag);
 
-  // 记录到最近列表
-  const index = proxyStore.recentGroups.indexOf(groupTag);
-  if (index !== -1) {
-    proxyStore.recentGroups.splice(index, 1);
-  }
-  proxyStore.recentGroups.unshift(groupTag);
-  if (proxyStore.recentGroups.length > 4) {
-    proxyStore.recentGroups = proxyStore.recentGroups.slice(0, 4);
-  }
+  // 记录使用计数
+  proxyStore.recordGroupUsage(groupTag);
 }
 
 async function handleNodeSelect(nodeTag: string) {
