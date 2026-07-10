@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(git add *)",
-      "Bash(rtk git *)"
+      "Bash(rtk git *)",
+      "Bash(rtk git commit -m 'feat\\(core\\): 系统代理全自动同步、DNS 按节点域名优化、侧车日志流式输出 *)",
+      "Bash(timeout 60 rtk cargo check)",
+      "Bash(timeout 30 rtk npm run tauri)",
+      "Bash(timeout 45 rtk npm run tauri)",
+      "Bash(timeout 20 cargo run)"
     ]
   }
 }

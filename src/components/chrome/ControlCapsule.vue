@@ -26,56 +26,56 @@ const isMac = ref(false);
 onMounted(async () => {
   isMac.value = navigator.userAgent.toLowerCase().includes("mac");
   try {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const appWindow = getCurrentWebviewWindow();
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
     isMaximized.value = await appWindow.isMaximized();
 
-    await appWindow.onResized(async () => {
+    appWindow.onResized(async () => {
       isMaximized.value = await appWindow.isMaximized();
     });
-  } catch {
-    // 浏览器预览模式兜底
+  } catch (e) {
+    console.log("Window control capsule: Tauri API not available, running in browser preview mode.", e);
   }
 });
 
 async function handleResetSize() {
   try {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const { LogicalSize } = await import("@tauri-apps/api/window");
-    const appWindow = getCurrentWebviewWindow();
+    const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
     await appWindow.setSize(new LogicalSize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT));
     await appWindow.center();
-  } catch {
-    console.log(`Reset size to: ${WINDOW_DEFAULT_WIDTH}x${WINDOW_DEFAULT_HEIGHT}`);
+  } catch (e) {
+    console.log(`Reset size to: ${WINDOW_DEFAULT_WIDTH}x${WINDOW_DEFAULT_HEIGHT}`, e);
   }
 }
 
 async function handleMinimize() {
   try {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    await getCurrentWebviewWindow().minimize();
-  } catch {
-    console.log("Minimize window (mock)");
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().minimize();
+  } catch (e) {
+    console.log("Minimize window (mock)", e);
   }
 }
 
 async function handleToggleMaximize() {
   try {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const appWindow = getCurrentWebviewWindow();
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
     await appWindow.toggleMaximize();
     isMaximized.value = await appWindow.isMaximized();
-  } catch {
+  } catch (e) {
     isMaximized.value = !isMaximized.value;
+    console.log("Toggle maximize window (mock)", e);
   }
 }
 
 async function handleClose() {
   try {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    await getCurrentWebviewWindow().close();
-  } catch {
-    console.log("Close window (mock)");
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().close();
+  } catch (e) {
+    console.log("Close window (mock)", e);
   }
 }
 

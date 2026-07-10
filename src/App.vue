@@ -35,9 +35,8 @@ onMounted(async () => {
   await settingsStore.fetchSettings();
 
   try {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const { LogicalSize } = await import("@tauri-apps/api/window");
-    const appWindow = getCurrentWebviewWindow();
+    const { getCurrentWindow, LogicalSize } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
     await appWindow.setMinSize(new LogicalSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT));
   } catch {
     // 浏览器预览模式跳过
