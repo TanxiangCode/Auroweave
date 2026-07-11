@@ -82,10 +82,10 @@ export const ENERGY_MAX_SPEED_BPS = 100 * 1024 * 1024;
 // 窗口
 // ============================================================
 
-export const WINDOW_DEFAULT_WIDTH = 960;
-export const WINDOW_DEFAULT_HEIGHT = 640;
-export const WINDOW_MIN_WIDTH = 960;
-export const WINDOW_MIN_HEIGHT = 600;
+export const WINDOW_DEFAULT_WIDTH = 1020;
+export const WINDOW_DEFAULT_HEIGHT = 680;
+export const WINDOW_MIN_WIDTH = 1020;
+export const WINDOW_MIN_HEIGHT = 640;
 
 // ============================================================
 // UI 交互

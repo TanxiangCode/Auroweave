@@ -19,8 +19,9 @@ export async function runLatencyTest(
   groupTag: string,
   nodeTags: string[]
 ): Promise<ApiResponse<Record<string, number>>> {
-  // 延迟测速使用 5,000ms 的专用超时控制
-  return await invokeWithTimeout("speedtest_run_latency", { groupTag, nodeTags }, LATENCY_TEST_TIMEOUT_MS);
+  // 根据受测节点规模自适应调宽超时时长，防止大批量并发测速时触发前端 invoke 超时报错
+  const timeoutMs = Math.max(LATENCY_TEST_TIMEOUT_MS, nodeTags.length * 200 + 5000);
+  return await invokeWithTimeout("speedtest_run_latency", { groupTag, nodeTags }, timeoutMs);
 }
 
 /** 针对单个节点触发吞吐量测速 */

@@ -23,9 +23,9 @@ export const useConnectionStore = defineStore("connection", () => {
   const smoothDownloadSpeed = ref(0);
   const smoothUploadSpeed = ref(0);
 
-  /** 累计流量 (Bytes) */
-  const totalDownload = ref(0);
-  const totalUpload = ref(0);
+  /** 累计流量 (Bytes) — 支持 localStorage 固化存盘 */
+  const totalDownload = ref(Number(localStorage.getItem("auroweave_total_download") || "0"));
+  const totalUpload = ref(Number(localStorage.getItem("auroweave_total_upload") || "0"));
 
   /** 当前活动连接数量 */
   const activeConnectionCount = ref(0);
@@ -67,9 +67,11 @@ export const useConnectionStore = defineStore("connection", () => {
     rawDownloadSpeed.value = snapshot.download_speed;
     rawUploadSpeed.value = snapshot.upload_speed;
 
-    // 累计数据累加
+    // 累计数据累加并同步写入 localStorage
     totalDownload.value += snapshot.download_speed;
     totalUpload.value += snapshot.upload_speed;
+    localStorage.setItem("auroweave_total_download", totalDownload.value.toString());
+    localStorage.setItem("auroweave_total_upload", totalUpload.value.toString());
 
     // EMA 平滑算法 (α=0.15)
     smoothDownloadSpeed.value =

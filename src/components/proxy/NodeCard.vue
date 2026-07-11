@@ -17,7 +17,7 @@
     <div class="node-middle">
       <span class="latency-indicator" :style="{ color: latencyColor }">
         <span class="status-dot" :style="{ backgroundColor: latencyColor }"></span>
-        {{ latency ? `${latency} ms` : '未测试' }}
+        {{ latency === -1 ? '超时' : (latency ? `${latency} ms` : '未测试') }}
       </span>
       <span v-if="speedBps !== undefined && speedBps > 0" class="speed-val">
         <SvgIcon name="wifi" :size="10" style="margin-right: 2px;" />
@@ -111,6 +111,7 @@ function getProtocolBadge(type: string): string {
 }
 
 function getLatencyColor(ms?: number): string {
+  if (ms === -1) return "var(--accent-red)"; // 超时状态变红
   if (!ms || ms <= 0) return "var(--text-tertiary)";
   if (ms < 100) return "var(--accent-green)";
   if (ms < 300) return "var(--accent-orange)";

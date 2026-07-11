@@ -65,10 +65,30 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
     try {
       const res = await runLatencyTest(groupTag, nodeTags);
+      const newResults = { ...latencyMap.value };
+
+      // 默认将本批次测速节点都标记为 -1 (超时失败)
+      nodeTags.forEach((tag) => {
+        newResults[tag] = -1;
+      });
+
       if (res.success && res.data) {
-        latencyMap.value = { ...latencyMap.value, ...res.data };
+        // 后端返回的有延迟的节点，用真实数据覆盖之
+        Object.entries(res.data).forEach(([tag, delay]) => {
+          newResults[tag] = delay as number;
+        });
       }
+      
+      latencyMap.value = newResults;
       return res;
+    } catch (e) {
+      // 捕获异常：将本批次测速节点强制设为 -1
+      const newResults = { ...latencyMap.value };
+      nodeTags.forEach((tag) => {
+        newResults[tag] = -1;
+      });
+      latencyMap.value = newResults;
+      throw e;
     } finally {
       nodeTags.forEach((tag) => testingLatencyNodes.value.delete(tag));
       testingLatencyNodes.value = new Set(testingLatencyNodes.value);
