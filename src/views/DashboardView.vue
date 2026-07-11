@@ -8,24 +8,14 @@ import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useFluidWave } from "@/composables/useFluidWave";
 import { storeToRefs } from "pinia";
-import { useRouter } from "vue-router";
 import SpeedChart from "@/components/charts/SpeedChart.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
 
-import { DASHBOARD_CARD_COUNT } from "@/constants";
-
-const router = useRouter();
 const connectionStore = useConnectionStore();
 const proxyStore = useProxyStore();
 
 const { smoothDownloadSpeed, activeConnectionCount, totalDownload, totalUpload } = storeToRefs(connectionStore);
 const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
-
-const cards = [
-  { id: "proxies", icon: "proxies", label: "代理节点", desc: "节点大厅与切换", route: "/proxies" },
-  { id: "routing", icon: "routing", label: "分流配置", desc: "应用级规则与矩阵", route: "/routing" },
-  { id: "audit",   icon: "audit", label: "安全审计", desc: "实时抓包与 DNS 状态", route: "/audit" },
-].slice(0, DASHBOARD_CARD_COUNT);
 
 function toggleProxy() {
   const targetMode = proxyStore.proxyMode === "direct" ? "rule" : "direct";
@@ -121,18 +111,6 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 极客精致快捷胶囊入口 -->
-    <div class="quick-links">
-      <button
-        v-for="card in cards"
-        :key="card.id"
-        class="quick-link-btn"
-        @click="router.push(card.route)"
-      >
-        <SvgIcon :name="card.icon" :size="16" class="link-icon" />
-        <span class="link-label">{{ card.label }}</span>
-      </button>
-    </div>
   </div>
 </template>
 
@@ -381,48 +359,5 @@ onMounted(() => {
   width: 100%;
 }
 
-/* ---- 极客快捷入口胶囊化 ---- */
-.quick-links {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  margin-top: 12px;
-}
 
-.quick-link-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
-  background: var(--layer-1);
-  backdrop-filter: var(--blur-panel);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-full);
-  color: var(--text-primary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  cursor: pointer;
-  transition: all var(--duration-normal) var(--ease-out);
-}
-
-.quick-link-btn:hover {
-  background: var(--layer-2);
-  border-color: var(--accent-blue);
-  box-shadow: var(--shadow-glow-blue);
-  transform: translateY(-1px);
-}
-
-.link-icon {
-  color: var(--text-secondary);
-  transition: color var(--duration-fast);
-}
-
-.quick-link-btn:hover .link-icon {
-  color: var(--accent-blue);
-}
-
-.link-label {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-}
 </style>

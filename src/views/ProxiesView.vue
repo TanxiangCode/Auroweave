@@ -219,7 +219,7 @@ async function confirmBatchSpeedTest() {
               <SvgIcon name="bolt" :size="12" style="margin-right: 4px;" />
               测延迟
             </button>
-            <button class="btn-action primary" @click="showConfirmModal = true">
+            <button class="btn-action" @click="showConfirmModal = true">
               <SvgIcon name="wifi" :size="12" style="margin-right: 4px;" />
               批量测速
             </button>

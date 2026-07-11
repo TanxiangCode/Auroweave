@@ -94,6 +94,51 @@ function handleSettingsClick() {
     title="双击控制胶囊：重置窗口为 960x640 黄金尺寸并居中"
     @dblclick="handleResetSize"
   >
+    <!-- 核心导航按钮群 -->
+    <div class="nav-buttons">
+      <!-- 首页 -->
+      <button
+        class="capsule-btn nav-btn"
+        :class="{ active: route.path === '/' || route.path === '/dashboard' }"
+        title="首页"
+        @click="router.push('/')"
+      >
+        <SvgIcon name="home" :size="13" />
+      </button>
+      
+      <!-- 代理大厅 -->
+      <button
+        class="capsule-btn nav-btn"
+        :class="{ active: route.path === '/proxies' }"
+        title="代理大厅"
+        @click="router.push('/proxies')"
+      >
+        <SvgIcon name="proxies" :size="13" />
+      </button>
+      
+      <!-- 分流规则 -->
+      <button
+        class="capsule-btn nav-btn"
+        :class="{ active: route.path === '/routing' }"
+        title="分流规则"
+        @click="router.push('/routing')"
+      >
+        <SvgIcon name="routing" :size="13" />
+      </button>
+      
+      <!-- 安全审计 -->
+      <button
+        class="capsule-btn nav-btn"
+        :class="{ active: route.path === '/audit' }"
+        title="安全审计"
+        @click="router.push('/audit')"
+      >
+        <SvgIcon name="audit" :size="13" />
+      </button>
+    </div>
+    
+    <div class="capsule-divider" />
+
     <!-- 1. ⚙️ 设置按钮 (在设置页内高亮) -->
     <button
       class="capsule-btn settings-btn"
@@ -101,7 +146,7 @@ function handleSettingsClick() {
       title="设置"
       @click="handleSettingsClick"
     >
-      <SvgIcon name="settings" :size="14" />
+      <SvgIcon name="settings" :size="13" />
     </button>
 
     <!-- 2. 非 macOS 平台下的窗口控制按钮群 (设置与关闭分割间距遵循 SETTINGS_CLOSE_MIN_GAP_PX 防误触) -->
@@ -136,8 +181,8 @@ function handleSettingsClick() {
 .control-capsule {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  gap: 3px;
+  padding: 3px 6px;
   background: var(--layer-1);
   backdrop-filter: var(--blur-panel);
   border: 1px solid var(--border-normal);
@@ -153,11 +198,17 @@ function handleSettingsClick() {
   border-color: var(--border-accent);
 }
 
+.nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .capsule-divider {
   width: 1px;
-  height: 14px;
+  height: 12px;
   background: var(--border-subtle);
-  margin: 0 6px;
+  margin: 0 4px;
 }
 
 .window-controls {

@@ -63,15 +63,16 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     nodeTags.forEach((tag) => testingLatencyNodes.value.add(tag));
     testingLatencyNodes.value = new Set(testingLatencyNodes.value);
 
-    const res = await runLatencyTest(groupTag, nodeTags);
-
-    nodeTags.forEach((tag) => testingLatencyNodes.value.delete(tag));
-    testingLatencyNodes.value = new Set(testingLatencyNodes.value);
-
-    if (res.success && res.data) {
-      latencyMap.value = { ...latencyMap.value, ...res.data };
+    try {
+      const res = await runLatencyTest(groupTag, nodeTags);
+      if (res.success && res.data) {
+        latencyMap.value = { ...latencyMap.value, ...res.data };
+      }
+      return res;
+    } finally {
+      nodeTags.forEach((tag) => testingLatencyNodes.value.delete(tag));
+      testingLatencyNodes.value = new Set(testingLatencyNodes.value);
     }
-    return res;
   }
 
   /** 单节点吞吐量测试 */
@@ -79,18 +80,19 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     testingNodes.value.add(nodeTag);
     testingNodes.value = new Set(testingNodes.value); // 触发 Vue Set 响应式更新
     
-    const res = await runSingleThroughputTest(nodeTag);
-    
-    testingNodes.value.delete(nodeTag);
-    testingNodes.value = new Set(testingNodes.value); // 触发 Vue Set 响应式更新
-    
-    if (res.success && res.data) {
-      throughputMap.value = {
-        ...throughputMap.value,
-        [nodeTag]: res.data,
-      };
+    try {
+      const res = await runSingleThroughputTest(nodeTag);
+      if (res.success && res.data) {
+        throughputMap.value = {
+          ...throughputMap.value,
+          [nodeTag]: res.data,
+        };
+      }
+      return res;
+    } finally {
+      testingNodes.value.delete(nodeTag);
+      testingNodes.value = new Set(testingNodes.value); // 触发 Vue Set 响应式更新
     }
-    return res;
   }
 
   /** 开始批量吞吐量测速 */

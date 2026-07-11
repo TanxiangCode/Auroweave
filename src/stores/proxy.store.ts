@@ -74,7 +74,8 @@ export const useProxyStore = defineStore("proxy", () => {
         : path[0] === "auto"
         ? "自动选择"
         : path[0];
-      return `${groupLabel} (${currentTag})`;
+      const leafName = currentTag ? currentTag : "测速中...";
+      return `${groupLabel} (${leafName})`;
     }
 
     return currentTag;
