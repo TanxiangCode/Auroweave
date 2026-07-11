@@ -166,9 +166,13 @@ const drawCurve = (
   ctx.fill();
 };
 
-watch(() => connectionStore.speedHistory.length, () => {
-  renderChart();
-});
+watch(
+  () => connectionStore.speedHistory,
+  () => {
+    renderChart();
+  },
+  { deep: true }
+);
 
 onMounted(() => {
   renderChart();

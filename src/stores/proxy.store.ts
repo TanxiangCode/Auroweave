@@ -5,7 +5,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import type { ProxyGroup, ProxyNode } from "@/types";
-import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode } from "@/api/ipc/proxy";
+import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode, getProxyMode } from "@/api/ipc/proxy";
 import { useToast } from "@/composables/useToast";
 
 export const useProxyStore = defineStore("proxy", () => {
@@ -44,15 +44,74 @@ export const useProxyStore = defineStore("proxy", () => {
     groups.value.find((g) => g.type === "selector")
   );
 
+  /** 递归物理工作节点追溯计算属性，解决负载均衡与自动组的显示盲区 */
+  const workingNodeName = computed(() => {
+    const mainGroup = groups.value.find((g) => g.tag === "proxy");
+    if (!mainGroup) return "直连";
+
+    let currentTag = mainGroup.now;
+    if (!currentTag) return "直连";
+
+    if (currentTag.toLowerCase() === "direct") return "直连";
+
+    let depth = 0;
+    const path: string[] = [];
+
+    while (depth < 5) {
+      const subGroup = groups.value.find((g) => g.tag === currentTag);
+      if (subGroup) {
+        path.push(currentTag);
+        currentTag = subGroup.now || "";
+        depth++;
+      } else {
+        break;
+      }
+    }
+
+    if (path.length > 0) {
+      const groupLabel = path[0] === "balance"
+        ? "负载均衡"
+        : path[0] === "auto"
+        ? "自动选择"
+        : path[0];
+      return `${groupLabel} (${currentTag})`;
+    }
+
+    return currentTag;
+  });
+
   // ---- 动作 ----
+  async function syncProxyMode() {
+    const res = await getProxyMode();
+    if (res.success && res.data) {
+      proxyMode.value = res.data.toLowerCase() as any;
+    } else {
+      proxyMode.value = "direct";
+    }
+  }
+
   async function fetchGroups() {
+    await syncProxyMode();
     loading.value = true;
     error.value = null;
     const res = await getProxyGroups();
     if (res.success && res.data) {
-      groups.value = res.data;
+      // 置顶排序逻辑：将 proxy、auto、balance 置顶，其他按字母表排序
+      const topTags = ["proxy", "auto", "balance"];
+      const sorted = [...res.data].sort((a, b) => {
+        const indexA = topTags.indexOf(a.tag);
+        const indexB = topTags.indexOf(b.tag);
+        if (indexA !== -1 && indexB !== -1) {
+          return indexA - indexB;
+        }
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return a.tag.localeCompare(b.tag, "zh-CN");
+      });
+      groups.value = sorted;
+
       // 默认将初始活跃分组载入最近列表作为兜底展示
-      const primary = res.data.find((g) => g.type === "selector");
+      const primary = sorted.find((g) => g.type === "selector");
       if (primary && Object.keys(groupUsage.value).length === 0) {
         groupUsage.value[primary.tag] = 2; // 兜底：主策略组初始有 2 次，算作常用
         localStorage.setItem("auroweave_group_usage", JSON.stringify(groupUsage.value));
@@ -71,7 +130,13 @@ export const useProxyStore = defineStore("proxy", () => {
   }
 
   async function selectNode(groupTag: string, nodeTag: string) {
+    console.log('selectNode')
+    const group = groups.value.find((g) => g.tag === groupTag);
+    if (group && group.type !== "selector") {
+      return { success: false, error: "该策略组为自动或非手动选择类型，不支持手动切换节点", code: 400 };
+    }
     const res = await selectGroupNode(groupTag, nodeTag);
+    console.log(res)
     if (res.success) {
       // 乐观更新 groups 中的 now 字段（左侧分组列表的"当前节点"文字）
       const group = groups.value.find((g) => g.tag === groupTag);
@@ -116,6 +181,7 @@ export const useProxyStore = defineStore("proxy", () => {
     loading,
     error,
     activeGroup,
+    workingNodeName,
     recentGroups,
     fetchGroups,
     fetchGroupNodes,

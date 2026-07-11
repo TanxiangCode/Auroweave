@@ -19,13 +19,22 @@ pub enum SidecarStatus {
 pub struct SidecarManager {
     process: Arc<Mutex<Option<Child>>>,
     status: Arc<Mutex<SidecarStatus>>,
+    #[cfg(target_os = "windows")]
+    job: Option<crate::system::job::JobObject>,
 }
 
 impl SidecarManager {
     pub fn new() -> Self {
+        #[cfg(target_os = "windows")]
+        let job = crate::system::job::JobObject::create()
+            .map_err(|e| error!("创建 Windows 作业对象失败: {}", e))
+            .ok();
+
         Self {
             process: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(SidecarStatus::Stopped)),
+            #[cfg(target_os = "windows")]
+            job,
         }
     }
 
@@ -77,6 +86,22 @@ impl SidecarManager {
 
         let mut proc_guard = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
         *proc_guard = Some(child);
+
+        // 如果是 Windows，绑定子进程到 Job Object
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(ref j) = self.job {
+                if let Some(ref p) = *proc_guard {
+                    if let Some(handle) = p.raw_handle() {
+                        if let Err(e) = j.assign_process(handle) {
+                            warn!("绑定 sing-box 进程到作业对象失败: {}", e);
+                        } else {
+                            info!("已成功将 sing-box 子进程绑定到作业对象");
+                        }
+                    }
+                }
+            }
+        }
 
         *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? = SidecarStatus::Running;
 

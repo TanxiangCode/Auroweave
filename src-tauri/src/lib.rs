@@ -91,6 +91,15 @@ pub fn run() {
                 tracing::info!("尚未检测到系统配置目录中的 config.json，等待用户导入订阅后拉起");
             }
 
+            // 使用条件编译：只在开发模式下生效
+            #[cfg(debug_assertions)]
+            {
+                // 获取你的主窗口实例（Tauri默认主窗口标签为 "main"）
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools(); // 自动打开内部调试器
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())

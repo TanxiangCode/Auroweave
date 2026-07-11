@@ -36,15 +36,6 @@ function changeMode(mode: "global" | "rule" | "direct") {
   proxyStore.changeProxyMode(mode);
 }
 
-function selectRecentGroup(tag: string) {
-  router.push({ path: "/proxies", query: { group: tag } });
-}
-
-function getGroupNow(tag: string) {
-  const g = proxyStore.groups.find((x) => x.tag === tag);
-  return g ? g.now : "";
-}
-
 onMounted(() => {
   proxyStore.fetchGroups();
 });
@@ -52,45 +43,29 @@ onMounted(() => {
 
 <template>
   <div class="dashboard">
-    <!-- 中央动态能量核 (Fluid Wave 驱动) -->
     <div class="energy-section">
-      <div class="energy-core" :class="{ connected: proxyStore.proxyMode !== 'direct' }">
+      <div
+        class="energy-core"
+        :class="{ connected: proxyStore.proxyMode !== 'direct' }"
+        @click="toggleProxy"
+        :title="proxyStore.proxyMode !== 'direct' ? '点击关闭代理' : '点击开启代理'"
+      >
         <div
           class="energy-ring"
-          :style="{ transform: `rotate(${rotationDeg}deg)` }"
+          :style="{ transform: 'rotate(' + rotationDeg + 'deg)' }"
         >
           <div class="energy-inner">
-            <span class="energy-status">
-              <span class="status-dot-indicator" :class="{ active: proxyStore.proxyMode !== 'direct' }"></span>
-              {{ proxyStore.proxyMode !== "direct" ? "已开启代理" : "已关闭 (直连)" }}
-            </span>
-            <span class="energy-speed">
-              ⚡ {{ connectionStore.formatSpeed(smoothDownloadSpeed) }}
-            </span>
-            <span class="energy-node">
-              模式: {{ proxyStore.proxyMode.toUpperCase() }}
-            </span>
+            <template v-if="proxyStore.proxyMode !== 'direct'">
+              <span class="energy-status-text">CONNECTED</span>
+              <span class="energy-mode-tag">{{ proxyStore.proxyMode.toUpperCase() }}</span>
+              <span class="energy-info-text">{{ activeConnectionCount }} 个连接</span>
+            </template>
+            <template v-else>
+              <span class="energy-status-text idle">TAP TO CONNECT</span>
+              <span class="status-dot-indicator"></span>
+              <span class="energy-info-text idle">已关闭 (直连)</span>
+            </template>
           </div>
-        </div>
-      </div>
-
-      <!-- 最近使用的策略组快捷切换 (一键直达) -->
-      <div v-if="proxyStore.recentGroups.length > 0" class="recent-groups-row">
-        <span class="recent-label">
-          <SvgIcon name="clock" :size="12" style="margin-right: 4px;" />
-          常用策略组:
-        </span>
-        <div class="recent-capsules">
-          <button
-            v-for="tag in proxyStore.recentGroups.slice(0, 4)"
-            :key="tag"
-            class="recent-capsule"
-            @click="selectRecentGroup(tag)"
-            :title="`点击管理 ${tag}`"
-          >
-            <span class="group-tag">{{ tag }}</span>
-            <span class="group-now" v-if="getGroupNow(tag)">: {{ getGroupNow(tag) }}</span>
-          </button>
         </div>
       </div>
     </div>
@@ -99,21 +74,16 @@ onMounted(() => {
     <div class="middle-panel">
       <!-- 左栏: 控制与快速统计 -->
       <div class="left-col">
-        <!-- 代理开关及模式切换 -->
+        <!-- 代理模式切换与活动出站 -->
         <div class="control-card glass-effect">
-          <div class="control-header">
-            <span class="control-title">
-              <SvgIcon name="power" :size="14" style="margin-right: 4px;" />
-              代理控制
+          <div class="active-node-row">
+            <span class="node-label">
+              <SvgIcon name="routing" :size="14" style="margin-right: 6px;" />
+              当前出站
             </span>
-            <button
-              class="power-btn"
-              :class="{ active: proxyStore.proxyMode !== 'direct' }"
-              @click="toggleProxy"
-              :title="proxyStore.proxyMode !== 'direct' ? '点击关闭代理' : '点击开启代理'"
-            >
-              {{ proxyStore.proxyMode !== "direct" ? "已开启" : "已关闭" }}
-            </button>
+            <span class="node-value" :title="proxyStore.workingNodeName">
+              {{ proxyStore.workingNodeName }}
+            </span>
           </div>
           <div class="mode-selector">
             <button
@@ -145,23 +115,22 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 右栏: 瘦身后的实时网速折线图 -->
-      <div class="right-col glass-effect chart-container">
-        <SpeedChart :compact="true" />
+      <!-- 右栏: 实时网速折线图 (大气展现) -->
+      <div class="right-col chart-container">
+        <SpeedChart />
       </div>
     </div>
 
-    <!-- 三张启动卡片 -->
-    <div class="launch-cards">
+    <!-- 极客精致快捷胶囊入口 -->
+    <div class="quick-links">
       <button
         v-for="card in cards"
         :key="card.id"
-        class="launch-card"
+        class="quick-link-btn"
         @click="router.push(card.route)"
       >
-        <SvgIcon :name="card.icon" :size="26" class="card-icon" />
-        <span class="card-label">{{ card.label }}</span>
-        <span class="card-desc">{{ card.desc }}</span>
+        <SvgIcon :name="card.icon" :size="16" class="link-icon" />
+        <span class="link-label">{{ card.label }}</span>
       </button>
     </div>
   </div>
@@ -172,7 +141,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  gap: 20px;
+  gap: 24px;
   padding: 24px;
   overflow-y: auto;
 }
@@ -181,6 +150,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  margin-bottom: 8px;
 }
 
 /* ---- 能量核 ---- */
@@ -188,11 +158,17 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.energy-core:hover {
+  transform: scale(1.03);
 }
 
 .energy-ring {
-  width: 180px;
-  height: 180px;
+  width: 240px;
+  height: 240px;
   border-radius: 50%;
   padding: 4px;
   background: var(--energy-active);
@@ -200,9 +176,18 @@ onMounted(() => {
   transition: all var(--duration-normal) var(--ease-out);
 }
 
+.energy-core:hover .energy-ring {
+  box-shadow: 0 0 20px rgba(0, 242, 254, 0.4), var(--shadow-glow-cyan);
+}
+
 .energy-core:not(.connected) .energy-ring {
   background: var(--energy-idle);
   box-shadow: none;
+}
+
+.energy-core:not(.connected):hover .energy-ring {
+  background: var(--border-strong);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.1);
 }
 
 .energy-inner {
@@ -214,16 +199,39 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 12px;
+  gap: 12px;
+  padding: 18px;
 }
 
-.energy-status {
-  display: flex;
-  align-items: center;
-  font-size: var(--text-xs);
+.energy-status-text {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--accent-cyan);
+  letter-spacing: 2px;
+  text-shadow: var(--shadow-glow-cyan);
+}
+
+.energy-status-text.idle {
   color: var(--text-secondary);
-  font-weight: var(--weight-medium);
+  text-shadow: none;
+}
+
+.energy-mode-tag {
+  background: var(--accent-blue-glow);
+  color: var(--accent-blue);
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.energy-info-text {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.energy-info-text.idle {
+  color: var(--text-tertiary);
 }
 
 .status-dot-indicator {
@@ -231,88 +239,23 @@ onMounted(() => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  margin-right: 6px;
   background: var(--text-tertiary);
-  transition: all var(--duration-fast);
 }
 
-.status-dot-indicator.active {
-  background: var(--accent-green);
-  box-shadow: var(--shadow-glow-green);
-}
-
-.energy-speed {
-  font-size: var(--text-lg);
-  color: var(--accent-cyan);
-  font-weight: var(--weight-bold);
-  text-shadow: var(--shadow-glow-cyan);
-}
-
-.energy-node {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.recent-groups-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-  background: var(--layer-1);
-  border: 1px solid var(--border-subtle);
-  padding: 6px 14px;
-  border-radius: var(--radius-full);
-}
-
-.recent-label {
-  display: flex;
-  align-items: center;
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  font-weight: var(--weight-semibold);
-}
-
-.recent-capsules {
-  display: flex;
-  gap: 8px;
-}
-
-.recent-capsule {
-  background: var(--layer-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-}
-
-.recent-capsule:hover {
-  border-color: var(--border-accent);
-  color: var(--text-primary);
-}
-
-.group-tag {
-  font-weight: var(--weight-bold);
-}
-
-.group-now {
-  font-family: var(--font-sans);
-}
+/* 常用策略组已移除 */
 
 /* ---- 中间面板 ---- */
 .middle-panel {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
   width: 100%;
 }
 
 .left-col, .right-col {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .glass-effect {
@@ -320,7 +263,12 @@ onMounted(() => {
   backdrop-filter: var(--blur-panel);
   border: 1px solid var(--border-normal);
   border-radius: var(--radius-lg);
-  padding: 16px;
+  padding: 20px;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+
+.glass-effect:hover {
+  border-color: var(--border-accent);
 }
 
 /* ---- 控制面板 ---- */
@@ -330,13 +278,14 @@ onMounted(() => {
   gap: 12px;
 }
 
-.control-header {
+.active-node-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-bottom: 4px;
 }
 
-.control-title {
+.node-label {
   display: flex;
   align-items: center;
   font-size: var(--text-sm);
@@ -344,22 +293,17 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 
-.power-btn {
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--text-secondary);
+.node-value {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-}
-
-.power-btn.active {
-  background: var(--accent-green-glow);
-  border-color: var(--accent-green);
-  color: var(--accent-green);
+  color: var(--accent-cyan);
+  background: var(--accent-cyan-glow);
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mode-selector {
@@ -394,7 +338,7 @@ onMounted(() => {
 .stats-overview {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: 12px;
 }
 
 .stat-pill {
@@ -402,75 +346,83 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 8px;
-  background: var(--layer-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-}
-
-.pill-label {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.pill-val {
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  font-weight: var(--weight-semibold);
-}
-
-/* ---- 图表面板 ---- */
-.chart-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* ---- 启动卡片 ---- */
-.launch-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
-
-.launch-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 16px;
+  gap: 6px;
+  padding: 12px;
   background: var(--layer-1);
   backdrop-filter: var(--blur-panel);
   border: 1px solid var(--border-normal);
   border-radius: var(--radius-lg);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all var(--duration-normal) var(--ease-out);
+  transition: all var(--duration-fast) var(--ease-out);
 }
 
-.launch-card:hover {
+.stat-pill:hover {
   background: var(--layer-2);
   border-color: var(--border-accent);
   transform: translateY(-2px);
 }
 
-.card-icon {
-  color: var(--text-secondary);
+.pill-label {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-weight: var(--weight-medium);
 }
 
-.launch-card:hover .card-icon {
+.pill-val {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  font-weight: var(--weight-bold);
+  font-family: var(--font-mono, monospace);
+}
+
+/* ---- 图表面板 ---- */
+.chart-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* ---- 极客快捷入口胶囊化 ---- */
+.quick-links {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 12px;
+}
+
+.quick-link-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background: var(--layer-1);
+  backdrop-filter: var(--blur-panel);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+.quick-link-btn:hover {
+  background: var(--layer-2);
+  border-color: var(--accent-blue);
+  box-shadow: var(--shadow-glow-blue);
+  transform: translateY(-1px);
+}
+
+.link-icon {
+  color: var(--text-secondary);
+  transition: color var(--duration-fast);
+}
+
+.quick-link-btn:hover .link-icon {
   color: var(--accent-blue);
 }
 
-.card-label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-}
-
-.card-desc {
+.link-label {
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  text-align: center;
+  font-weight: var(--weight-bold);
 }
 </style>

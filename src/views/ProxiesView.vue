@@ -37,6 +37,36 @@ const currentNodes = computed(() => {
   return g ? g.proxies : [];
 });
 
+const currentGroup = computed(() => {
+  return groups.value.find((x) => x.tag === selectedGroupTag.value);
+});
+
+const isSelectorGroup = computed(() => {
+  return currentGroup.value?.type === "selector";
+});
+
+// 计算当前处于激活出口链路上的所有策略组 tag
+const routingGroupTags = computed(() => {
+  const tags = new Set<string>();
+  const primary = groups.value.find((g) => g.type === "selector");
+  if (!primary) return tags;
+
+  tags.add(primary.tag);
+
+  let currentTagName = primary.now;
+  // 限制循环次数防死循环，最多 10 层
+  for (let i = 0; i < 10 && currentTagName; i++) {
+    const nextGroup = groups.value.find((g) => g.tag === currentTagName);
+    if (nextGroup) {
+      tags.add(nextGroup.tag);
+      currentTagName = nextGroup.now;
+    } else {
+      break;
+    }
+  }
+  return tags;
+});
+
 async function handleGroupSelect(groupTag: string) {
   selectedGroupTag.value = groupTag;
   await proxyStore.fetchGroupNodes(groupTag);
@@ -47,15 +77,33 @@ async function handleGroupSelect(groupTag: string) {
 
 async function handleNodeSelect(nodeTag: string) {
   if (!selectedGroupTag.value) return;
-  await proxyStore.selectNode(selectedGroupTag.value, nodeTag);
-  toast.success("节点已切换", `当前出站: ${nodeTag}`);
+  if (!isSelectorGroup.value) {
+    toast.warning("不支持切换", "该策略组为自动或非手动选择类型，无法手动指定节点。");
+    return;
+  }
+  console.log('handleNodeSelect')
+  const res = await proxyStore.selectNode(selectedGroupTag.value, nodeTag);
+  if (res && res.success) {
+    toast.success("节点已切换", `当前出站: ${nodeTag}`);
+  } else {
+    toast.error("切换节点失败", res?.error || "未知错误");
+  }
 }
 
 async function handleRunLatency() {
   if (!selectedGroupTag.value) return;
   toast.info("正在并发测试延迟...");
   const nodes = proxyStore.nodeMap.get(selectedGroupTag.value) ?? [];
-  const tags = nodes.map((n) => n.tag);
+  // 过滤：排除 selector、urltest 等策略组类型的子项，仅对具体的真实代理服务器进行延迟测试
+  const tags = nodes
+    .filter((n) => !["selector", "urltest", "fallback"].includes(n.type.toLowerCase()))
+    .map((n) => n.tag);
+
+  if (tags.length === 0) {
+    toast.warning("该策略组内没有可供测试的真实节点");
+    return;
+  }
+
   await speedtestStore.testLatency(selectedGroupTag.value, tags);
   toast.success("延迟测试完成");
 }
@@ -133,14 +181,26 @@ async function confirmBatchSpeedTest() {
             v-for="group in groups"
             :key="group.tag"
             class="group-item"
-            :class="{ active: group.tag === selectedGroupTag }"
+            :class="{ 
+              active: group.tag === selectedGroupTag,
+              'in-route': routingGroupTags.has(group.tag)
+            }"
             @click="handleGroupSelect(group.tag)"
           >
             <div class="group-header-info">
-              <span class="group-name">{{ group.tag }}</span>
+              <div class="group-name-wrapper">
+                <span v-if="routingGroupTags.has(group.tag)" class="route-dot" title="当前活跃出口链路成员"></span>
+                <span class="group-name">{{ group.tag }}</span>
+              </div>
               <span class="group-badge">{{ group.type }}</span>
             </div>
-            <span v-if="group.now" class="group-current-node">{{ group.now }}</span>
+            <span 
+              v-if="group.now" 
+              class="group-current-node"
+              :class="{ 'highlight-now': routingGroupTags.has(group.tag) }"
+            >
+              {{ group.now }}
+            </span>
           </button>
         </div>
       </aside>
@@ -186,6 +246,7 @@ async function confirmBatchSpeedTest() {
               :is-active="node.is_active"
               :latency="speedtestStore.latencyMap[node.tag]"
               :speed-bps="speedtestStore.throughputMap[node.tag]?.download_bps"
+              :is-selectable="isSelectorGroup"
               @select="handleNodeSelect(node.tag)"
               @test-latency="handleSingleLatency(node.tag)"
               @test-speed="handleSingleSpeed(node.tag)"
@@ -309,6 +370,36 @@ async function confirmBatchSpeedTest() {
   width: 100%;
 }
 
+.group-name-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.route-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--accent-green);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent-green);
+  flex-shrink: 0;
+  animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(52, 211, 153, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+
 .group-name {
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
@@ -333,6 +424,12 @@ async function confirmBatchSpeedTest() {
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-top: 2px;
+  transition: color var(--duration-fast);
+}
+
+.group-current-node.highlight-now {
+  color: var(--accent-cyan);
+  font-weight: var(--weight-medium);
 }
 
 /* ---- 右栏: 节点内容 ---- */

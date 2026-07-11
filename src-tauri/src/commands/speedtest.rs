@@ -10,18 +10,29 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tracing::info;
 
-/// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试）
+/// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试，使用 JoinSet 并发提速）
 #[tauri::command]
 pub async fn speedtest_run_latency(
     _group_tag: String,
     node_tags: Vec<String>,
 ) -> Result<ApiResponse<HashMap<String, u16>>, AppError> {
-    info!("触发共 {} 个节点的延迟测试", node_tags.len());
-    let clash_client = ClashApiClient::default();
-    let mut results = HashMap::new();
+    info!("触发共 {} 个节点的异步并发延迟测试", node_tags.len());
+    let clash_client = Arc::new(ClashApiClient::default());
+    let mut join_set = tokio::task::JoinSet::new();
 
     for tag in node_tags {
-        if let Ok(delay) = clash_client.get_node_delay(&tag, "https://www.gstatic.com/generate_204", 5000).await {
+        let client = clash_client.clone();
+        join_set.spawn(async move {
+            match client.get_node_delay(&tag, "https://www.gstatic.com/generate_204", 5000).await {
+                Ok(delay) => Some((tag, delay)),
+                Err(_) => None,
+            }
+        });
+    }
+
+    let mut results = HashMap::new();
+    while let Some(res) = join_set.join_next().await {
+        if let Ok(Some((tag, delay))) = res {
             results.insert(tag, delay);
         }
     }

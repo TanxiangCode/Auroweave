@@ -34,8 +34,8 @@ import { useToast } from "@/composables/useToast";
 const settingsStore = useSettingsStore();
 const toast = useToast();
 
-const subName = ref("");
-const subUrl = ref("");
+const subName = ref("SKYLUMO加速器");
+const subUrl = ref("https://skylumo.com/api/v1/client/subscribe?token=REDACTED");
 const importing = ref(false);
 
 async function save() {

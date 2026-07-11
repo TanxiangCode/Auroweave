@@ -90,6 +90,16 @@ export const useSettingsStore = defineStore("settings", () => {
     { immediate: true }
   );
 
+  // 监听 clash_api_port 变化，动态重连 WebSocket 客户端
+  watch(
+    () => settings.value.clash_api_port,
+    () => {
+      import("@/api/clash-ws").then(({ reconnectAll }) => {
+        reconnectAll();
+      });
+    }
+  );
+
   return {
     settings,
     loaded,

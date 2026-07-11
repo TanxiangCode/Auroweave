@@ -3,7 +3,7 @@
  * 作者: TanXiang
  */
 import { defineStore } from "pinia";
-import { ref, computed, onUnmounted } from "vue";
+import { ref, computed } from "vue";
 import type { TrafficSnapshot, Connection, ConnectionStats } from "@/types";
 import { subscribeTraffic, subscribeConnections } from "@/api/clash-ws";
 import { ENERGY_EMA_ALPHA } from "@/constants";
@@ -63,7 +63,7 @@ export const useConnectionStore = defineStore("connection", () => {
   };
 
   // ---- WebSocket 订阅监听 ----
-  const unsubTraffic = subscribeTraffic((snapshot: TrafficSnapshot) => {
+  subscribeTraffic((snapshot: TrafficSnapshot) => {
     rawDownloadSpeed.value = snapshot.download_speed;
     rawUploadSpeed.value = snapshot.upload_speed;
 
@@ -91,15 +91,12 @@ export const useConnectionStore = defineStore("connection", () => {
     }
   });
 
-  const unsubConnections = subscribeConnections((payload) => {
+  subscribeConnections((payload) => {
     connections.value = payload.connections || [];
     activeConnectionCount.value = connections.value.length;
   });
 
-  onUnmounted(() => {
-    unsubTraffic();
-    unsubConnections();
-  });
+  // WebSocket 订阅已升级为常驻生命周期，解决页面切换后的流量漏记和图形凝固Bug
 
   return {
     rawDownloadSpeed,

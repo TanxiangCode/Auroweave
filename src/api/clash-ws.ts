@@ -5,7 +5,6 @@
 import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
-  WS_RECONNECT_MAX_RETRIES,
 } from "@/constants";
 import type { TrafficSnapshot, Connection } from "@/types";
 import { useSettingsStore } from "@/stores/settings.store";
@@ -81,10 +80,7 @@ class WsClient<T> {
   }
 
   private scheduleReconnect(): void {
-    if (this.retryCount >= WS_RECONNECT_MAX_RETRIES) {
-      this.options.onStatusChange?.("error");
-      return;
-    }
+    if (this.stopped) return;
     const delay = Math.min(
       WS_RECONNECT_DELAY_MS * Math.pow(2, this.retryCount),
       WS_RECONNECT_MAX_DELAY_MS
@@ -152,7 +148,29 @@ export function subscribeConnections(cb: ConnectionsCallback): () => void {
   if (!connectionsClient) {
     connectionsClient = new WsClient({
       url: () => getDynamicWsUrl("/connections"),
-      onMessage: (data) => connectionsCallbacks.forEach((fn) => fn(data)),
+      onMessage: (data: any) => {
+        // 归一化转换 Clash / Sing-box 的原始 Connection 数据结构，匹配前端 interface Connection 定义
+        const normalizedConns = (data.connections || []).map((conn: any) => {
+          const metadata = conn.metadata || {};
+          const chains = conn.chains || [];
+          const destHost = metadata.host || metadata.destinationIP || "未知主机";
+          const destPort = parseInt(metadata.destinationPort) || 0;
+          const outboundNode = chains[chains.length - 1] || "direct";
+          
+          return {
+            id: conn.id,
+            destination: destHost,
+            port: destPort,
+            outbound: outboundNode,
+            rule: conn.rule || "Match",
+            upload_bytes: conn.upload || 0,
+            download_bytes: conn.download || 0,
+            start: conn.start ? new Date(conn.start).getTime() : Date.now(),
+          } as Connection;
+        });
+        
+        connectionsCallbacks.forEach((fn) => fn({ connections: normalizedConns }));
+      },
     });
     connectionsClient.connect();
   }
@@ -182,6 +200,16 @@ export function disconnectAll(): void {
 }
 
 export function resumeAll(): void {
+  trafficClient?.resume();
+  connectionsClient?.resume();
+  logClient?.resume();
+}
+
+export function reconnectAll(): void {
+  trafficClient?.disconnect();
+  connectionsClient?.disconnect();
+  logClient?.disconnect();
+
   trafficClient?.resume();
   connectionsClient?.resume();
   logClient?.resume();

@@ -69,7 +69,7 @@ impl ConfigBuilder {
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
         // 2. Selector "proxy" (主出站)
-        let mut proxy_group_list = vec!["auto".to_string()];
+        let mut proxy_group_list = vec!["auto".to_string(), "balance".to_string()];
         for (region, _) in &region_map {
             proxy_group_list.push(format!("{}-auto", region));
         }
@@ -87,7 +87,18 @@ impl ConfigBuilder {
             "tag": "auto",
             "outbounds": node_tags,
             "url": "https://www.gstatic.com/generate_204",
-            "interval": "5m"
+            "interval": "15m",
+            "idle_timeout": "30m"
+        }));
+
+        // 3.1 全局 "balance" 默认负载均衡/自动选择出站
+        final_outbounds.push(json!({
+            "type": "urltest",
+            "tag": "balance",
+            "outbounds": node_tags,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": "15m",
+            "idle_timeout": "30m"
         }));
 
         // 4. 地区 urltest 出站
@@ -97,7 +108,8 @@ impl ConfigBuilder {
                 "tag": format!("{}-auto", region),
                 "outbounds": tags,
                 "url": "https://www.gstatic.com/generate_204",
-                "interval": "5m"
+                "interval": "15m",
+                "idle_timeout": "30m"
             }));
         }
 
@@ -160,7 +172,7 @@ impl ConfigBuilder {
             ],
             "outbounds": final_outbounds,
             "route": {
-                "default_domain_resolver": "remote",
+                "default_domain_resolver": "local",
                 "rules": [
                     { "action": "sniff" },
                     { "protocol": "dns", "action": "hijack-dns" },

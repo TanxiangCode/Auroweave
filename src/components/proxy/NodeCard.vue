@@ -1,8 +1,8 @@
 <template>
   <div
     class="node-row"
-    :class="{ active: isActive, testing: isTesting }"
-    @click="$emit('select', nodeTag)"
+    :class="{ active: isActive, testing: isTesting, 'non-selectable': !isSelectable }"
+    @click="onCardClick"
   >
     <!-- 左侧: 协议徽章与节点名称 -->
     <div class="node-left">
@@ -48,7 +48,10 @@
         <SvgIcon v-else name="wifi" :size="12" />
       </button>
       <div class="select-indicator">
-        <SvgIcon v-if="isActive" name="check" :size="12" class="check-mark" />
+        <template v-if="isActive">
+          <SvgIcon v-if="isSelectable" name="check" :size="12" class="check-mark" />
+          <span v-else class="auto-badge" title="当前自动测速选择的出口">自动</span>
+        </template>
       </div>
     </div>
   </div>
@@ -63,19 +66,32 @@ import { computed } from "vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import SvgIcon from "@/components/common/SvgIcon.vue";
 
-const props = defineProps<{
-  nodeTag: string;
-  nodeType: string;
-  isActive?: boolean;
-  latency?: number;
-  speedBps?: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    nodeTag: string;
+    nodeType: string;
+    isActive?: boolean;
+    latency?: number;
+    speedBps?: number;
+    isSelectable?: boolean;
+  }>(),
+  {
+    isActive: false,
+    isSelectable: true,
+  }
+);
 
-defineEmits<{
+const emit = defineEmits<{
   (e: "select", tag: string): void;
   (e: "test-latency", tag: string): void;
   (e: "test-speed", tag: string): void;
 }>();
+
+function onCardClick() {
+  if (props.isSelectable) {
+    emit("select", props.nodeTag);
+  }
+}
 
 const speedtestStore = useSpeedtestStore();
 
@@ -131,9 +147,25 @@ function formatSpeed(bps: number): string {
   transform: translateX(2px);
 }
 
+.node-row.non-selectable {
+  cursor: default;
+}
+
+.node-row.non-selectable:hover {
+  transform: none;
+  background: var(--layer-1);
+  border-color: var(--border-subtle);
+}
+
 .node-row.active {
   border-color: var(--accent-blue);
   background: var(--accent-blue-glow);
+}
+
+/* 自动测速类型的组中，当前工作节点的特别高亮样式（不与手动蓝色混淆） */
+.node-row.non-selectable.active {
+  border-color: var(--accent-cyan);
+  background: var(--accent-cyan-glow);
 }
 
 .node-left {
@@ -277,7 +309,6 @@ function formatSpeed(bps: number): string {
 }
 
 .select-indicator {
-  width: 16px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -285,5 +316,16 @@ function formatSpeed(bps: number): string {
 
 .check-mark {
   color: var(--accent-blue);
+}
+
+.auto-badge {
+  font-size: 10px;
+  padding: 1px 4px;
+  background: var(--accent-cyan-glow);
+  color: var(--accent-cyan);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-xs);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
 }
 </style>
