@@ -153,3 +153,11 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
         Err(e) => ApiResponse::err(e, 500),
     }
 }
+
+/// 强制设置 Windows 系统代理开启或注销 (供前端总开关与自救调用)
+#[tauri::command]
+pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
+    tracing::info!("强制设置系统代理状态: enabled={}, port={}", enabled, port);
+    let _ = crate::system::sysproxy::set_system_proxy(enabled, port);
+    ApiResponse::ok(())
+}

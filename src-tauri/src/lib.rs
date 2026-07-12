@@ -38,6 +38,7 @@ pub fn run() {
             commands::proxy::proxy_select_node,
             commands::proxy::proxy_get_mode,
             commands::proxy::proxy_set_mode,
+            commands::proxy::sysproxy_set,
             commands::subscription::subscription_import,
             commands::subscription::subscription_get_all,
             commands::subscription::subscription_delete,

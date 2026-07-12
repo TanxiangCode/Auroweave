@@ -3,19 +3,23 @@
  * Dashboard 首页 — 环绕双翼镜像对称布局
  * 作者: TanXiang
  */
-import { onMounted, computed } from "vue";
+import { onMounted, computed, ref } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useFluidWave } from "@/composables/useFluidWave";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
+import { invoke } from "@tauri-apps/api/core";
 import SpeedChart from "@/components/charts/SpeedChart.vue";
 
 const router = useRouter();
 const connectionStore = useConnectionStore();
 const proxyStore = useProxyStore();
 const settingsStore = useSettingsStore();
+
+// 代理流量接管总开关 (ON / OFF)
+const proxyActive = ref(true);
 
 const {
   smoothDownloadSpeed,
@@ -32,21 +36,72 @@ const inboundMode = computed({
     return settingsStore.settings.tun_enabled ? "tun" : "system";
   },
   async set(val: "system" | "tun") {
+    // 若总开关未开启，仅静默记录设置，不进行物理系统代理变动
+    if (!proxyActive.value) {
+      await settingsStore.updateSettings({ tun_enabled: val === "tun" });
+      return;
+    }
+
     if (val === "system") {
       await settingsStore.updateSettings({ tun_enabled: false });
+      // 开启 Windows IE 系统代理
+      await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
       if (proxyStore.proxyMode === "direct") {
         await proxyStore.changeProxyMode("rule");
       }
     } else if (val === "tun") {
-      await settingsStore.updateSettings({ tun_enabled: true });
+      // 开启 TUN 虚拟网卡接管
+      const res = await settingsStore.updateSettings({ tun_enabled: true });
+      if (!res.success) {
+        // 无管理员 UAC 权限防御拦截！
+        alert("TUN 网卡启动失败：创建网络适配器权限不足。\n\n请右键点击 AUROWEAVE 程序图标，选择【以管理员身份运行】重试。");
+        // 安全自动回滚为系统代理接管，防范内核挂载崩溃与整机断网
+        await settingsStore.updateSettings({ tun_enabled: false });
+        await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
+        if (proxyStore.proxyMode === "direct") {
+          await proxyStore.changeProxyMode("rule");
+        }
+        return;
+      }
+      // 成功拉起 TUN，注销 Windows 系统代理以求纯净
+      await invoke("sysproxy_set", { enabled: false, port: settingsStore.settings.mixed_port });
       await proxyStore.changeProxyMode("direct");
     }
   }
 });
 
-function toggleProxy() {
-  const targetMode = proxyStore.proxyMode === "direct" ? "rule" : "direct";
-  proxyStore.changeProxyMode(targetMode);
+// 大圆环点击：一键接管网络 / 完全注销释放 Windows 代理 (网络自救总开关)
+async function toggleProxy() {
+  proxyActive.value = !proxyActive.value;
+  
+  if (proxyActive.value) {
+    // 一键开机，恢复流量接管
+    if (settingsStore.settings.tun_enabled) {
+      // 激活 TUN，并进行 UAC 权限保护
+      const res = await settingsStore.updateSettings({ tun_enabled: true });
+      if (res.success) {
+        await invoke("sysproxy_set", { enabled: false, port: settingsStore.settings.mixed_port });
+        await proxyStore.changeProxyMode("direct");
+      } else {
+        alert("TUN 网卡启动失败：创建网络适配器权限不足。\n\n请右键点击 AUROWEAVE 程序图标，选择【以管理员身份运行】重试。");
+        proxyActive.value = false;
+        await settingsStore.updateSettings({ tun_enabled: false });
+        await invoke("sysproxy_set", { enabled: false, port: 0 });
+      }
+    } else {
+      // 激活 Windows 系统代理
+      await settingsStore.updateSettings({ tun_enabled: false });
+      await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
+      if (proxyStore.proxyMode === "direct") {
+        await proxyStore.changeProxyMode("rule");
+      }
+    }
+  } else {
+    // 一键关机，完全释放接管 (注销 Windows IE 代理并关闭 TUN)
+    await settingsStore.updateSettings({ tun_enabled: false });
+    await invoke("sysproxy_set", { enabled: false, port: 0 });
+    await proxyStore.changeProxyMode("direct");
+  }
 }
 
 function changeMode(mode: "global" | "rule" | "direct") {
@@ -64,6 +119,14 @@ function formatBytes(bytes: number): string {
 onMounted(async () => {
   await settingsStore.fetchSettings();
   proxyStore.fetchGroups();
+  // 根据 settings 本地配置初始化大开关状态 (在 direct 且 tun 关的状况下为未接管)
+  const isDirect = proxyStore.proxyMode === "direct";
+  const isTun = settingsStore.settings.tun_enabled;
+  if (isDirect && !isTun) {
+    proxyActive.value = false;
+  } else {
+    proxyActive.value = true;
+  }
 });
 </script>
 
@@ -106,19 +169,21 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 中央：旋转能量核 (视觉绝对重心，始终保持高亮绿色工作自旋) -->
+      <!-- 中央：旋转能量核 (视觉绝对重心) -->
       <div class="energy-wing">
         <div
-          class="energy-core connected"
+          class="energy-core"
+          :class="{ connected: proxyActive }"
           @click="toggleProxy"
-          title="点击在分流与直连模式之间切换"
+          title="点击开启或释放系统流量接管"
         >
           <div
             class="energy-ring"
-            :style="{ transform: 'rotate(' + rotationDeg + 'deg)' }"
+            :style="{ transform: proxyActive ? 'rotate(' + rotationDeg + 'deg)' : 'none' }"
           >
             <div class="energy-inner">
-              <span class="energy-status-text">CONNECTED</span>
+              <span v-if="proxyActive" class="energy-status-text">CONNECTED</span>
+              <span v-else class="energy-status-text idle">TAP TO CONNECT</span>
             </div>
           </div>
         </div>
