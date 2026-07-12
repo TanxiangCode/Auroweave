@@ -161,3 +161,33 @@ pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
     let _ = crate::system::sysproxy::set_system_proxy(enabled, port);
     ApiResponse::ok(())
 }
+
+/// 以管理员身份提权重启当前 Auroweave 程序
+#[tauri::command]
+pub async fn app_restart_as_admin(app_handle: tauri::AppHandle) -> ApiResponse<()> {
+    tracing::info!("准备以管理员身份提权重启程序");
+    if let Ok(current_exe) = std::env::current_exe() {
+        let exe_path = current_exe.to_string_lossy().to_string();
+        
+        #[cfg(target_os = "windows")]
+        {
+            // 通过 PowerShell 执行 Start-Process -Verb RunAs 提权运行当前 exe
+            let status = std::process::Command::new("powershell")
+                .args(&[
+                    "-NoProfile",
+                    "-WindowStyle", "Hidden",
+                    "-Command",
+                    &format!("Start-Process -FilePath '{}' -Verb RunAs", exe_path)
+                ])
+                .status();
+            
+            if status.is_ok() {
+                // 注销系统代理，防止退出时残留
+                let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                app_handle.exit(0);
+                return ApiResponse::ok(());
+            }
+        }
+    }
+    ApiResponse::err("以管理员身份提权重启失败".to_string(), 500)
+}

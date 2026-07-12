@@ -39,6 +39,7 @@ pub fn run() {
             commands::proxy::proxy_get_mode,
             commands::proxy::proxy_set_mode,
             commands::proxy::sysproxy_set,
+            commands::proxy::app_restart_as_admin,
             commands::subscription::subscription_import,
             commands::subscription::subscription_get_all,
             commands::subscription::subscription_delete,

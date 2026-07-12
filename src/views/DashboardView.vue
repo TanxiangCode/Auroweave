@@ -53,9 +53,15 @@ const inboundMode = computed({
       // 开启 TUN 虚拟网卡接管
       const res = await settingsStore.updateSettings({ tun_enabled: true });
       if (!res.success) {
-        // 无管理员 UAC 权限防御拦截！
-        alert("TUN 网卡启动失败：创建网络适配器权限不足。\n\n请右键点击 AUROWEAVE 程序图标，选择【以管理员身份运行】重试。");
-        // 安全自动回滚为系统代理接管，防范内核挂载崩溃与整机断网
+        // UAC 提权重启防御自动申请！
+        const confirmRestart = confirm(
+          "启用 TUN 虚拟网卡需要管理员/UAC 权限。\n\n是否允许程序自动以管理员身份提权重启？"
+        );
+        if (confirmRestart) {
+          await invoke("app_restart_as_admin");
+        }
+        
+        // 若取消或重启中，安全自动回滚为系统代理接管，防范闪退和断网
         await settingsStore.updateSettings({ tun_enabled: false });
         await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
         if (proxyStore.proxyMode === "direct") {
@@ -83,7 +89,12 @@ async function toggleProxy() {
         await invoke("sysproxy_set", { enabled: false, port: settingsStore.settings.mixed_port });
         await proxyStore.changeProxyMode("direct");
       } else {
-        alert("TUN 网卡启动失败：创建网络适配器权限不足。\n\n请右键点击 AUROWEAVE 程序图标，选择【以管理员身份运行】重试。");
+        const confirmRestart = confirm(
+          "启用 TUN 虚拟网卡需要管理员/UAC 权限。\n\n是否允许程序自动以管理员身份提权重启？"
+        );
+        if (confirmRestart) {
+          await invoke("app_restart_as_admin");
+        }
         proxyActive.value = false;
         await settingsStore.updateSettings({ tun_enabled: false });
         await invoke("sysproxy_set", { enabled: false, port: 0 });
@@ -100,7 +111,8 @@ async function toggleProxy() {
     // 一键关机，完全释放接管 (注销 Windows IE 代理并关闭 TUN)
     await settingsStore.updateSettings({ tun_enabled: false });
     await invoke("sysproxy_set", { enabled: false, port: 0 });
-    await proxyStore.changeProxyMode("direct");
+    // 本地状态更新，不再发送网络请求去调 Clash API (避开因为内核 stop 期间访问 API 报 Toast 切换失败错误)
+    proxyStore.$patch({ proxyMode: "direct" });
   }
 }
 
