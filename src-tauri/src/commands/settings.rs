@@ -199,10 +199,19 @@ pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Valu
         tauri::async_runtime::spawn(async move {
             let _ = crate::system::sysproxy::set_system_proxy(false, 0);
             let _ = sidecar_manager.stop().await;
+            
+            // 完全释放网络接管状态拦截：若是直连模式且 TUN 未启用，直接退出不自启动进程
+            let settings = settings_get_internal(&app_handle_clone);
+            if settings.proxy_mode == "direct" && !settings.tun_enabled {
+                tracing::info!("系统处于直连且TUN关闭的完全释放状态，sing-box 进程保持停止且不自启动");
+                return;
+            }
+            
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             if sidecar_manager.start(&config_path_str).await.is_ok() {
-                let settings = settings_get_internal(&app_handle_clone);
-                if settings.proxy_mode != "direct" {
+                if settings.tun_enabled {
+                    let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                } else {
                     let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
                 }
             }

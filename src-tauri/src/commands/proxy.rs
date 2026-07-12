@@ -139,18 +139,50 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
         let _ = std::fs::write(&settings_path, content);
     }
 
-    let client = ClashApiClient::default();
-    let body = serde_json::json!({ "mode": mode });
-    match client.patch_configs(body).await {
-        Ok(_) => {
-            if settings.tun_enabled {
-                let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
-            } else {
-                let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+    // 重新构建 config.json
+    let _ = crate::commands::settings::rebuild_config_from_settings(&app_handle);
+
+    let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
+    let config_path = config_dir.join("config.json");
+    let config_path_str = config_path.to_string_lossy().to_string();
+
+    // 核心判定：若需要接管 (rule/global) 且进程当前没在跑，说明需要重新拉起后台核心
+    if (mode == "rule" || mode == "global") && sidecar_manager.get_status() != crate::core::sidecar::SidecarStatus::Running {
+        tracing::info!("sing-box 处于停止状态，开始重新拉起进程...");
+        match sidecar_manager.start(&config_path_str).await {
+            Ok(_) => {
+                if settings.tun_enabled {
+                    let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                } else {
+                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                }
+                return ApiResponse::ok(());
             }
-            ApiResponse::ok(())
+            Err(e) => return ApiResponse::err(e, 500),
         }
-        Err(e) => ApiResponse::err(e, 500),
+    }
+
+    // 若进程在运行中，直接通过 Clash API 发送 patch
+    if sidecar_manager.get_status() == crate::core::sidecar::SidecarStatus::Running {
+        let client = ClashApiClient::default();
+        let body = serde_json::json!({ "mode": mode });
+        match client.patch_configs(body).await {
+            Ok(_) => {
+                if settings.tun_enabled {
+                    let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                } else {
+                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                }
+                ApiResponse::ok(())
+            }
+            Err(e) => ApiResponse::err(e, 500),
+        }
+    } else {
+        // 若核心停止运行，且处于直连且未启用 TUN (完全释放网络)，则注销 Windows 系统代理
+        if mode == "direct" && !settings.tun_enabled {
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+        }
+        ApiResponse::ok(())
     }
 }
 
