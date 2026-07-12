@@ -2,9 +2,10 @@
 /// 作者: TanXiang
 use crate::error::AppError;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::process::Child;
-use tracing::{info, warn, error};
+use tokio::sync::Mutex;
+use tracing::{error, info, warn};
 
 pub const SINGBOX_VERSION: &str = "1.13.14";
 
@@ -16,6 +17,7 @@ pub enum SidecarStatus {
     Error(String),
 }
 
+/// 全部字段使用 tokio::sync::Mutex，确保 guard 实现 Send，可以安全跨 await 边界
 pub struct SidecarManager {
     process: Arc<Mutex<Option<Child>>>,
     status: Arc<Mutex<SidecarStatus>>,
@@ -38,14 +40,22 @@ impl SidecarManager {
         }
     }
 
+    pub fn get_status(&self) -> SidecarStatus {
+        self.status
+            .try_lock()
+            .map(|s| s.clone())
+            .unwrap_or(SidecarStatus::Error("锁获取失败".to_string()))
+    }
+
     pub async fn start(&self, config_path: &str) -> Result<(), AppError> {
-        let mut status = self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
-        if *status == SidecarStatus::Running {
-            info!("sing-box 已在运行，跳过启动");
-            return Ok(());
+        {
+            let mut status = self.status.lock().await;
+            if *status == SidecarStatus::Running {
+                info!("sing-box 已在运行，跳过启动");
+                return Ok(());
+            }
+            *status = SidecarStatus::Starting;
         }
-        *status = SidecarStatus::Starting;
-        drop(status);
 
         let binary_path = Self::resolve_binary_path()?;
         info!("找到 sing-box 执行文件: {:?}", binary_path);
@@ -61,8 +71,23 @@ impl SidecarManager {
             .spawn()
             .map_err(|e| AppError::Sidecar(format!("拉起 sing-box 失败: {}", e)))?;
 
+        // 取出 stdout / stderr 管道
         let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+
+        // 捕获 stderr 供早期退出检测
+        let stderr_lines_arc =
+            Arc::new(Mutex::new(Vec::<String>::new()));
+        if let Some(stderr) = child.stderr.take() {
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            let arc_clone = stderr_lines_arc.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    error!("[sing-box error] {}", line);
+                    arc_clone.lock().await.push(line);
+                }
+            });
+        }
 
         if let Some(stdout) = stdout {
             tokio::spawn(async move {
@@ -74,46 +99,61 @@ impl SidecarManager {
             });
         }
 
-        if let Some(stderr) = stderr {
-            tokio::spawn(async move {
-                use tokio::io::{AsyncBufReadExt, BufReader};
-                let mut reader = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    error!("[sing-box error] {}", line);
+        // 等待 1.5 秒，检测进程是否因错误（权限不足等）提早退出
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+        match child.try_wait() {
+            Ok(Some(exit_status)) => {
+                // 进程已退出 —— 启动失败
+                let mut err_msg = format!(
+                    "sing-box 启动后立即退出，退出码: {:?}",
+                    exit_status.code()
+                );
+                let lines = stderr_lines_arc.lock().await;
+                if !lines.is_empty() {
+                    err_msg = format!("{}\n详情: {}", err_msg, lines.join("\n"));
                 }
-            });
+                drop(lines);
+                *self.status.lock().await = SidecarStatus::Stopped;
+                return Err(AppError::Sidecar(err_msg));
+            }
+            Ok(None) => {
+                // 进程仍在运行 —— 启动成功
+            }
+            Err(e) => {
+                warn!("检查 sing-box 进程状态时出现警告: {}", e);
+            }
         }
 
-        let mut proc_guard = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
-        *proc_guard = Some(child);
-
-        // 如果是 Windows，绑定子进程到 Job Object
-        #[cfg(target_os = "windows")]
+        // 存储子进程句柄
         {
-            if let Some(ref j) = self.job {
-                if let Some(ref p) = *proc_guard {
-                    if let Some(handle) = p.raw_handle() {
-                        if let Err(e) = j.assign_process(handle) {
-                            warn!("绑定 sing-box 进程到作业对象失败: {}", e);
-                        } else {
-                            info!("已成功将 sing-box 子进程绑定到作业对象");
+            let mut proc_guard = self.process.lock().await;
+            *proc_guard = Some(child);
+
+            // Windows：绑定到 Job Object 使进程随主进程退出
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(ref j) = self.job {
+                    if let Some(ref p) = *proc_guard {
+                        if let Some(handle) = p.raw_handle() {
+                            if let Err(e) = j.assign_process(handle) {
+                                warn!("绑定 sing-box 进程到作业对象失败: {}", e);
+                            } else {
+                                info!("已成功将 sing-box 子进程绑定到作业对象");
+                            }
                         }
                     }
                 }
             }
         }
 
-        *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? = SidecarStatus::Running;
-
+        *self.status.lock().await = SidecarStatus::Running;
         info!("sing-box 子进程启动成功");
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<(), AppError> {
-        let child = {
-            let mut proc = self.process.lock().map_err(|e| AppError::Sidecar(e.to_string()))?;
-            proc.take()
-        };
+        let child = self.process.lock().await.take();
 
         if let Some(mut child) = child {
             if let Err(e) = child.kill().await {
@@ -121,14 +161,8 @@ impl SidecarManager {
             }
             info!("sing-box 进程已停止");
         }
-        *self.status.lock().map_err(|e| AppError::Sidecar(e.to_string()))? = SidecarStatus::Stopped;
+        *self.status.lock().await = SidecarStatus::Stopped;
         Ok(())
-    }
-
-    pub fn get_status(&self) -> SidecarStatus {
-        self.status.lock()
-            .map(|s| s.clone())
-            .unwrap_or(SidecarStatus::Error("锁获取失败".to_string()))
     }
 
     pub async fn handle_wake(&self, config_path: &str) -> Result<(), AppError> {
@@ -144,17 +178,33 @@ impl SidecarManager {
 
         #[cfg(target_os = "windows")]
         {
-            candidates.push(format!("src-tauri/sidecar-bin/windows-x64/sing-box-{}.exe", SINGBOX_VERSION));
-            candidates.push(format!("sidecar-bin/windows-x64/sing-box-{}.exe", SINGBOX_VERSION));
-            candidates.push("src-tauri/sidecar-bin/windows-x64/sing-box-1.11.4.exe".to_string());
+            candidates.push(format!(
+                "src-tauri/sidecar-bin/windows-x64/sing-box-{}.exe",
+                SINGBOX_VERSION
+            ));
+            candidates.push(format!(
+                "sidecar-bin/windows-x64/sing-box-{}.exe",
+                SINGBOX_VERSION
+            ));
+            candidates.push(
+                "src-tauri/sidecar-bin/windows-x64/sing-box-1.11.4.exe".to_string(),
+            );
             candidates.push("sidecar-bin/windows-x64/sing-box-1.11.4.exe".to_string());
         }
 
         #[cfg(target_os = "macos")]
         {
-            candidates.push(format!("src-tauri/sidecar-bin/macos-universal/sing-box-{}", SINGBOX_VERSION));
-            candidates.push(format!("sidecar-bin/macos-universal/sing-box-{}", SINGBOX_VERSION));
-            candidates.push("src-tauri/sidecar-bin/macos-universal/sing-box-1.11.4".to_string());
+            candidates.push(format!(
+                "src-tauri/sidecar-bin/macos-universal/sing-box-{}",
+                SINGBOX_VERSION
+            ));
+            candidates.push(format!(
+                "sidecar-bin/macos-universal/sing-box-{}",
+                SINGBOX_VERSION
+            ));
+            candidates.push(
+                "src-tauri/sidecar-bin/macos-universal/sing-box-1.11.4".to_string(),
+            );
             candidates.push("sidecar-bin/macos-universal/sing-box-1.11.4".to_string());
         }
 
@@ -162,9 +212,19 @@ impl SidecarManager {
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
                 #[cfg(target_os = "windows")]
-                candidates.push(exe_dir.join(format!("sing-box-{}.exe", SINGBOX_VERSION)).to_string_lossy().to_string());
+                candidates.push(
+                    exe_dir
+                        .join(format!("sing-box-{}.exe", SINGBOX_VERSION))
+                        .to_string_lossy()
+                        .to_string(),
+                );
                 #[cfg(target_os = "macos")]
-                candidates.push(exe_dir.join(format!("sing-box-{}", SINGBOX_VERSION)).to_string_lossy().to_string());
+                candidates.push(
+                    exe_dir
+                        .join(format!("sing-box-{}", SINGBOX_VERSION))
+                        .to_string_lossy()
+                        .to_string(),
+                );
             }
         }
 
