@@ -154,9 +154,7 @@ onMounted(async () => {
 
     <!-- 下部：实时折线图托底座 (消除重复 Header 标题) -->
     <div class="bottom-panel-row">
-      <div class="chart-container glass-effect">
-        <SpeedChart />
-      </div>
+      <SpeedChart />
     </div>
   </div>
 </template>
@@ -334,6 +332,11 @@ onMounted(async () => {
   transition: transform var(--duration-fast) var(--ease-out);
 }
 
+/* 呼吸发光微缩放动效 (Breathing Scale & Glow) */
+.energy-core.connected {
+  animation: breathing-core 3s infinite ease-in-out;
+}
+
 .energy-core:hover {
   transform: scale(1.02);
 }
@@ -388,24 +391,6 @@ onMounted(async () => {
   text-shadow: none;
 }
 
-.energy-mode-tag {
-  background: var(--accent-blue-glow);
-  color: var(--accent-blue);
-  padding: 2px 10px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-}
-
-.energy-info-text {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.energy-info-text.idle {
-  color: var(--text-tertiary);
-}
-
 /* ---- 下部：折线图底座 ---- */
 .bottom-panel-row {
   flex: 1;
@@ -414,72 +399,26 @@ onMounted(async () => {
   min-height: 0; /* 允许折线图内部自适应伸缩而不溢出 */
 }
 
-.chart-container {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
+/* 使用 Vue :deep 穿透修改折线图自带卡片的样式，强制 24px 大圆角与高度撑满 */
+.bottom-panel-row :deep(.speed-chart-card) {
+  border-radius: 24px !important;
+  border-color: var(--border-normal);
   height: 100%;
-  padding: 18px 24px;
+  box-shadow: var(--shadow-sm);
 }
 
-.chart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.chart-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  color: var(--text-primary);
-}
-
-.status-dot-pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-cyan);
-  box-shadow: 0 0 8px var(--accent-cyan);
-  animation: pulse 2s infinite;
-}
-
-.chart-speed-legend {
-  display: flex;
-  gap: 16px;
-  font-size: var(--text-xs);
-  font-family: var(--font-mono, monospace);
-  font-weight: var(--weight-bold);
-}
-
-.speed-down {
-  color: var(--accent-cyan);
-}
-
-.speed-up {
-  color: var(--accent-purple, #b388ff);
-}
-
-/* 磨砂玻璃底座 — 提升圆角至 24px，化棱角为圆润 */
-.glass-effect {
-  background: var(--layer-1);
-  backdrop-filter: var(--blur-panel);
-  border: 1px solid var(--border-normal);
-  border-radius: 24px; /* 升级为 24px，视觉圆润过渡 */
-  padding: 20px;
-  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
-}
-
-.glass-effect:hover {
-  border-color: var(--border-accent);
-}
-
-@keyframes pulse {
-  0% { transform: scale(0.9); opacity: 0.6; }
-  50% { transform: scale(1.15); opacity: 1; }
-  100% { transform: scale(0.9); opacity: 0.6; }
+@keyframes breathing-core {
+  0% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(0, 242, 254, 0.25));
+  }
+  50% {
+    transform: scale(1.025); /* 极细微优雅的形体收缩 */
+    filter: drop-shadow(0 0 20px rgba(0, 242, 254, 0.55)); /* 吞吐光晕阴影 */
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(0, 242, 254, 0.25));
+  }
 }
 </style>
