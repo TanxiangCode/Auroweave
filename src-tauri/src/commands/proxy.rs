@@ -143,7 +143,7 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
     let body = serde_json::json!({ "mode": mode });
     match client.patch_configs(body).await {
         Ok(_) => {
-            if mode == "direct" {
+            if settings.tun_enabled {
                 let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
             } else {
                 let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);

@@ -80,10 +80,10 @@ pub fn run() {
                         tracing::warn!("启动 sing-box 失败: {}", e);
                     } else {
                         let settings = crate::commands::settings::settings_get_internal(&app_handle);
-                        if settings.proxy_mode != "direct" {
-                            let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                        } else {
+                        if settings.tun_enabled {
                             let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                        } else {
+                            let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
                         }
                     }
                 });

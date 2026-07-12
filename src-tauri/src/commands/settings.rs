@@ -109,7 +109,7 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
                 "type": "tun",
                 "tag": "tun-in",
                 "interface_name": "singbox-tun",
-                "inet4_address": "172.19.0.1/30",
+                "address": ["172.19.0.1/30"],
                 "auto_route": true,
                 "strict_route": true,
                 "stack": "system"
