@@ -48,6 +48,7 @@ pub fn run() {
             commands::settings::settings_save,
             commands::settings::settings_inject_terminal_proxy,
             commands::settings::settings_export_diagnostic_log,
+            commands::settings::tun_set_enabled,
             commands::speedtest::speedtest_run_latency,
             commands::speedtest::speedtest_run_single,
             commands::speedtest::speedtest_run_batch,

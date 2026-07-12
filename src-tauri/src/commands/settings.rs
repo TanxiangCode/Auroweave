@@ -259,3 +259,72 @@ pub async fn settings_export_diagnostic_log(app_handle: tauri::AppHandle) -> Api
         Err(e) => ApiResponse::err(format!("获取桌面路径失败: {}", e), 500),
     }
 }
+
+/// 专用 TUN 模式切换命令 (同步等待进程启动结果并将失败透传前端)
+/// 作者: TanXiang
+#[tauri::command]
+pub async fn tun_set_enabled(app_handle: tauri::AppHandle, enabled: bool) -> ApiResponse<()> {
+    tracing::info!("设置 TUN 接管模式: enabled={}", enabled);
+
+    // 先写入设置文件
+    let path = get_settings_path(&app_handle);
+    let mut current = if path.exists() {
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+            .unwrap_or_else(|| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if let Some(obj) = current.as_object_mut() {
+        obj.insert("tun_enabled".to_string(), serde_json::Value::Bool(enabled));
+    }
+    if let Ok(content) = serde_json::to_string_pretty(&current) {
+        let _ = fs::write(&path, content);
+    }
+
+    // 重新构建 config.json
+    let _ = rebuild_config_from_settings(&app_handle);
+
+    let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
+    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
+    let config_path = config_dir.join("config.json");
+
+    if !config_path.exists() {
+        return ApiResponse::err("config.json 不存在，请先导入订阅", 404);
+    }
+
+    let config_path_str = config_path.to_string_lossy().to_string();
+
+    // 清理系统代理，关闭当前进程
+    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+    let _ = sidecar_manager.stop().await;
+
+    if !enabled {
+        // 关闭 TUN，不重启（由外部决定是否切换回系统代理）
+        tracing::info!("TUN 接管模式已关闭");
+        return ApiResponse::ok(());
+    }
+
+    // 开启 TUN，同步等待进程启动，真实返回失败状态
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    match sidecar_manager.start(&config_path_str).await {
+        Ok(_) => {
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+            tracing::info!("TUN 接管模式启动成功");
+            ApiResponse::ok(())
+        }
+        Err(e) => {
+            tracing::error!("TUN 接管模式启动失败: {:?}", e);
+            // 失败时将 tun_enabled 回写为 false
+            if let Some(obj) = current.as_object_mut() {
+                obj.insert("tun_enabled".to_string(), serde_json::Value::Bool(false));
+            }
+            if let Ok(content) = serde_json::to_string_pretty(&current) {
+                let _ = fs::write(&path, content);
+            }
+            ApiResponse::err(format!("启动 TUN 接管失败，可能是权限不足: {}", e), 403)
+        }
+    }
+}

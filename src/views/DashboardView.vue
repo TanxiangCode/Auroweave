@@ -38,20 +38,22 @@ const inboundMode = computed({
   async set(val: "system" | "tun") {
     // 若总开关未开启，仅静默记录设置，不进行物理系统代理变动
     if (!proxyActive.value) {
-      await settingsStore.updateSettings({ tun_enabled: val === "tun" });
+      await invoke("tun_set_enabled", { enabled: val === "tun" });
+      settingsStore.settings.tun_enabled = (val === "tun");
       return;
     }
 
     if (val === "system") {
-      await settingsStore.updateSettings({ tun_enabled: false });
-      // 开启 Windows IE 系统代理
+      // 同步关闭 TUN，恢复为系统代理接管
+      await invoke("tun_set_enabled", { enabled: false });
+      settingsStore.settings.tun_enabled = false;
       await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
       if (proxyStore.proxyMode === "direct") {
         await proxyStore.changeProxyMode("rule");
       }
     } else if (val === "tun") {
-      // 开启 TUN 虚拟网卡接管
-      const res = await settingsStore.updateSettings({ tun_enabled: true });
+      // 使用专用同步命令开启 TUN，等待真实启动结果
+      const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
       if (!res.success) {
         // UAC 提权重启防御自动申请！
         const confirmRestart = confirm(
@@ -60,17 +62,17 @@ const inboundMode = computed({
         if (confirmRestart) {
           await invoke("app_restart_as_admin");
         }
-        
-        // 若取消或重启中，安全自动回滚为系统代理接管，防范闪退和断网
-        await settingsStore.updateSettings({ tun_enabled: false });
+        // 安全自动回滚为系统代理接管
+        settingsStore.settings.tun_enabled = false;
         await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
         if (proxyStore.proxyMode === "direct") {
           await proxyStore.changeProxyMode("rule");
         }
         return;
       }
-      // 成功拉起 TUN，注销 Windows 系统代理以求纯净
-      await invoke("sysproxy_set", { enabled: false, port: settingsStore.settings.mixed_port });
+      settingsStore.settings.tun_enabled = true;
+      // TUN 模式下不使用 Windows 系统代理
+      await invoke("sysproxy_set", { enabled: false, port: 0 });
       await proxyStore.changeProxyMode("direct");
     }
   }
@@ -83,10 +85,11 @@ async function toggleProxy() {
   if (proxyActive.value) {
     // 一键开机，恢复流量接管
     if (settingsStore.settings.tun_enabled) {
-      // 激活 TUN，并进行 UAC 权限保护
-      const res = await settingsStore.updateSettings({ tun_enabled: true });
+      // 激活 TUN，同步等待结果
+      const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
       if (res.success) {
-        await invoke("sysproxy_set", { enabled: false, port: settingsStore.settings.mixed_port });
+        settingsStore.settings.tun_enabled = true;
+        await invoke("sysproxy_set", { enabled: false, port: 0 });
         await proxyStore.changeProxyMode("direct");
       } else {
         const confirmRestart = confirm(
@@ -96,12 +99,13 @@ async function toggleProxy() {
           await invoke("app_restart_as_admin");
         }
         proxyActive.value = false;
-        await settingsStore.updateSettings({ tun_enabled: false });
+        settingsStore.settings.tun_enabled = false;
         await invoke("sysproxy_set", { enabled: false, port: 0 });
       }
     } else {
       // 激活 Windows 系统代理
-      await settingsStore.updateSettings({ tun_enabled: false });
+      await invoke("tun_set_enabled", { enabled: false });
+      settingsStore.settings.tun_enabled = false;
       await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
       if (proxyStore.proxyMode === "direct") {
         await proxyStore.changeProxyMode("rule");
@@ -111,8 +115,8 @@ async function toggleProxy() {
     // 一键关机，完全释放接管 (注销 Windows IE 代理并关闭 TUN)
     // 同时将 proxy_mode 写入 settings.json，确保 Rust 后端读到完全释放状态，防止 sing-box 后台自启动
     await settingsStore.updateSettings({ tun_enabled: false, proxy_mode: "direct" });
+    settingsStore.settings.tun_enabled = false;
     await invoke("sysproxy_set", { enabled: false, port: 0 });
-    // 同步更新本地 store 状态（不再发起 Clash API 请求，因为核心已停止）
     proxyStore.$patch({ proxyMode: "direct" });
   }
 }
