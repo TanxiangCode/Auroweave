@@ -11,7 +11,6 @@ import { useFluidWave } from "@/composables/useFluidWave";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import SpeedChart from "@/components/charts/SpeedChart.vue";
-import SvgIcon from "@/components/common/SvgIcon.vue";
 
 const router = useRouter();
 const connectionStore = useConnectionStore();
@@ -29,16 +28,12 @@ const {
 
 const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
 
-// 流量接管三态读写双向绑定
+// 流量接管双态读写双向绑定
 const inboundMode = computed({
   get() {
-    const tun = settingsStore.settings.tun_enabled;
-    const isDirect = proxyStore.proxyMode === "direct";
-    if (tun && isDirect) return "tun";
-    if (tun && !isDirect) return "mixed";
-    return "system";
+    return settingsStore.settings.tun_enabled ? "tun" : "system";
   },
-  async set(val: "system" | "tun" | "mixed") {
+  async set(val: "system" | "tun") {
     if (val === "system") {
       await settingsStore.updateSettings({ tun_enabled: false });
       if (proxyStore.proxyMode === "direct") {
@@ -47,11 +42,6 @@ const inboundMode = computed({
     } else if (val === "tun") {
       await settingsStore.updateSettings({ tun_enabled: true });
       await proxyStore.changeProxyMode("direct");
-    } else if (val === "mixed") {
-      await settingsStore.updateSettings({ tun_enabled: true });
-      if (proxyStore.proxyMode === "direct") {
-        await proxyStore.changeProxyMode("rule");
-      }
     }
   }
 });
@@ -83,20 +73,20 @@ onMounted(async () => {
   <div class="dashboard-layout">
     <!-- 上部：“两翼对称”三栏全息悬浮大格局 -->
     <div class="top-panel-row">
-      <!-- 左翼：流量接管与控制 -->
+      <!-- 左翼：流量接管与控制 (至简双胶囊) -->
       <div class="control-wing">
-        <!-- 胶囊 1: 流量接管三态切换 (System/TUN/Mixed) -->
+        <!-- 胶囊 1: 流量接管双态切换 (System/TUN) -->
         <div class="stat-pill">
           <span class="pill-label">流量接管</span>
           <div class="mode-selector inbound-selector">
             <button
-              v-for="mode in ['system', 'tun', 'mixed']"
+              v-for="mode in ['system', 'tun']"
               :key="mode"
               class="mode-btn"
               :class="{ active: inboundMode === mode }"
               @click="inboundMode = mode as any"
             >
-              {{ mode === 'system' ? '系统' : mode === 'tun' ? 'TUN' : '混合' }}
+              {{ mode === 'system' ? '系统代理' : 'TUN 网卡' }}
             </button>
           </div>
         </div>
@@ -114,18 +104,6 @@ onMounted(async () => {
             >
               {{ mode === 'global' ? '全局' : mode === 'rule' ? '规则' : '直连' }}
             </button>
-          </div>
-        </div>
-
-        <!-- 胶囊 3: 核心引擎状态与状态同步 -->
-        <div class="stat-pill clickable-pill" @click="proxyStore.fetchGroups" title="点击手动同步刷新引擎数据">
-          <span class="pill-label">核心引擎</span>
-          <div class="engine-status-row">
-            <span class="engine-active-tag">
-              <span class="status-dot-indicator active"></span>
-              ACTIVE
-            </span>
-            <SvgIcon name="refresh" :size="12" class="refresh-icon-spin" />
           </div>
         </div>
       </div>
@@ -158,7 +136,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 右翼：流量统计与历史 (垂直层叠镜像) -->
+      <!-- 右翼：流量统计与数据 (垂直对齐镜像) -->
       <div class="stats-wing">
         <!-- 胶囊 1: 活动连接 -> 点击跳转安全审计 -->
         <div
@@ -170,24 +148,18 @@ onMounted(async () => {
           <span class="pill-val cyan-glow">{{ activeConnectionCount }} 条</span>
         </div>
 
-        <!-- 胶囊 2: 累计下载 -> 点击跳转流量统计 -->
+        <!-- 胶囊 2: 累计流量 -> 下载/上传合二为一，点击跳转流量统计 -->
         <div
           class="stat-pill clickable-pill"
           @click="router.push('/stats')"
           title="点击查看详细流量统计"
         >
-          <span class="pill-label">累计下载</span>
-          <span class="pill-val">{{ formatBytes(totalDownload) }}</span>
-        </div>
-
-        <!-- 胶囊 3: 累计上传 -> 点击跳转流量统计 -->
-        <div
-          class="stat-pill clickable-pill"
-          @click="router.push('/stats')"
-          title="点击查看详细流量统计"
-        >
-          <span class="pill-label">累计上传</span>
-          <span class="pill-val">{{ formatBytes(totalUpload) }}</span>
+          <span class="pill-label">累计流量</span>
+          <span class="pill-val data-combined-val">
+            <span class="down-flow">↓ {{ formatBytes(totalDownload) }}</span>
+            <span class="divider">|</span>
+            <span class="up-flow">↑ {{ formatBytes(totalUpload) }}</span>
+          </span>
         </div>
       </div>
     </div>
@@ -228,18 +200,18 @@ onMounted(async () => {
 /* ---- 上部：“两翼对称”三栏全息悬浮大格局 ---- */
 .top-panel-row {
   display: grid;
-  grid-template-columns: 320px 1fr 260px;
+  grid-template-columns: 320px 1fr 280px; /* 稍微调宽右翼容纳合显流量 */
   gap: 24px;
   align-items: center;
   width: 100%;
   height: 260px; /* 锁死上部高度，保证对称呼吸感 */
 }
 
-/* 移除 control-wing 和 stats-wing 的 glass-effect 大包装背景，改为完全高透悬浮 */
+/* 移除 control-wing 和 stats-wing 的包装背景，完全高透悬浮 */
 .control-wing, .stats-wing {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px; /* 调宽至 24px，使 2 个胶囊的高度范围与中间 240px 圆环能量核完美对齐 */
   justify-content: center;
   height: 100%;
 }
@@ -296,6 +268,32 @@ onMounted(async () => {
   text-shadow: 0 0 6px var(--accent-cyan-glow);
 }
 
+/* ---- 累计流量合二为一渲染 ---- */
+.data-combined-val {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  font-family: var(--font-mono, monospace);
+}
+
+.down-flow {
+  color: var(--accent-cyan);
+  text-shadow: 0 0 4px var(--accent-cyan-glow);
+}
+
+.up-flow {
+  color: var(--accent-purple, #b388ff);
+  text-shadow: 0 0 4px rgba(179, 136, 255, 0.25);
+}
+
+.divider {
+  color: var(--border-strong);
+  font-weight: var(--weight-light);
+  opacity: 0.5;
+}
+
 /* ---- 模式选择器 (Mode Selector) 全圆角大统一 ---- */
 .mode-selector {
   display: flex;
@@ -305,9 +303,9 @@ onMounted(async () => {
   gap: 2px;
 }
 
-/* 接管模式包含 3 项，设定总宽 */
+/* 接管模式包含 2 项，设定总宽 */
 .inbound-selector {
-  width: 160px;
+  width: 150px;
 }
 
 /* 分流模式包含 3 项，设定总宽 */
@@ -343,48 +341,6 @@ onMounted(async () => {
 .rule-selector .mode-btn.active {
   color: var(--accent-blue);
   box-shadow: 0 0 8px var(--accent-blue-glow);
-}
-
-/* ---- 核心引擎状态与刷新按钮 ---- */
-.engine-status-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.engine-active-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-weight: var(--weight-bold);
-  color: var(--accent-green);
-  background: var(--accent-green-glow);
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-}
-
-.status-dot-indicator {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-}
-
-.status-dot-indicator.active {
-  background: var(--accent-green);
-  box-shadow: 0 0 6px var(--accent-green);
-}
-
-.refresh-icon-spin {
-  color: var(--text-tertiary);
-  transition: transform 0.4s var(--ease-out);
-}
-
-.stat-pill:hover .refresh-icon-spin {
-  color: var(--accent-green);
-  transform: rotate(180deg); /* 鼠标移入自动旋转，灵动非凡 */
 }
 
 /* ---- 中央：圆环能量核 ---- */
