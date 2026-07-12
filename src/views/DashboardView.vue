@@ -18,8 +18,6 @@ const proxyStore = useProxyStore();
 const settingsStore = useSettingsStore();
 
 const {
-  rawDownloadSpeed,
-  rawUploadSpeed,
   smoothDownloadSpeed,
   activeConnectionCount,
   totalDownload,
@@ -108,29 +106,20 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 中央：旋转能量核 (视觉绝对重心) -->
+      <!-- 中央：旋转能量核 (视觉绝对重心，始终保持高亮绿色工作自旋) -->
       <div class="energy-wing">
         <div
           class="energy-core"
-          :class="{ connected: proxyStore.proxyMode !== 'direct' }"
+          class="connected"
           @click="toggleProxy"
-          :title="proxyStore.proxyMode !== 'direct' ? '点击关闭代理' : '点击开启代理'"
+          title="点击在分流与直连模式之间切换"
         >
           <div
             class="energy-ring"
             :style="{ transform: 'rotate(' + rotationDeg + 'deg)' }"
           >
             <div class="energy-inner">
-              <template v-if="proxyStore.proxyMode !== 'direct'">
-                <span class="energy-status-text">CONNECTED</span>
-                <span class="energy-mode-tag">{{ proxyStore.proxyMode.toUpperCase() }}</span>
-                <span class="energy-info-text">{{ activeConnectionCount }} 个连接</span>
-              </template>
-              <template v-else>
-                <span class="energy-status-text idle">TAP TO CONNECT</span>
-                <span class="status-dot-indicator"></span>
-                <span class="energy-info-text idle">已关闭 (直连)</span>
-              </template>
+              <span class="energy-status-text">CONNECTED</span>
             </div>
           </div>
         </div>
@@ -164,23 +153,9 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- 下部：实时折线图托底座 -->
+    <!-- 下部：实时折线图托底座 (消除重复 Header 标题) -->
     <div class="bottom-panel-row">
       <div class="chart-container glass-effect">
-        <div class="chart-header">
-          <span class="chart-title">
-            <span class="status-dot-pulse"></span>
-            实时网络流量趋势
-          </span>
-          <div class="chart-speed-legend">
-            <span class="speed-down">
-              ↓ 下载 {{ connectionStore.formatSpeed(rawDownloadSpeed) }}
-            </span>
-            <span class="speed-up">
-              ↑ 上传 {{ connectionStore.formatSpeed(rawUploadSpeed) }}
-            </span>
-          </div>
-        </div>
         <SpeedChart />
       </div>
     </div>
@@ -207,13 +182,14 @@ onMounted(async () => {
   height: 260px; /* 锁死上部高度，保证对称呼吸感 */
 }
 
-/* 移除 control-wing 和 stats-wing 的包装背景，完全高透悬浮 */
+/* 移除 control-wing 和 stats-wing 的包装背景，完全高透悬浮并底部对齐 */
 .control-wing, .stats-wing {
   display: flex;
   flex-direction: column;
-  gap: 24px; /* 调宽至 24px，使 2 个胶囊的高度范围与中间 240px 圆环能量核完美对齐 */
-  justify-content: center;
+  gap: 24px; /* 调宽至 24px，使 2 个胶囊在垂直对齐下高贵舒展 */
+  justify-content: flex-end; /* 左右内容底对齐 */
   height: 100%;
+  padding-bottom: 10px; /* 精调底部内边距，使胶囊物理底部与大圆环下边缘完全齐平 */
 }
 
 /* ---- 化方为圆：高透胶囊药丸 (Sleek Stadium Pill) ---- */
