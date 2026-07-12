@@ -3,9 +3,10 @@
  * Dashboard 首页 — 环绕双翼镜像对称布局
  * 作者: TanXiang
  */
-import { onMounted } from "vue";
+import { onMounted, computed } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
+import { useSettingsStore } from "@/stores/settings.store";
 import { useFluidWave } from "@/composables/useFluidWave";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
@@ -15,6 +16,7 @@ import SvgIcon from "@/components/common/SvgIcon.vue";
 const router = useRouter();
 const connectionStore = useConnectionStore();
 const proxyStore = useProxyStore();
+const settingsStore = useSettingsStore();
 
 const {
   rawDownloadSpeed,
@@ -26,6 +28,33 @@ const {
 } = storeToRefs(connectionStore);
 
 const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
+
+// 流量接管三态读写双向绑定
+const inboundMode = computed({
+  get() {
+    const tun = settingsStore.settings.tun_enabled;
+    const isDirect = proxyStore.proxyMode === "direct";
+    if (tun && isDirect) return "tun";
+    if (tun && !isDirect) return "mixed";
+    return "system";
+  },
+  async set(val: "system" | "tun" | "mixed") {
+    if (val === "system") {
+      await settingsStore.updateSettings({ tun_enabled: false });
+      if (proxyStore.proxyMode === "direct") {
+        await proxyStore.changeProxyMode("rule");
+      }
+    } else if (val === "tun") {
+      await settingsStore.updateSettings({ tun_enabled: true });
+      await proxyStore.changeProxyMode("direct");
+    } else if (val === "mixed") {
+      await settingsStore.updateSettings({ tun_enabled: true });
+      if (proxyStore.proxyMode === "direct") {
+        await proxyStore.changeProxyMode("rule");
+      }
+    }
+  }
+});
 
 function toggleProxy() {
   const targetMode = proxyStore.proxyMode === "direct" ? "rule" : "direct";
@@ -44,29 +73,38 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await settingsStore.fetchSettings();
   proxyStore.fetchGroups();
 });
 </script>
 
 <template>
   <div class="dashboard-layout">
-    <!-- 上部：“两翼对称”三栏大格局 -->
+    <!-- 上部：“两翼对称”三栏全息悬浮大格局 -->
     <div class="top-panel-row">
-      <!-- 左翼：出站控制 -->
-      <div class="control-wing glass-effect">
-        <div class="wing-header">
-          <SvgIcon name="settings" :size="13" style="color: var(--accent-blue);" />
-          <span class="wing-title">控制面板</span>
-        </div>
-        <div class="control-card">
-          <div class="active-node-row">
-            <span class="node-label">当前出站</span>
-            <span class="node-value" :title="proxyStore.workingNodeName">
-              {{ proxyStore.workingNodeName }}
-            </span>
+      <!-- 左翼：流量接管与控制 -->
+      <div class="control-wing">
+        <!-- 胶囊 1: 流量接管三态切换 (System/TUN/Mixed) -->
+        <div class="stat-pill">
+          <span class="pill-label">流量接管</span>
+          <div class="mode-selector inbound-selector">
+            <button
+              v-for="mode in ['system', 'tun', 'mixed']"
+              :key="mode"
+              class="mode-btn"
+              :class="{ active: inboundMode === mode }"
+              @click="inboundMode = mode as any"
+            >
+              {{ mode === 'system' ? '系统' : mode === 'tun' ? 'TUN' : '混合' }}
+            </button>
           </div>
-          <div class="mode-selector">
+        </div>
+
+        <!-- 胶囊 2: 分流模式三态切换 (Global/Rule/Direct) -->
+        <div class="stat-pill">
+          <span class="pill-label">分流规则</span>
+          <div class="mode-selector rule-selector">
             <button
               v-for="mode in ['global', 'rule', 'direct']"
               :key="mode"
@@ -78,9 +116,21 @@ onMounted(() => {
             </button>
           </div>
         </div>
+
+        <!-- 胶囊 3: 核心引擎状态与状态同步 -->
+        <div class="stat-pill clickable-pill" @click="proxyStore.fetchGroups" title="点击手动同步刷新引擎数据">
+          <span class="pill-label">核心引擎</span>
+          <div class="engine-status-row">
+            <span class="engine-active-tag">
+              <span class="status-dot-indicator active"></span>
+              ACTIVE
+            </span>
+            <SvgIcon name="refresh" :size="12" class="refresh-icon-spin" />
+          </div>
+        </div>
       </div>
 
-      <!-- 中央：旋转圆环能量核 (视觉绝对重心) -->
+      <!-- 中央：旋转能量核 (视觉绝对重心) -->
       <div class="energy-wing">
         <div
           class="energy-core"
@@ -108,45 +158,41 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 右翼：流量统计小卡片 (垂直层叠镜像) -->
-      <div class="stats-wing glass-effect">
-        <div class="wing-header">
-          <SvgIcon name="audit" :size="13" style="color: var(--accent-cyan);" />
-          <span class="wing-title">实时大盘</span>
+      <!-- 右翼：流量统计与历史 (垂直层叠镜像) -->
+      <div class="stats-wing">
+        <!-- 胶囊 1: 活动连接 -> 点击跳转安全审计 -->
+        <div
+          class="stat-pill clickable-pill"
+          @click="router.push('/audit')"
+          title="点击查看实时连接审计"
+        >
+          <span class="pill-label">活动连接</span>
+          <span class="pill-val cyan-glow">{{ activeConnectionCount }} 条</span>
         </div>
-        <div class="stats-col">
-          <!-- 连接数 -> 跳转审计 -->
-          <div
-            class="stat-pill clickable-pill"
-            @click="router.push('/audit')"
-            title="点击查看实时连接审计"
-          >
-            <span class="pill-label">活动连接</span>
-            <span class="pill-val cyan-glow">{{ activeConnectionCount }} 条</span>
-          </div>
-          <!-- 下载 -> 跳转统计 -->
-          <div
-            class="stat-pill clickable-pill"
-            @click="router.push('/stats')"
-            title="点击查看详细流量统计"
-          >
-            <span class="pill-label">累计下载</span>
-            <span class="pill-val">{{ formatBytes(totalDownload) }}</span>
-          </div>
-          <!-- 上传 -> 跳转统计 -->
-          <div
-            class="stat-pill clickable-pill"
-            @click="router.push('/stats')"
-            title="点击查看详细流量统计"
-          >
-            <span class="pill-label">累计上传</span>
-            <span class="pill-val">{{ formatBytes(totalUpload) }}</span>
-          </div>
+
+        <!-- 胶囊 2: 累计下载 -> 点击跳转流量统计 -->
+        <div
+          class="stat-pill clickable-pill"
+          @click="router.push('/stats')"
+          title="点击查看详细流量统计"
+        >
+          <span class="pill-label">累计下载</span>
+          <span class="pill-val">{{ formatBytes(totalDownload) }}</span>
+        </div>
+
+        <!-- 胶囊 3: 累计上传 -> 点击跳转流量统计 -->
+        <div
+          class="stat-pill clickable-pill"
+          @click="router.push('/stats')"
+          title="点击查看详细流量统计"
+        >
+          <span class="pill-label">累计上传</span>
+          <span class="pill-val">{{ formatBytes(totalUpload) }}</span>
         </div>
       </div>
     </div>
 
-    <!-- 下部：实时折线图底托 -->
+    <!-- 下部：实时折线图托底座 -->
     <div class="bottom-panel-row">
       <div class="chart-container glass-effect">
         <div class="chart-header">
@@ -179,104 +225,166 @@ onMounted(() => {
   overflow: hidden; /* 保证在 1020x680 分辨率下完美贴合且不出现滚动条 */
 }
 
-/* ---- 上部：“两翼对称”三栏 ---- */
+/* ---- 上部：“两翼对称”三栏全息悬浮大格局 ---- */
 .top-panel-row {
   display: grid;
   grid-template-columns: 320px 1fr 260px;
   gap: 24px;
   align-items: center;
   width: 100%;
+  height: 260px; /* 锁死上部高度，保证对称呼吸感 */
 }
 
-.wing-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 10px;
-}
-
-.wing-title {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.control-wing {
-  height: 260px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.control-card {
+/* 移除 control-wing 和 stats-wing 的 glass-effect 大包装背景，改为完全高透悬浮 */
+.control-wing, .stats-wing {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  height: 100%;
   justify-content: center;
+  height: 100%;
 }
 
-.active-node-row {
+/* ---- 化方为圆：高透胶囊药丸 (Sleek Stadium Pill) ---- */
+.stat-pill {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--layer-1);
+  backdrop-filter: var(--blur-panel);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-full); /* 彻底的胶囊圆形跑道角，告别方圆违和 */
+  height: 48px; /* 锁定高度，保证两侧垂直对齐极其工整 */
+  transition: all var(--duration-fast) var(--ease-out);
 }
 
-.node-label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-secondary);
+.stat-pill.clickable-pill {
+  cursor: pointer;
 }
 
-.node-value {
+/* 向内磁吸式 hover 位移动效 (左翼向右，右翼向左) */
+.control-wing .stat-pill.clickable-pill:hover {
+  background: var(--layer-2);
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 12px var(--accent-blue-glow);
+  transform: translateX(4px); /* 向右朝能量核方向微微聚拢 */
+}
+
+.stats-wing .stat-pill.clickable-pill:hover {
+  background: var(--layer-2);
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 12px var(--accent-blue-glow);
+  transform: translateX(-4px); /* 向左朝能量核方向微微聚拢 */
+}
+
+.pill-label {
   font-size: var(--text-xs);
+  color: var(--text-secondary);
   font-weight: var(--weight-bold);
-  color: var(--accent-cyan);
-  background: var(--accent-cyan-glow);
-  padding: 4px 12px;
-  border-radius: var(--radius-sm);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  box-shadow: 0 0 8px var(--accent-cyan-glow);
+  letter-spacing: 0.5px;
 }
 
+.pill-val {
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  font-weight: var(--weight-bold);
+  font-family: var(--font-mono, monospace);
+}
+
+.pill-val.cyan-glow {
+  color: var(--accent-cyan);
+  text-shadow: 0 0 6px var(--accent-cyan-glow);
+}
+
+/* ---- 模式选择器 (Mode Selector) 全圆角大统一 ---- */
 .mode-selector {
   display: flex;
   background: var(--layer-2);
-  padding: 3px;
-  border-radius: var(--radius-sm);
-  gap: 4px;
+  padding: 2px;
+  border-radius: var(--radius-full); /* 完全圆润 */
+  gap: 2px;
+}
+
+/* 接管模式包含 3 项，设定总宽 */
+.inbound-selector {
+  width: 160px;
+}
+
+/* 分流模式包含 3 项，设定总宽 */
+.rule-selector {
+  width: 140px;
 }
 
 .mode-btn {
   flex: 1;
-  padding: 8px 0;
+  padding: 4px 0;
   background: transparent;
   border: none;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }
 
 .mode-btn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.02);
 }
 
 .mode-btn.active {
   background: var(--layer-1);
-  color: var(--accent-blue);
+  color: var(--accent-cyan);
   font-weight: var(--weight-bold);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 0 8px var(--accent-cyan-glow);
+}
+
+/* 规则选择按钮激活态用蓝光呼应 */
+.rule-selector .mode-btn.active {
+  color: var(--accent-blue);
+  box-shadow: 0 0 8px var(--accent-blue-glow);
+}
+
+/* ---- 核心引擎状态与刷新按钮 ---- */
+.engine-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.engine-active-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  color: var(--accent-green);
+  background: var(--accent-green-glow);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.status-dot-indicator {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.status-dot-indicator.active {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
+}
+
+.refresh-icon-spin {
+  color: var(--text-tertiary);
+  transition: transform 0.4s var(--ease-out);
+}
+
+.stat-pill:hover .refresh-icon-spin {
+  color: var(--accent-green);
+  transform: rotate(180deg); /* 鼠标移入自动旋转，灵动非凡 */
 }
 
 /* ---- 中央：圆环能量核 ---- */
@@ -367,70 +475,7 @@ onMounted(() => {
   color: var(--text-tertiary);
 }
 
-.status-dot-indicator {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-}
-
-/* ---- 右翼：流量大盘 ---- */
-.stats-wing {
-  height: 260px;
-  display: flex;
-  flex-direction: column;
-}
-
-.stats-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  height: 100%;
-  justify-content: center;
-}
-
-.stat-pill {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--layer-1);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-md);
-  transition: all var(--duration-fast) var(--ease-out);
-}
-
-.stat-pill.clickable-pill {
-  cursor: pointer;
-}
-
-.stat-pill.clickable-pill:hover {
-  background: var(--layer-2);
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 10px var(--accent-blue-glow);
-  transform: translateX(-2px);
-}
-
-.pill-label {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  font-weight: var(--weight-semibold);
-}
-
-.pill-val {
-  font-size: var(--text-xs);
-  color: var(--text-primary);
-  font-weight: var(--weight-bold);
-  font-family: var(--font-mono, monospace);
-}
-
-.pill-val.cyan-glow {
-  color: var(--accent-cyan);
-  text-shadow: 0 0 4px var(--accent-cyan-glow);
-}
-
-/* ---- 下部：折线图底托 ---- */
+/* ---- 下部：折线图底座 ---- */
 .bottom-panel-row {
   flex: 1;
   display: flex;
@@ -487,11 +532,12 @@ onMounted(() => {
   color: var(--accent-purple, #b388ff);
 }
 
+/* 磨砂玻璃底座 — 提升圆角至 24px，化棱角为圆润 */
 .glass-effect {
   background: var(--layer-1);
   backdrop-filter: var(--blur-panel);
   border: 1px solid var(--border-normal);
-  border-radius: var(--radius-lg);
+  border-radius: 24px; /* 升级为 24px，视觉圆润过渡 */
   padding: 20px;
   transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }

@@ -41,13 +41,6 @@
           @change="save"
         />
       </div>
-
-      <div class="setting-item">
-        <div class="item-label">
-          <span>TUN 虚拟网卡接管</span>
-          <span class="sub-label">全局接管操作系统所有 UDP/TCP 流量 (需要管理员/UAC 权限)</span>
-        </div>
-        <input type="checkbox" v-model="settingsStore.settings.tun_enabled" class="switch" @change="save" />
       </div>
     </div>
   </div>
