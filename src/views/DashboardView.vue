@@ -109,8 +109,7 @@ onMounted(async () => {
       <!-- 中央：旋转能量核 (视觉绝对重心，始终保持高亮绿色工作自旋) -->
       <div class="energy-wing">
         <div
-          class="energy-core"
-          class="connected"
+          class="energy-core connected"
           @click="toggleProxy"
           title="点击在分流与直连模式之间切换"
         >
