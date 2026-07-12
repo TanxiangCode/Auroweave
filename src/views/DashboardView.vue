@@ -109,9 +109,10 @@ async function toggleProxy() {
     }
   } else {
     // 一键关机，完全释放接管 (注销 Windows IE 代理并关闭 TUN)
-    await settingsStore.updateSettings({ tun_enabled: false });
+    // 同时将 proxy_mode 写入 settings.json，确保 Rust 后端读到完全释放状态，防止 sing-box 后台自启动
+    await settingsStore.updateSettings({ tun_enabled: false, proxy_mode: "direct" });
     await invoke("sysproxy_set", { enabled: false, port: 0 });
-    // 本地状态更新，不再发送网络请求去调 Clash API (避开因为内核 stop 期间访问 API 报 Toast 切换失败错误)
+    // 同步更新本地 store 状态（不再发起 Clash API 请求，因为核心已停止）
     proxyStore.$patch({ proxyMode: "direct" });
   }
 }
