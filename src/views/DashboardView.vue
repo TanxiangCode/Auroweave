@@ -253,7 +253,7 @@ onMounted(async () => {
 <template>
   <div class="dashboard-layout">
     <!-- 上部：“两翼对称”三栏全息悬浮大格局 -->
-    <div class="top-panel-row">
+    <div class="top-panel-row" :class="{ 'idle-layout': !proxyActive }">
       <!-- 左翼：流量接管与控制 (至简双胶囊) -->
       <div v-if="proxyActive" class="control-wing">
         <!-- 胶囊 1: 流量接管双态切换 (System/TUN) -->
@@ -290,10 +290,9 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <div v-else class="control-wing empty-wing"></div>
 
       <!-- 中央：旋转能量核 (视觉绝对重心) -->
-      <div class="energy-wing">
+      <div class="energy-wing" :class="{ 'full-center': !proxyActive }">
         <div
           class="energy-core"
           :class="{ connected: proxyActive }"
@@ -311,6 +310,19 @@ onMounted(async () => {
               <span v-if="proxyActive" class="energy-status-text" :style="coreGlowStyle.text">CONNECTED</span>
               <span v-else class="energy-status-text idle">TAP TO CONNECT</span>
             </div>
+          </div>
+        </div>
+
+        <!-- 关闭代理时的极简科技神盾详情 -->
+        <div v-if="!proxyActive" class="shield-tips-container">
+          <div class="shield-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shield-svg">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <div class="shield-title">Auroweave 安全防线已静默</div>
+          <div class="shield-desc">
+            Windows 系统代理与 TUN 虚拟网卡已安全释放。点击中心核一键激活网络全息守护。
           </div>
         </div>
       </div>
@@ -341,7 +353,6 @@ onMounted(async () => {
           </span>
         </div>
       </div>
-      <div v-else class="stats-wing empty-wing"></div>
     </div>
 
     <!-- 下部：实时折线图托底座 (消除重复 Header 标题) -->
@@ -612,6 +623,84 @@ onMounted(async () => {
   100% {
     transform: scale(1);
     filter: drop-shadow(0 0 8px v-bind(breathingGlowColor));
+  }
+}
+
+/* ---- 关闭代理时（Idle 状态）布局微调与科技防线包装 ---- */
+.top-panel-row.idle-layout {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  flex: 1;
+  height: 100%;
+  padding-top: 40px; /* 精调整体向下居中的舒适上边距 */
+}
+
+.energy-wing.full-center {
+  flex-direction: column;
+  height: auto;
+  gap: 36px;
+  justify-content: center;
+  align-items: center;
+}
+
+.shield-tips-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 420px;
+  opacity: 0;
+  transform: translateY(12px);
+  animation: fadeInShield 0.8s forwards var(--ease-out);
+}
+
+.shield-icon {
+  width: 44px;
+  height: 44px;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--layer-1);
+  border: 1px solid var(--border-normal);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.5s ease-in-out;
+}
+
+.shield-svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* 兄弟选择器联动：当大圆环被悬浮时，下方的盾牌组件亮起呼吸青光！ */
+.energy-core:hover + .shield-tips-container .shield-icon {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan-glow);
+  box-shadow: 0 0 16px var(--accent-cyan-glow);
+}
+
+.shield-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  letter-spacing: 1px;
+}
+
+.shield-desc {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+
+@keyframes fadeInShield {
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 </style>
