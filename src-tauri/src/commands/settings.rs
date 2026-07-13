@@ -10,6 +10,8 @@ pub struct AppSettings {
     pub proxy_mode: String,
     pub auto_start: bool,
     pub tun_enabled: bool,
+    /// TUN 虚拟网卡名称，显示在 Windows 网络适配器列表中，默认 Auroweave
+    pub tun_interface_name: String,
     pub topology_enabled: bool,
     pub performance_mode: bool,
     pub command_palette_hotkey: String,
@@ -32,6 +34,7 @@ impl Default for AppSettings {
             proxy_mode: "rule".to_string(),
             auto_start: false,
             tun_enabled: false,
+            tun_interface_name: "Auroweave".to_string(),
             topology_enabled: false,
             performance_mode: false,
             command_palette_hotkey: "CommandOrControl+Space".to_string(),
@@ -105,10 +108,16 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         
         // TUN 模式入口 (如果启用)
         if settings.tun_enabled {
+            // 使用用户配置的网卡名称，默认 Auroweave
+            let iface_name = if settings.tun_interface_name.trim().is_empty() {
+                "Auroweave".to_string()
+            } else {
+                settings.tun_interface_name.clone()
+            };
             inbounds.push(serde_json::json!({
                 "type": "tun",
                 "tag": "tun-in",
-                "interface_name": "singbox-tun",
+                "interface_name": iface_name,
                 "address": ["172.19.0.1/30"],
                 "auto_route": true,
                 "strict_route": true,

@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   proxy_mode: "rule",
   auto_start: false,
   tun_enabled: false,
+  tun_interface_name: "Auroweave",
   topology_enabled: false,
   performance_mode: false,
   command_palette_hotkey: "CommandOrControl+Space",

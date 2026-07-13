@@ -172,6 +172,8 @@ export interface AppSettings {
   proxy_mode: ProxyMode;
   auto_start: boolean;
   tun_enabled: boolean;
+  /** TUN 虚拟网卡名称，显示在 Windows 网络适配器列表中，默认 "Auroweave" */
+  tun_interface_name: string;
   topology_enabled: boolean;
   performance_mode: boolean;
   command_palette_hotkey: string;
