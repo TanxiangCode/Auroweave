@@ -27,6 +27,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000",
   speed_test_timeout_secs: 5,
   connection_timeout_secs: 15,
+  core: {
+    runMode: "direct",
+    service: {
+      installedVersion: null,
+      lastKnownStatus: "not_installed",
+      lastFallbackReason: null,
+    },
+  },
 };
 
 export const useSettingsStore = defineStore("settings", () => {

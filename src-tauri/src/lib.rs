@@ -49,6 +49,12 @@ pub fn run() {
             commands::settings::settings_inject_terminal_proxy,
             commands::settings::settings_export_diagnostic_log,
             commands::settings::tun_set_enabled,
+            commands::settings::service_query_status,
+            commands::settings::service_install,
+            commands::settings::service_uninstall,
+            commands::settings::service_start,
+            commands::settings::service_stop,
+            commands::settings::service_read_log,
             commands::speedtest::speedtest_run_latency,
             commands::speedtest::speedtest_run_single,
             commands::speedtest::speedtest_run_batch,
@@ -75,18 +81,80 @@ pub fn run() {
                 // 在启动前，将最新的设置配置项同步到 config.json 中
                 let _ = commands::settings::rebuild_config_from_settings(app.handle());
 
+                let settings = commands::settings::settings_get_internal(app.handle());
+                let app_handle = app.handle().clone();
                 let sm = sidecar_manager.clone();
                 let path_str = config_path.to_string_lossy().to_string();
-                let app_handle = app.handle().clone();
+
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = sm.start(&path_str).await {
-                        tracing::warn!("启动 sing-box 失败: {}", e);
-                    } else {
-                        let settings = crate::commands::settings::settings_get_internal(&app_handle);
-                        if settings.tun_enabled {
-                            let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                    if settings.core.run_mode == "service" {
+                        // 系统服务模式自愈
+                        let status = crate::system::service_control::query_service_status().unwrap_or_default();
+                        if status == "not_installed" {
+                            tracing::warn!("系统服务未安装，启动时自动回退为直接运行模式");
+                            let mut patch_settings = settings.clone();
+                            patch_settings.core.run_mode = "direct".to_string();
+                            patch_settings.core.service.last_fallback_reason = Some("not_installed".to_string());
+                            let _ = commands::settings::update_settings_internal(&app_handle, serde_json::to_value(patch_settings).unwrap());
+                            
+                            let _ = sm.start(&path_str).await;
+                            if settings.tun_enabled {
+                                let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                            } else {
+                                let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                            }
                         } else {
-                            let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                            if status == "stopped" {
+                                if let Err(e) = crate::system::service_control::start_service() {
+                                    tracing::error!("系统服务启动失败: {}，回退为直接运行模式", e);
+                                    let mut patch_settings = settings.clone();
+                                    patch_settings.core.run_mode = "direct".to_string();
+                                    patch_settings.core.service.last_fallback_reason = Some("start_failed".to_string());
+                                    let _ = commands::settings::update_settings_internal(&app_handle, serde_json::to_value(patch_settings).unwrap());
+                                    
+                                    let _ = sm.start(&path_str).await;
+                                    if settings.tun_enabled {
+                                        let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                                    } else {
+                                        let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                                    }
+                                    return;
+                                }
+                            }
+                            
+                            // 同步配置至服务
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            if let Err(e) = commands::settings::sync_config_to_service(&app_handle).await {
+                                tracing::error!("配置同步至服务失败: {}，回退为直接运行模式", e);
+                                let mut patch_settings = settings.clone();
+                                patch_settings.core.run_mode = "direct".to_string();
+                                patch_settings.core.service.last_fallback_reason = Some("start_failed".to_string());
+                                let _ = commands::settings::update_settings_internal(&app_handle, serde_json::to_value(patch_settings).unwrap());
+                                
+                                let _ = sm.start(&path_str).await;
+                                if settings.tun_enabled {
+                                    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                                } else {
+                                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                                }
+                            } else {
+                                if settings.tun_enabled {
+                                    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                                } else {
+                                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                                }
+                            }
+                        }
+                    } else {
+                        // 直接运行模式
+                        if let Err(e) = sm.start(&path_str).await {
+                            tracing::warn!("启动 sing-box 失败: {}", e);
+                        } else {
+                            if settings.tun_enabled {
+                                let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                            } else {
+                                let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                            }
                         }
                     }
                 });
@@ -110,10 +178,16 @@ pub fn run() {
         .run(move |app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 let _ = system::sysproxy::set_system_proxy(false, 0);
-                let sidecar_manager = app_handle.state::<std::sync::Arc<SidecarManager>>().inner().clone();
-                tauri::async_runtime::block_on(async move {
-                    let _ = sidecar_manager.stop().await;
-                });
+                let settings = commands::settings::settings_get_internal(app_handle);
+                if settings.core.run_mode == "service" {
+                    let _ = system::service_control::stop_service();
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                } else {
+                    let sidecar_manager = app_handle.state::<std::sync::Arc<SidecarManager>>().inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = sidecar_manager.stop().await;
+                    });
+                }
             }
         });
 }

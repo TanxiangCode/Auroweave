@@ -32,3 +32,33 @@ export async function injectTerminalProxy(
 export async function exportDiagnosticLog(): Promise<ApiResponse<string>> {
   return invokeWithTimeout<ApiResponse<string>>("settings_export_diagnostic_log");
 }
+
+/** 查询 Windows 服务状态 */
+export async function serviceQueryStatus(): Promise<ApiResponse<AppSettings["core"]["service"]>> {
+  return invokeWithTimeout<ApiResponse<AppSettings["core"]["service"]>>("service_query_status");
+}
+
+/** 提权安装 Windows 服务 */
+export async function serviceInstall(): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("service_install", {}, 30000); // 提权需要较长超时
+}
+
+/** 提权卸载 Windows 服务 */
+export async function serviceUninstall(): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("service_uninstall", {}, 30000);
+}
+
+/** 启动 Windows 服务 */
+export async function serviceStart(): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("service_start");
+}
+
+/** 停止 Windows 服务 */
+export async function serviceStop(): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("service_stop");
+}
+
+/** 读取 Windows 服务日志 */
+export async function serviceReadLog(): Promise<ApiResponse<string>> {
+  return invokeWithTimeout<ApiResponse<string>>("service_read_log");
+}

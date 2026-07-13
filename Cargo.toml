@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "src-tauri",
+    "crates/auroweave-svc"
+]
+resolver = "2"

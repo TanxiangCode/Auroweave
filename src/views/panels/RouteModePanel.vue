@@ -43,8 +43,7 @@
       </div>
       </div>
     </div>
-  </div>
-</template>
+  </template>
 
 <script setup lang="ts">
 import { useSettingsStore } from "@/stores/settings.store";

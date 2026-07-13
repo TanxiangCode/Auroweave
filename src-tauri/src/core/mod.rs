@@ -4,3 +4,4 @@ pub mod sidecar;
 pub mod parser;
 pub mod config_builder;
 pub mod clash_api;
+pub mod ipc_client;

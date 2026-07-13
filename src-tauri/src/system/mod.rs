@@ -3,3 +3,4 @@
 pub mod process;
 pub mod sysproxy;
 pub mod job;
+pub mod service_control;

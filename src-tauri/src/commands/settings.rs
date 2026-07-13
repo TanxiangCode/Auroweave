@@ -4,13 +4,41 @@ use crate::error::ApiResponse;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CoreServiceSettings {
+    #[serde(rename = "installedVersion")]
+    pub installed_version: Option<String>,
+    #[serde(rename = "lastKnownStatus")]
+    pub last_known_status: String,
+    #[serde(rename = "lastFallbackReason")]
+    pub last_fallback_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CoreSettings {
+    #[serde(rename = "runMode")]
+    pub run_mode: String,
+    pub service: CoreServiceSettings,
+}
+
+fn default_core_settings() -> CoreSettings {
+    CoreSettings {
+        run_mode: "direct".to_string(),
+        service: CoreServiceSettings {
+            installed_version: None,
+            last_known_status: "not_installed".to_string(),
+            last_fallback_reason: None,
+        },
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     pub theme: String,
     pub language: String,
     pub proxy_mode: String,
     pub auto_start: bool,
     pub tun_enabled: bool,
-    /// TUN 虚拟网卡名称，显示在 Windows 网络适配器列表中，默认 Auroweave
+    /// TUN 虚拟网卡名称，显示 in Windows 网络适配器列表中，默认 Auroweave
     pub tun_interface_name: String,
     pub topology_enabled: bool,
     pub performance_mode: bool,
@@ -24,6 +52,9 @@ pub struct AppSettings {
     pub speed_test_url: String,
     pub speed_test_timeout_secs: u64,
     pub connection_timeout_secs: u64,
+
+    #[serde(default = "default_core_settings")]
+    pub core: CoreSettings,
 }
 
 impl Default for AppSettings {
@@ -50,6 +81,7 @@ impl Default for AppSettings {
             speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000".to_string(),
             speed_test_timeout_secs: 5,
             connection_timeout_secs: 15,
+            core: default_core_settings(),
         }
     }
 }
@@ -161,10 +193,9 @@ pub async fn settings_get_all(app_handle: tauri::AppHandle) -> ApiResponse<AppSe
     ApiResponse::ok(settings_get_internal(&app_handle))
 }
 
-/// 保存设置
-#[tauri::command]
-pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Value) -> ApiResponse<()> {
-    let path = get_settings_path(&app_handle);
+/// 内部保存设置辅助函数
+pub fn update_settings_internal(app_handle: &tauri::AppHandle, patch: serde_json::Value) -> Result<(), String> {
+    let path = get_settings_path(app_handle);
     let mut current = if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
             serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
@@ -190,41 +221,128 @@ pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Valu
     }
 
     if let Ok(content) = serde_json::to_string_pretty(&current) {
-        if let Err(e) = fs::write(&path, content) {
-            return ApiResponse::err(format!("写入设置文件失败: {}", e), 500);
-        }
+        fs::write(&path, content).map_err(|e| e.to_string())?;
     }
 
-    // 调用统一的 rebuild 函数更新 config.json
-    let _ = rebuild_config_from_settings(&app_handle);
+    let _ = rebuild_config_from_settings(app_handle);
+    Ok(())
+}
 
-    // 重新拉起 sidecar 生效新设置
+/// 将当前的 config.json 配置同步下发给系统服务
+pub async fn sync_config_to_service(app_handle: &tauri::AppHandle) -> Result<(), String> {
     let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
     let config_path = config_dir.join("config.json");
-    if config_path.exists() {
-        let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
-        let config_path_str = config_path.to_string_lossy().to_string();
-        let app_handle_clone = app_handle.clone();
-        tauri::async_runtime::spawn(async move {
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+    if !config_path.exists() {
+        return Err("config.json 配置文件不存在，请先导入订阅".to_string());
+    }
+
+    let config_path_str = config_path.to_string_lossy().to_string();
+    let resp = crate::core::ipc_client::send_ipc_request("RELOAD_CONFIG", Some(&config_path_str)).await?;
+    if !resp.success {
+        return Err(resp.error.unwrap_or_else(|| "服务内部处理配置重载异常".to_string()));
+    }
+    Ok(())
+}
+
+/// 保存设置
+#[tauri::command]
+pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Value) -> ApiResponse<()> {
+    let old_settings = settings_get_internal(&app_handle);
+    if let Err(e) = update_settings_internal(&app_handle, patch) {
+        return ApiResponse::err(format!("写入设置失败: {}", e), 500);
+    }
+    let new_settings = settings_get_internal(&app_handle);
+
+    // 如果模式发生了切换
+    if old_settings.core.run_mode != new_settings.core.run_mode {
+        if new_settings.core.run_mode == "service" {
+            // 从 direct 切换到 service
+            let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
             let _ = sidecar_manager.stop().await;
-            
-            // 完全释放网络接管状态拦截：若是直连模式且 TUN 未启用，直接退出不自启动进程
-            let settings = settings_get_internal(&app_handle_clone);
-            if settings.proxy_mode == "direct" && !settings.tun_enabled {
-                tracing::info!("系统处于直连且TUN关闭的完全释放状态，sing-box 进程保持停止且不自启动");
-                return;
-            }
-            
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            if sidecar_manager.start(&config_path_str).await.is_ok() {
-                if settings.tun_enabled {
-                    let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
-                } else {
-                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+
+            // 检查并确保服务处于运行状态
+            let status = crate::system::service_control::query_service_status().unwrap_or_default();
+            if status == "stopped" {
+                if let Err(e) = crate::system::service_control::start_service() {
+                    return ApiResponse::err(format!("启动系统服务失败: {}", e), 500);
                 }
             }
-        });
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            if let Err(e) = sync_config_to_service(&app_handle).await {
+                return ApiResponse::err(format!("同步配置至服务失败: {}", e), 500);
+            }
+
+            if new_settings.tun_enabled {
+                let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+            } else {
+                let _ = crate::system::sysproxy::set_system_proxy(true, new_settings.mixed_port);
+            }
+        } else {
+            // 从 service 切换到 direct
+            let _ = crate::system::service_control::stop_service();
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+
+            let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
+            let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
+            let config_path = config_dir.join("config.json");
+            if config_path.exists() {
+                let config_path_str = config_path.to_string_lossy().to_string();
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                if sidecar_manager.start(&config_path_str).await.is_ok() {
+                    if new_settings.tun_enabled {
+                        let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                    } else {
+                        let _ = crate::system::sysproxy::set_system_proxy(true, new_settings.mixed_port);
+                    }
+                }
+            }
+        }
+    } else {
+        // 模式未变，只是更新设置参数
+        if new_settings.core.run_mode == "service" {
+            // 同步配置
+            let _ = sync_config_to_service(&app_handle).await;
+            if new_settings.proxy_mode == "direct" && !new_settings.tun_enabled {
+                let _ = crate::core::ipc_client::send_ipc_request("SHUTDOWN_CORE", None).await;
+                let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+            } else {
+                if new_settings.tun_enabled {
+                    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                } else {
+                    let _ = crate::system::sysproxy::set_system_proxy(true, new_settings.mixed_port);
+                }
+            }
+        } else {
+            // 直接运行模式下的重载逻辑
+            let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
+            let config_path = config_dir.join("config.json");
+            if config_path.exists() {
+                let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
+                let config_path_str = config_path.to_string_lossy().to_string();
+                let app_handle_clone = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+                    let _ = sidecar_manager.stop().await;
+
+                    let settings = settings_get_internal(&app_handle_clone);
+                    if settings.proxy_mode == "direct" && !settings.tun_enabled {
+                        tracing::info!("系统处于直连且TUN关闭，sing-box 保持停止");
+                        return;
+                    }
+
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    if sidecar_manager.start(&config_path_str).await.is_ok() {
+                        if settings.tun_enabled {
+                            let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                        } else {
+                            let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                        }
+                    }
+                });
+            }
+        }
     }
 
     ApiResponse::ok(())
@@ -270,70 +388,174 @@ pub async fn settings_export_diagnostic_log(app_handle: tauri::AppHandle) -> Api
 }
 
 /// 专用 TUN 模式切换命令 (同步等待进程启动结果并将失败透传前端)
-/// 作者: TanXiang
 #[tauri::command]
 pub async fn tun_set_enabled(app_handle: tauri::AppHandle, enabled: bool) -> ApiResponse<()> {
     tracing::info!("设置 TUN 接管模式: enabled={}", enabled);
 
-    // 先写入设置文件
-    let path = get_settings_path(&app_handle);
-    let mut current = if path.exists() {
-        fs::read_to_string(&path)
-            .ok()
-            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-            .unwrap_or_else(|| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
-
-    if let Some(obj) = current.as_object_mut() {
-        obj.insert("tun_enabled".to_string(), serde_json::Value::Bool(enabled));
-    }
-    if let Ok(content) = serde_json::to_string_pretty(&current) {
-        let _ = fs::write(&path, content);
+    let mut current_settings = settings_get_internal(&app_handle);
+    current_settings.tun_enabled = enabled;
+    
+    if let Err(e) = update_settings_internal(&app_handle, serde_json::to_value(current_settings).unwrap()) {
+        return ApiResponse::err(format!("保存设置失败: {}", e), 500);
     }
 
-    // 重新构建 config.json
-    let _ = rebuild_config_from_settings(&app_handle);
-
+    let settings = settings_get_internal(&app_handle);
     let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
-    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
-    let config_path = config_dir.join("config.json");
-
-    if !config_path.exists() {
-        return ApiResponse::err("config.json 不存在，请先导入订阅", 404);
-    }
-
-    let config_path_str = config_path.to_string_lossy().to_string();
-
-    // 清理系统代理，关闭当前进程
+    
+    // 清理系统代理
     let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-    let _ = sidecar_manager.stop().await;
 
-    if !enabled {
-        // 关闭 TUN，不重启（由外部决定是否切换回系统代理）
-        tracing::info!("TUN 接管模式已关闭");
-        return ApiResponse::ok(());
+    if settings.core.run_mode == "service" {
+        // 服务运行模式
+        if !enabled {
+            if let Err(e) = sync_config_to_service(&app_handle).await {
+                return ApiResponse::err(format!("重载服务配置失败: {}", e), 500);
+            }
+            tracing::info!("系统服务 TUN 模式已关闭");
+            return ApiResponse::ok(());
+        }
+
+        // 开启 TUN
+        let status = crate::system::service_control::query_service_status().unwrap_or_default();
+        if status != "running" {
+            if let Err(e) = crate::system::service_control::start_service() {
+                return ApiResponse::err(format!("启动系统服务失败: {}", e), 500);
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        match sync_config_to_service(&app_handle).await {
+            Ok(_) => {
+                tracing::info!("系统服务 TUN 模式启动成功");
+                ApiResponse::ok(())
+            }
+            Err(e) => {
+                tracing::error!("系统服务 TUN 模式启动失败: {:?}", e);
+                // 失败时回滚 settings
+                let mut fallback_settings = settings_get_internal(&app_handle);
+                fallback_settings.tun_enabled = false;
+                let _ = update_settings_internal(&app_handle, serde_json::to_value(fallback_settings).unwrap());
+                ApiResponse::err(format!("启动系统服务 TUN 失败: {}", e), 403)
+            }
+        }
+    } else {
+        // 直接运行模式
+        let _ = sidecar_manager.stop().await;
+
+        let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
+        let config_path = config_dir.join("config.json");
+        if !config_path.exists() {
+            return ApiResponse::err("config.json 不存在，请先导入订阅", 404);
+        }
+        let config_path_str = config_path.to_string_lossy().to_string();
+
+        if !enabled {
+            tracing::info!("直连模式下 TUN 已关闭");
+            return ApiResponse::ok(());
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        match sidecar_manager.start(&config_path_str).await {
+            Ok(_) => {
+                tracing::info!("直连模式下 TUN 启动成功");
+                ApiResponse::ok(())
+            }
+            Err(e) => {
+                tracing::error!("直连模式下 TUN 启动失败: {:?}", e);
+                let mut fallback_settings = settings_get_internal(&app_handle);
+                fallback_settings.tun_enabled = false;
+                let _ = update_settings_internal(&app_handle, serde_json::to_value(fallback_settings).unwrap());
+                ApiResponse::err(format!("启动直连 TUN 失败: {}", e), 403)
+            }
+        }
     }
+}
 
-    // 开启 TUN，同步等待进程启动，真实返回失败状态
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    match sidecar_manager.start(&config_path_str).await {
+/// 查询系统服务状态与版本
+#[tauri::command]
+pub async fn service_query_status(app_handle: tauri::AppHandle) -> ApiResponse<CoreServiceSettings> {
+    let status = crate::system::service_control::query_service_status().unwrap_or_else(|e| {
+        tracing::error!("查询 Windows 系统服务状态异常: {}", e);
+        "error".to_string()
+    });
+
+    let settings = settings_get_internal(&app_handle);
+    let mut current_core = settings.core;
+    current_core.service.last_known_status = status;
+
+    ApiResponse::ok(current_core.service)
+}
+
+/// 提权安装系统服务
+#[tauri::command]
+pub async fn service_install(app_handle: tauri::AppHandle) -> ApiResponse<()> {
+    match crate::system::service_control::install_service_uac(&app_handle) {
         Ok(_) => {
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-            tracing::info!("TUN 接管模式启动成功");
+            // 安装成功后，自动为用户启动该服务
+            let _ = crate::system::service_control::start_service();
+            let version = app_handle.package_info().version.to_string();
+            
+            let mut settings = settings_get_internal(&app_handle);
+            settings.core.service.installed_version = Some(version);
+            settings.core.service.last_known_status = "running".to_string();
+            settings.core.service.last_fallback_reason = None;
+            let _ = update_settings_internal(&app_handle, serde_json::to_value(settings).unwrap());
+            
             ApiResponse::ok(())
         }
-        Err(e) => {
-            tracing::error!("TUN 接管模式启动失败: {:?}", e);
-            // 失败时将 tun_enabled 回写为 false
-            if let Some(obj) = current.as_object_mut() {
-                obj.insert("tun_enabled".to_string(), serde_json::Value::Bool(false));
-            }
-            if let Ok(content) = serde_json::to_string_pretty(&current) {
-                let _ = fs::write(&path, content);
-            }
-            ApiResponse::err(format!("启动 TUN 接管失败，可能是权限不足: {}", e), 403)
+        Err(e) => ApiResponse::err(format!("提权安装系统服务失败: {}", e), 500),
+    }
+}
+
+/// 提权卸载系统服务
+#[tauri::command]
+pub async fn service_uninstall(app_handle: tauri::AppHandle) -> ApiResponse<()> {
+    match crate::system::service_control::uninstall_service_uac(&app_handle) {
+        Ok(_) => {
+            let mut settings = settings_get_internal(&app_handle);
+            settings.core.service.installed_version = None;
+            settings.core.service.last_known_status = "not_installed".to_string();
+            let _ = update_settings_internal(&app_handle, serde_json::to_value(settings).unwrap());
+            ApiResponse::ok(())
         }
+        Err(e) => ApiResponse::err(format!("提权卸载系统服务失败: {}", e), 500),
+    }
+}
+
+/// 手动启动系统服务
+#[tauri::command]
+pub async fn service_start(app_handle: tauri::AppHandle) -> ApiResponse<()> {
+    match crate::system::service_control::start_service() {
+        Ok(_) => {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            if let Err(e) = sync_config_to_service(&app_handle).await {
+                return ApiResponse::err(format!("服务已成功拉起，但初始化内核配置失败: {}", e), 500);
+            }
+            ApiResponse::ok(())
+        }
+        Err(e) => ApiResponse::err(format!("启动服务失败: {}", e), 500),
+    }
+}
+
+/// 手动停止系统服务
+#[tauri::command]
+pub async fn service_stop() -> ApiResponse<()> {
+    match crate::system::service_control::stop_service() {
+        Ok(_) => ApiResponse::ok(()),
+        Err(e) => ApiResponse::err(format!("停止服务失败: {}", e), 500),
+    }
+}
+
+/// 读取系统服务运行日志
+#[tauri::command]
+pub async fn service_read_log() -> ApiResponse<String> {
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    let log_path = std::path::PathBuf::from(program_data).join("Auroweave").join("service.log");
+    if !log_path.exists() {
+        return ApiResponse::err("系统服务运行日志文件不存在".to_string(), 404);
+    }
+    match fs::read_to_string(log_path) {
+        Ok(c) => ApiResponse::ok(c),
+        Err(e) => ApiResponse::err(format!("读取系统服务日志失败: {}", e), 500),
     }
 }

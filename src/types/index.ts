@@ -186,4 +186,13 @@ export interface AppSettings {
   speed_test_url: string;
   speed_test_timeout_secs: number;
   connection_timeout_secs: number;
+
+  core: {
+    runMode: "direct" | "service";
+    service: {
+      installedVersion: string | null;
+      lastKnownStatus: "running" | "stopped" | "not_installed" | "error";
+      lastFallbackReason: "not_installed" | "start_failed" | "uac_denied" | "timeout" | null;
+    };
+  };
 }
