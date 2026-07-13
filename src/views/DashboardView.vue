@@ -121,11 +121,20 @@ const inboundMode = computed({
         } else if (val === "tun") {
           const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
           if (!res.success) {
-            const confirmRestart = confirm(
-              "启用 TUN 虚拟网卡需要管理员/UAC 权限（静默提权任务可能未安装）。\n\n是否允许程序自动以管理员身份提权重启？"
+            const confirmInstall = confirm(
+              "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
             );
-            if (confirmRestart) {
-              await invoke("app_restart_as_admin");
+            if (confirmInstall) {
+              const installRes: any = await invoke("service_install");
+              if (installRes.success) {
+                const retryRes: any = await invoke("tun_set_enabled", { enabled: true });
+                if (retryRes.success) {
+                  settingsStore.settings.tun_enabled = true;
+                  await invoke("sysproxy_set", { enabled: false, port: 0 });
+                  await proxyStore.changeProxyMode("direct");
+                  return;
+                }
+              }
             }
             settingsStore.settings.tun_enabled = false;
             await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
@@ -166,11 +175,20 @@ async function toggleProxy() {
             await invoke("sysproxy_set", { enabled: false, port: 0 });
             await proxyStore.changeProxyMode("direct");
           } else {
-            const confirmRestart = confirm(
-              "启用 TUN 虚拟网卡需要管理员/UAC 权限（静默提权任务可能未安装）。\n\n是否允许程序自动以管理员身份提权重启？"
+            const confirmInstall = confirm(
+              "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
             );
-            if (confirmRestart) {
-              await invoke("app_restart_as_admin");
+            if (confirmInstall) {
+              const installRes: any = await invoke("service_install");
+              if (installRes.success) {
+                const retryRes: any = await invoke("tun_set_enabled", { enabled: true });
+                if (retryRes.success) {
+                  settingsStore.settings.tun_enabled = true;
+                  await invoke("sysproxy_set", { enabled: false, port: 0 });
+                  await proxyStore.changeProxyMode("direct");
+                  return;
+                }
+              }
             }
             proxyActive.value = false;
             settingsStore.settings.tun_enabled = false;

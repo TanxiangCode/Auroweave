@@ -147,11 +147,21 @@ pub fn run() {
                         }
                     } else {
                         // 直接运行模式
-                        if let Err(e) = sm.start(&path_str).await {
-                            tracing::warn!("启动 sing-box 失败: {}", e);
+                        if settings.tun_enabled {
+                            // 启动前同步配置到服务目录，并由计划任务静默拉起
+                            let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+                            let cache_dir = std::path::PathBuf::from(program_data).join("Auroweave");
+                            let _ = std::fs::create_dir_all(&cache_dir);
+                            let cache_config_path = cache_dir.join("config.json");
+                            let _ = std::fs::copy(&config_path, &cache_config_path);
+
+                            if let Err(e) = crate::system::service_control::run_direct_tun_task() {
+                                tracing::error!("启动时直接模式下静默拉起 TUN 失败: {}", e);
+                            }
+                            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
                         } else {
-                            if settings.tun_enabled {
-                                let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+                            if let Err(e) = sm.start(&path_str).await {
+                                tracing::warn!("启动 sing-box 失败: {}", e);
                             } else {
                                 let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
                             }
@@ -183,6 +193,7 @@ pub fn run() {
                     let _ = system::service_control::stop_service();
                     std::thread::sleep(std::time::Duration::from_millis(1500));
                 } else {
+                    let _ = system::service_control::stop_direct_tun_task();
                     let sidecar_manager = app_handle.state::<std::sync::Arc<SidecarManager>>().inner().clone();
                     tauri::async_runtime::block_on(async move {
                         let _ = sidecar_manager.stop().await;
