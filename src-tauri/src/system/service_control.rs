@@ -206,6 +206,56 @@ pub fn uninstall_service_uac(app_handle: &tauri::AppHandle) -> Result<(), String
     win::execute_uac_action(app_handle, "uninstall")
 }
 
+// 计划任务控制方法 (Direct 模式静默提权)
+#[cfg(target_os = "windows")]
+pub fn run_direct_tun_task() -> Result<(), String> {
+    tracing::info!("执行 schtasks /run /tn AuroweaveDirectTunTask");
+    let status = std::process::Command::new("schtasks")
+        .arg("/run")
+        .arg("/tn")
+        .arg("AuroweaveDirectTunTask")
+        .status()
+        .map_err(|e| format!("无法启动 schtasks 命令: {}", e))?;
+    if !status.success() {
+        return Err("启动提权计划任务失败，请确认是否已成功安装服务（静默任务随服务一并安装）".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+pub fn stop_direct_tun_task() -> Result<(), String> {
+    tracing::info!("执行 schtasks /end /tn AuroweaveDirectTunTask");
+    let _ = std::process::Command::new("schtasks")
+        .arg("/end")
+        .arg("/tn")
+        .arg("AuroweaveDirectTunTask")
+        .status();
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+pub fn query_direct_tun_task_running() -> Result<bool, String> {
+    let output = std::process::Command::new("schtasks")
+        .arg("/query")
+        .arg("/tn")
+        .arg("AuroweaveDirectTunTask")
+        .arg("/fo")
+        .arg("CSV")
+        .arg("/nh")
+        .output()
+        .map_err(|e| format!("查询计划任务状态失败: {}", e))?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    // 包含 "Running", "正在运行" 或刚刚启动可能处于的 "Unknown" 状态皆判定为正在运行
+    let running = output_str.contains("Running") 
+        || output_str.contains("正在运行") 
+        || output_str.contains("Unknown")
+        || output_str.contains("Ready"); // 部分系统上可能在任务活跃时也包含就绪指示
+    Ok(running)
+}
+
 // 非 Windows 平台空桩实现
 #[cfg(not(target_os = "windows"))]
 pub fn query_service_status() -> Result<String, String> {
@@ -230,4 +280,19 @@ pub fn install_service_uac(_app_handle: &tauri::AppHandle) -> Result<(), String>
 #[cfg(not(target_os = "windows"))]
 pub fn uninstall_service_uac(_app_handle: &tauri::AppHandle) -> Result<(), String> {
     Err("当前平台不支持系统服务模式".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn run_direct_tun_task() -> Result<(), String> {
+    Err("当前平台不支持静默提权任务".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn stop_direct_tun_task() -> Result<(), String> {
+    Err("当前平台不支持静默提权任务".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn query_direct_tun_task_running() -> Result<bool, String> {
+    Ok(false)
 }

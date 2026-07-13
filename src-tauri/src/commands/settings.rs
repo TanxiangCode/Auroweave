@@ -442,30 +442,52 @@ pub async fn tun_set_enabled(app_handle: tauri::AppHandle, enabled: bool) -> Api
         // 直接运行模式
         let _ = sidecar_manager.stop().await;
 
+        if !enabled {
+            let _ = crate::system::service_control::stop_direct_tun_task();
+            tracing::info!("直连模式下 TUN 已关闭");
+            return ApiResponse::ok(());
+        }
+
+        // 停止之前的直连任务以防冲突
+        let _ = crate::system::service_control::stop_direct_tun_task();
+
         let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
         let config_path = config_dir.join("config.json");
         if !config_path.exists() {
             return ApiResponse::err("config.json 不存在，请先导入订阅", 404);
         }
-        let config_path_str = config_path.to_string_lossy().to_string();
 
-        if !enabled {
-            tracing::info!("直连模式下 TUN 已关闭");
-            return ApiResponse::ok(());
+        // 复制配置文件到计划任务可读取的服务公共目录 %ProgramData%\Auroweave\config.json
+        let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        let cache_dir = PathBuf::from(program_data).join("Auroweave");
+        if let Err(e) = fs::create_dir_all(&cache_dir) {
+            return ApiResponse::err(format!("创建服务公共缓存目录失败: {}", e), 500);
+        }
+        let cache_config_path = cache_dir.join("config.json");
+        if let Err(e) = fs::copy(&config_path, &cache_config_path) {
+            return ApiResponse::err(format!("同步配置文件至服务缓存目录失败: {}", e), 500);
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        match sidecar_manager.start(&config_path_str).await {
-            Ok(_) => {
-                tracing::info!("直连模式下 TUN 启动成功");
+        // 通过运行计划任务来静默提权启动内核
+        if let Err(e) = crate::system::service_control::run_direct_tun_task() {
+            let mut fallback_settings = settings_get_internal(&app_handle);
+            fallback_settings.tun_enabled = false;
+            let _ = update_settings_internal(&app_handle, serde_json::to_value(fallback_settings).unwrap());
+            return ApiResponse::err(format!("静默提权启动 TUN 失败: {}", e), 403);
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+        match crate::system::service_control::query_direct_tun_task_running() {
+            Ok(true) => {
+                tracing::info!("直连模式下通过计划任务静默提权启动 TUN 成功");
                 ApiResponse::ok(())
             }
-            Err(e) => {
-                tracing::error!("直连模式下 TUN 启动失败: {:?}", e);
+            _ => {
+                tracing::error!("直连模式下通过计划任务静默提权启动 TUN 失败: 计划任务未处于运行中");
                 let mut fallback_settings = settings_get_internal(&app_handle);
                 fallback_settings.tun_enabled = false;
                 let _ = update_settings_internal(&app_handle, serde_json::to_value(fallback_settings).unwrap());
-                ApiResponse::err(format!("启动直连 TUN 失败: {}", e), 403)
+                ApiResponse::err("静默启动 TUN 任务失败，请确认是否已成功安装服务".to_string(), 403)
             }
         }
     }

@@ -108,6 +108,10 @@ pub fn install() -> Result<(), String> {
     info!("系统服务配置成功。正在生成 IPC Token...");
     setup_token()?;
 
+    if let Err(e) = create_direct_tun_task(&exe_path) {
+        info!("创建静默提权任务失败（警告）: {}", e);
+    }
+
     info!("服务安装与安全加固已全部完成。");
     Ok(())
 }
@@ -195,6 +199,7 @@ pub fn uninstall() -> Result<(), String> {
     }
 
     let _ = cleanup_token();
+    let _ = remove_direct_tun_task();
     info!("系统服务及残留配置已彻底删除。");
     Ok(())
 }
@@ -252,5 +257,50 @@ fn cleanup_token() -> Result<(), String> {
     if token_path.exists() {
         let _ = std::fs::remove_file(token_path);
     }
+    Ok(())
+}
+
+fn create_direct_tun_task(exe_path: &std::path::Path) -> Result<(), String> {
+    let task_name = "AuroweaveDirectTunTask";
+    let exe_path_str = exe_path.to_string_lossy();
+    let action_str = format!("\"{}\" run-task", exe_path_str);
+    
+    info!("正在创建静默提权计划任务: {} -> {}", task_name, action_str);
+    
+    let status = std::process::Command::new("schtasks")
+        .arg("/create")
+        .arg("/tn")
+        .arg(task_name)
+        .arg("/tr")
+        .arg(&action_str)
+        .arg("/sc")
+        .arg("ONCE")
+        .arg("/ru")
+        .arg("SYSTEM")
+        .arg("/rl")
+        .arg("HIGHEST")
+        .arg("/st")
+        .arg("00:00")
+        .arg("/f")
+        .status()
+        .map_err(|e| format!("启动 schtasks 失败: {}", e))?;
+        
+    if !status.success() {
+        return Err("创建计划任务命令行返回错误".to_string());
+    }
+    
+    info!("创建静默提权计划任务成功。");
+    Ok(())
+}
+
+fn remove_direct_tun_task() -> Result<(), String> {
+    let task_name = "AuroweaveDirectTunTask";
+    info!("正在删除静默提权计划任务: {}", task_name);
+    let _ = std::process::Command::new("schtasks")
+        .arg("/delete")
+        .arg("/tn")
+        .arg(task_name)
+        .arg("/f")
+        .status();
     Ok(())
 }

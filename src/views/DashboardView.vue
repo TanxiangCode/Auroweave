@@ -20,6 +20,7 @@ const settingsStore = useSettingsStore();
 
 // 代理流量接管总开关 (ON / OFF)
 const proxyActive = ref(true);
+const operating = ref(false);
 
 const {
   smoothDownloadSpeed,
@@ -30,99 +31,189 @@ const {
 
 const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
 
+// 针对不同的分流规则和运行状态计算不同的光圈和文字阴影样式
+const coreGlowStyle = computed(() => {
+  if (!proxyActive.value) {
+    return {
+      ring: {
+        background: "var(--energy-idle)",
+        boxShadow: "none",
+      },
+      text: {
+        color: "var(--text-secondary)",
+        textShadow: "none",
+      }
+    };
+  }
+
+  const mode = proxyStore.proxyMode;
+  if (mode === "global") {
+    // 全局代理模式：高贵的紫红渐变
+    return {
+      ring: {
+        background: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+        boxShadow: "0 0 24px rgba(245, 87, 108, 0.45), inset 0 0 12px rgba(245, 87, 108, 0.3)",
+      },
+      text: {
+        color: "#f093fb",
+        textShadow: "0 0 8px rgba(240, 147, 251, 0.6)",
+      }
+    };
+  } else if (mode === "direct") {
+    // 全直连模式：翡翠绿色
+    return {
+      ring: {
+        background: "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+        boxShadow: "0 0 24px rgba(67, 233, 123, 0.45), inset 0 0 12px rgba(67, 233, 123, 0.3)",
+      },
+      text: {
+        color: "#43e97b",
+        textShadow: "0 0 8px rgba(67, 233, 123, 0.6)",
+      }
+    };
+  } else {
+    // 规则分流模式 (Rule) / 默认：经典的科技蓝青渐变
+    return {
+      ring: {
+        background: "linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)",
+        boxShadow: "0 0 24px rgba(0, 242, 254, 0.45), inset 0 0 12px rgba(0, 242, 254, 0.3)",
+      },
+      text: {
+        color: "#00f2fe",
+        textShadow: "0 0 8px rgba(0, 242, 254, 0.6)",
+      }
+    };
+  }
+});
+
+// 计算呼吸灯的光晕阴影颜色，配合 v-bind 实现动态关键帧渲染
+const breathingGlowColor = computed(() => {
+  if (!proxyActive.value) return "rgba(255, 255, 255, 0.05)";
+  const mode = proxyStore.proxyMode;
+  if (mode === "global") {
+    return "rgba(240, 147, 251, 0.4)";
+  } else if (mode === "direct") {
+    return "rgba(67, 233, 123, 0.4)";
+  } else {
+    return "rgba(0, 242, 254, 0.4)";
+  }
+});
+
 // 流量接管双态读写双向绑定
 const inboundMode = computed({
   get() {
     return settingsStore.settings.tun_enabled ? "tun" : "system";
   },
   async set(val: "system" | "tun") {
-    // 若总开关未开启，仅静默记录设置，不进行物理系统代理变动
-    if (!proxyActive.value) {
-      await invoke("tun_set_enabled", { enabled: val === "tun" });
-      settingsStore.settings.tun_enabled = (val === "tun");
-      return;
-    }
+    if (operating.value) return;
+    operating.value = true;
 
-    if (val === "system") {
-      // 同步关闭 TUN，恢复为系统代理接管
-      await invoke("tun_set_enabled", { enabled: false });
-      settingsStore.settings.tun_enabled = false;
-      await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
-      if (proxyStore.proxyMode === "direct") {
-        await proxyStore.changeProxyMode("rule");
-      }
-    } else if (val === "tun") {
-      // 使用专用同步命令开启 TUN，等待真实启动结果
-      const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
-      if (!res.success) {
-        // UAC 提权重启防御自动申请！
-        const confirmRestart = confirm(
-          "启用 TUN 虚拟网卡需要管理员/UAC 权限。\n\n是否允许程序自动以管理员身份提权重启？"
-        );
-        if (confirmRestart) {
-          await invoke("app_restart_as_admin");
+    // 开启非阻塞的异步微任务以平滑过渡 UI 选中状态
+    setTimeout(async () => {
+      try {
+        if (!proxyActive.value) {
+          await invoke("tun_set_enabled", { enabled: val === "tun" });
+          settingsStore.settings.tun_enabled = (val === "tun");
+          return;
         }
-        // 安全自动回滚为系统代理接管
-        settingsStore.settings.tun_enabled = false;
-        await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
-        if (proxyStore.proxyMode === "direct") {
-          await proxyStore.changeProxyMode("rule");
+
+        if (val === "system") {
+          await invoke("tun_set_enabled", { enabled: false });
+          settingsStore.settings.tun_enabled = false;
+          await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
+          if (proxyStore.proxyMode === "direct") {
+            await proxyStore.changeProxyMode("rule");
+          }
+        } else if (val === "tun") {
+          const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
+          if (!res.success) {
+            const confirmRestart = confirm(
+              "启用 TUN 虚拟网卡需要管理员/UAC 权限（静默提权任务可能未安装）。\n\n是否允许程序自动以管理员身份提权重启？"
+            );
+            if (confirmRestart) {
+              await invoke("app_restart_as_admin");
+            }
+            settingsStore.settings.tun_enabled = false;
+            await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
+            if (proxyStore.proxyMode === "direct") {
+              await proxyStore.changeProxyMode("rule");
+            }
+            return;
+          }
+          settingsStore.settings.tun_enabled = true;
+          await invoke("sysproxy_set", { enabled: false, port: 0 });
+          await proxyStore.changeProxyMode("direct");
         }
-        return;
+      } catch (e) {
+        console.error("切换接管模式错误: ", e);
+      } finally {
+        operating.value = false;
       }
-      settingsStore.settings.tun_enabled = true;
-      // TUN 模式下不使用 Windows 系统代理
-      await invoke("sysproxy_set", { enabled: false, port: 0 });
-      await proxyStore.changeProxyMode("direct");
-    }
+    }, 50);
   }
 });
 
 // 大圆环点击：一键接管网络 / 完全注销释放 Windows 代理 (网络自救总开关)
 async function toggleProxy() {
-  proxyActive.value = !proxyActive.value;
-  
-  if (proxyActive.value) {
-    // 一键开机，恢复流量接管
-    if (settingsStore.settings.tun_enabled) {
-      // 激活 TUN，同步等待结果
-      const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
-      if (res.success) {
-        settingsStore.settings.tun_enabled = true;
-        await invoke("sysproxy_set", { enabled: false, port: 0 });
-        await proxyStore.changeProxyMode("direct");
-      } else {
-        const confirmRestart = confirm(
-          "启用 TUN 虚拟网卡需要管理员/UAC 权限。\n\n是否允许程序自动以管理员身份提权重启？"
-        );
-        if (confirmRestart) {
-          await invoke("app_restart_as_admin");
+  if (operating.value) return;
+  operating.value = true;
+
+  const nextActive = !proxyActive.value;
+  // 乐观更新：立刻在前端呈现开关变动，消除 1.5 秒的同步等待卡顿！
+  proxyActive.value = nextActive;
+
+  setTimeout(async () => {
+    try {
+      if (nextActive) {
+        if (settingsStore.settings.tun_enabled) {
+          const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
+          if (res.success) {
+            settingsStore.settings.tun_enabled = true;
+            await invoke("sysproxy_set", { enabled: false, port: 0 });
+            await proxyStore.changeProxyMode("direct");
+          } else {
+            const confirmRestart = confirm(
+              "启用 TUN 虚拟网卡需要管理员/UAC 权限（静默提权任务可能未安装）。\n\n是否允许程序自动以管理员身份提权重启？"
+            );
+            if (confirmRestart) {
+              await invoke("app_restart_as_admin");
+            }
+            proxyActive.value = false;
+            settingsStore.settings.tun_enabled = false;
+            await invoke("sysproxy_set", { enabled: false, port: 0 });
+          }
+        } else {
+          await invoke("tun_set_enabled", { enabled: false });
+          settingsStore.settings.tun_enabled = false;
+          await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
+          if (proxyStore.proxyMode === "direct") {
+            await proxyStore.changeProxyMode("rule");
+          }
         }
-        proxyActive.value = false;
+      } else {
+        await settingsStore.updateSettings({ tun_enabled: false, proxy_mode: "direct" });
         settingsStore.settings.tun_enabled = false;
         await invoke("sysproxy_set", { enabled: false, port: 0 });
+        proxyStore.$patch({ proxyMode: "direct" });
       }
-    } else {
-      // 激活 Windows 系统代理
-      await invoke("tun_set_enabled", { enabled: false });
-      settingsStore.settings.tun_enabled = false;
-      await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
-      if (proxyStore.proxyMode === "direct") {
-        await proxyStore.changeProxyMode("rule");
-      }
+    } catch (e) {
+      console.error("开关代理错误: ", e);
+    } finally {
+      operating.value = false;
     }
-  } else {
-    // 一键关机，完全释放接管 (注销 Windows IE 代理并关闭 TUN)
-    // 同时将 proxy_mode 写入 settings.json，确保 Rust 后端读到完全释放状态，防止 sing-box 后台自启动
-    await settingsStore.updateSettings({ tun_enabled: false, proxy_mode: "direct" });
-    settingsStore.settings.tun_enabled = false;
-    await invoke("sysproxy_set", { enabled: false, port: 0 });
-    proxyStore.$patch({ proxyMode: "direct" });
-  }
+  }, 50);
 }
 
 function changeMode(mode: "global" | "rule" | "direct") {
-  proxyStore.changeProxyMode(mode);
+  if (operating.value) return;
+  operating.value = true;
+  setTimeout(async () => {
+    try {
+      await proxyStore.changeProxyMode(mode);
+    } finally {
+      operating.value = false;
+    }
+  }, 50);
 }
 
 function formatBytes(bytes: number): string {
@@ -152,7 +243,7 @@ onMounted(async () => {
     <!-- 上部：“两翼对称”三栏全息悬浮大格局 -->
     <div class="top-panel-row">
       <!-- 左翼：流量接管与控制 (至简双胶囊) -->
-      <div class="control-wing">
+      <div v-if="proxyActive" class="control-wing">
         <!-- 胶囊 1: 流量接管双态切换 (System/TUN) -->
         <div class="stat-pill">
           <span class="pill-label">流量接管</span>
@@ -162,6 +253,7 @@ onMounted(async () => {
               :key="mode"
               class="mode-btn"
               :class="{ active: inboundMode === mode }"
+              :disabled="operating"
               @click="inboundMode = mode as any"
             >
               {{ mode === 'system' ? '系统代理' : 'TUN 网卡' }}
@@ -178,6 +270,7 @@ onMounted(async () => {
               :key="mode"
               class="mode-btn"
               :class="{ active: proxyStore.proxyMode === mode }"
+              :disabled="operating"
               @click="changeMode(mode as any)"
             >
               {{ mode === 'global' ? '全局' : mode === 'rule' ? '规则' : '直连' }}
@@ -185,6 +278,7 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+      <div v-else class="control-wing empty-wing"></div>
 
       <!-- 中央：旋转能量核 (视觉绝对重心) -->
       <div class="energy-wing">
@@ -196,10 +290,13 @@ onMounted(async () => {
         >
           <div
             class="energy-ring"
-            :style="{ transform: proxyActive ? 'rotate(' + rotationDeg + 'deg)' : 'none' }"
+            :style="[
+              { transform: proxyActive ? 'rotate(' + rotationDeg + 'deg)' : 'none' },
+              coreGlowStyle.ring
+            ]"
           >
             <div class="energy-inner">
-              <span v-if="proxyActive" class="energy-status-text">CONNECTED</span>
+              <span v-if="proxyActive" class="energy-status-text" :style="coreGlowStyle.text">CONNECTED</span>
               <span v-else class="energy-status-text idle">TAP TO CONNECT</span>
             </div>
           </div>
@@ -207,7 +304,7 @@ onMounted(async () => {
       </div>
 
       <!-- 右翼：流量统计与数据 (垂直对齐镜像) -->
-      <div class="stats-wing">
+      <div v-if="proxyActive" class="stats-wing">
         <!-- 胶囊 1: 活动连接 -> 点击跳转安全审计 -->
         <div
           class="stat-pill clickable-pill"
@@ -232,10 +329,11 @@ onMounted(async () => {
           </span>
         </div>
       </div>
+      <div v-else class="stats-wing empty-wing"></div>
     </div>
 
     <!-- 下部：实时折线图托底座 (消除重复 Header 标题) -->
-    <div class="bottom-panel-row">
+    <div v-if="proxyActive" class="bottom-panel-row">
       <SpeedChart />
     </div>
   </div>
@@ -492,15 +590,15 @@ onMounted(async () => {
 @keyframes breathing-core {
   0% {
     transform: scale(1);
-    filter: drop-shadow(0 0 8px rgba(0, 242, 254, 0.25));
+    filter: drop-shadow(0 0 8px v-bind(breathingGlowColor));
   }
   50% {
     transform: scale(1.025); /* 极细微优雅的形体收缩 */
-    filter: drop-shadow(0 0 20px rgba(0, 242, 254, 0.55)); /* 吞吐光晕阴影 */
+    filter: drop-shadow(0 0 20px v-bind(breathingGlowColor)); /* 吞吐光晕阴影 */
   }
   100% {
     transform: scale(1);
-    filter: drop-shadow(0 0 8px rgba(0, 242, 254, 0.25));
+    filter: drop-shadow(0 0 8px v-bind(breathingGlowColor));
   }
 }
 </style>
