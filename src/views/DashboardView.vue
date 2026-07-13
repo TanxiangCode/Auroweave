@@ -31,6 +31,43 @@ const {
 
 const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
 
+// 能量核在不同代理分流模式下的主题色彩配置表 (配置模式，便于维护与扩展)
+const CORE_GLOW_THEMES = {
+  global: {
+    ring: {
+      background: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+      boxShadow: "0 0 24px rgba(245, 87, 108, 0.45), inset 0 0 12px rgba(245, 87, 108, 0.3)",
+    },
+    text: {
+      color: "#f093fb",
+      textShadow: "0 0 8px rgba(240, 147, 251, 0.6)",
+    },
+    breathing: "rgba(240, 147, 251, 0.4)"
+  },
+  direct: {
+    ring: {
+      background: "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+      boxShadow: "0 0 24px rgba(67, 233, 123, 0.45), inset 0 0 12px rgba(67, 233, 123, 0.3)",
+    },
+    text: {
+      color: "#43e97b",
+      textShadow: "0 0 8px rgba(67, 233, 123, 0.6)",
+    },
+    breathing: "rgba(67, 233, 123, 0.4)"
+  },
+  rule: {
+    ring: {
+      background: "linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)",
+      boxShadow: "0 0 24px rgba(0, 242, 254, 0.45), inset 0 0 12px rgba(0, 242, 254, 0.3)",
+    },
+    text: {
+      color: "#00f2fe",
+      textShadow: "0 0 8px rgba(0, 242, 254, 0.6)",
+    },
+    breathing: "rgba(0, 242, 254, 0.4)"
+  }
+} as const;
+
 // 针对不同的分流规则和运行状态计算不同的光圈和文字阴影样式
 const coreGlowStyle = computed(() => {
   if (!proxyActive.value) {
@@ -45,58 +82,15 @@ const coreGlowStyle = computed(() => {
       }
     };
   }
-
-  const mode = proxyStore.proxyMode;
-  if (mode === "global") {
-    // 全局代理模式：高贵的紫红渐变
-    return {
-      ring: {
-        background: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
-        boxShadow: "0 0 24px rgba(245, 87, 108, 0.45), inset 0 0 12px rgba(245, 87, 108, 0.3)",
-      },
-      text: {
-        color: "#f093fb",
-        textShadow: "0 0 8px rgba(240, 147, 251, 0.6)",
-      }
-    };
-  } else if (mode === "direct") {
-    // 全直连模式：翡翠绿色
-    return {
-      ring: {
-        background: "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
-        boxShadow: "0 0 24px rgba(67, 233, 123, 0.45), inset 0 0 12px rgba(67, 233, 123, 0.3)",
-      },
-      text: {
-        color: "#43e97b",
-        textShadow: "0 0 8px rgba(67, 233, 123, 0.6)",
-      }
-    };
-  } else {
-    // 规则分流模式 (Rule) / 默认：经典的科技蓝青渐变
-    return {
-      ring: {
-        background: "linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)",
-        boxShadow: "0 0 24px rgba(0, 242, 254, 0.45), inset 0 0 12px rgba(0, 242, 254, 0.3)",
-      },
-      text: {
-        color: "#00f2fe",
-        textShadow: "0 0 8px rgba(0, 242, 254, 0.6)",
-      }
-    };
-  }
+  const mode = proxyStore.proxyMode as keyof typeof CORE_GLOW_THEMES;
+  return CORE_GLOW_THEMES[mode] || CORE_GLOW_THEMES.rule;
 });
 
 // 计算呼吸灯的光晕阴影颜色，配合 v-bind 实现动态关键帧渲染
 const breathingGlowColor = computed(() => {
   if (!proxyActive.value) return "rgba(255, 255, 255, 0.05)";
-  const mode = proxyStore.proxyMode;
-  if (mode === "global") {
-    return "rgba(240, 147, 251, 0.4)";
-  } else if (mode === "direct") {
-    return "rgba(67, 233, 123, 0.4)";
-  } else {
-    return "rgba(0, 242, 254, 0.4)";
-  }
+  const mode = proxyStore.proxyMode as keyof typeof CORE_GLOW_THEMES;
+  return CORE_GLOW_THEMES[mode]?.breathing || "rgba(0, 242, 254, 0.4)";
 });
 
 // 流量接管双态读写双向绑定
@@ -528,7 +522,7 @@ onMounted(async () => {
   padding: 4px;
   background: var(--energy-active);
   box-shadow: var(--shadow-glow-cyan);
-  transition: all var(--duration-normal) var(--ease-out);
+  transition: background 0.6s ease-in-out, box-shadow 0.6s ease-in-out, transform var(--duration-normal) var(--ease-out);
 }
 
 .energy-core:hover .energy-ring {
@@ -564,6 +558,7 @@ onMounted(async () => {
   color: var(--accent-cyan);
   letter-spacing: 2px;
   text-shadow: var(--shadow-glow-cyan);
+  transition: color 0.6s ease-in-out, text-shadow 0.6s ease-in-out;
 }
 
 .energy-status-text.idle {

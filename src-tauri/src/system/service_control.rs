@@ -247,12 +247,27 @@ pub fn query_direct_tun_task_running() -> Result<bool, String> {
     if !output.status.success() {
         return Ok(false);
     }
-    let output_str = String::from_utf8_lossy(&output.stdout);
-    // 包含 "Running", "正在运行" 或刚刚启动可能处于的 "Unknown" 状态皆判定为正在运行
-    let running = output_str.contains("Running") 
-        || output_str.contains("正在运行") 
-        || output_str.contains("Unknown")
-        || output_str.contains("Ready"); // 部分系统上可能在任务活跃时也包含就绪指示
+    
+    let bytes = &output.stdout;
+    
+    // ASCII "Running" (7 bytes)
+    let contains_running_en = bytes.windows(7).any(|w| w == b"Running");
+    
+    // GBK "正在运行" (8 bytes) -> 正=D5FD, 在=D4DA, 运=D4CB, 行=D0D0
+    let gbk_running = [0xd5, 0xfd, 0xd4, 0xda, 0xd4, 0xcb, 0xd0, 0xd0];
+    let contains_running_zh = bytes.windows(8).any(|w| w == gbk_running);
+    
+    // ASCII "Ready" (5 bytes)
+    let contains_ready_en = bytes.windows(5).any(|w| w == b"Ready");
+    
+    // GBK "准备就绪" (8 bytes) -> 准=D7BC, 备=B1B8, 就=BED9, 绪=D0F7
+    let gbk_ready = [0xd7, 0xbc, 0xb1, 0xb8, 0xbe, 0xd9, 0xd0, 0xf7];
+    let contains_ready_zh = bytes.windows(8).any(|w| w == gbk_ready);
+    
+    // ASCII "Unknown" (7 bytes)
+    let contains_unknown = bytes.windows(7).any(|w| w == b"Unknown");
+
+    let running = contains_running_en || contains_running_zh || contains_ready_en || contains_ready_zh || contains_unknown;
     Ok(running)
 }
 
