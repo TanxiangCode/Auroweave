@@ -35,12 +35,12 @@ pub fn check_and_apply_updates() {
     let bin_dir = PathBuf::from(&program_data).join("Auroweave").join("bin");
     
     // 1. 清理遗留的 .old.exe
-    let old_svc_path = bin_dir.join("auroweave-svc.old.exe");
+    let old_svc_path = bin_dir.join("AuroDaemon.old.exe");
     if old_svc_path.exists() {
         if let Err(e) = fs::remove_file(&old_svc_path) {
             warn!("无法删除遗留的 old.exe: {}", e);
         } else {
-            info!("成功清理遗留的 auroweave-svc.old.exe");
+            info!("成功清理遗留的 AuroDaemon.old.exe");
         }
     }
     

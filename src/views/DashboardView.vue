@@ -36,7 +36,7 @@ const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
 const CORE_GLOW_THEMES = {
   global: {
     ring: {
-      background: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+      background: "conic-gradient(from 0deg, #f093fb, #f5576c, #ff9a9e, #f093fb)",
       boxShadow: "0 0 24px rgba(245, 87, 108, 0.45), inset 0 0 12px rgba(245, 87, 108, 0.3)",
     },
     text: {
@@ -47,7 +47,7 @@ const CORE_GLOW_THEMES = {
   },
   direct: {
     ring: {
-      background: "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+      background: "conic-gradient(from 0deg, #43e97b, #38f9d7, #4facfe, #43e97b)",
       boxShadow: "0 0 24px rgba(67, 233, 123, 0.45), inset 0 0 12px rgba(67, 233, 123, 0.3)",
     },
     text: {
@@ -58,7 +58,7 @@ const CORE_GLOW_THEMES = {
   },
   rule: {
     ring: {
-      background: "linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)",
+      background: "conic-gradient(from 0deg, #00f2fe, #4facfe, #f093fb, #00f2fe)",
       boxShadow: "0 0 24px rgba(0, 242, 254, 0.45), inset 0 0 12px rgba(0, 242, 254, 0.3)",
     },
     text: {
@@ -331,7 +331,7 @@ onUnmounted(() => {
           class="energy-core"
           :class="{ connected: proxyActive }"
           @click="toggleProxy"
-          title="点击开启或释放系统流量接管"
+          :title="proxyActive ? '网络已接管，点击安全释放并休眠' : '核心已待命，点击唤醒并接管流量'"
         >
           <div
             class="energy-ring"
@@ -341,22 +341,30 @@ onUnmounted(() => {
             ]"
           >
             <div class="energy-inner">
-              <span v-if="proxyActive" class="energy-status-text" :style="coreGlowStyle.text">CONNECTED</span>
-              <span v-else class="energy-status-text idle">TAP TO CONNECT</span>
+              <template v-if="proxyActive">
+                <!-- 动态连接脉冲图标 -->
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="core-active-icon" :style="{ color: coreGlowStyle.text.color }">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                <!-- 稳定的底部状态文字 -->
+                <span class="energy-status-text active-badge">CONNECTED</span>
+              </template>
+              <template v-else>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="core-idle-icon">
+                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                  <line x1="12" y1="2" x2="12" y2="12"></line>
+                </svg>
+                <span class="energy-status-text idle">TAP TO CONNECT</span>
+              </template>
             </div>
           </div>
         </div>
 
-        <!-- 关闭代理时的极简科技神盾详情 -->
-        <div v-if="!proxyActive" class="shield-tips-container">
-          <div class="shield-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shield-svg">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
-          </div>
-          <div class="shield-title">Auroweave 安全防线已静默</div>
-          <div class="shield-desc">
-            Windows 系统代理与 TUN 虚拟网卡已安全释放。点击中心核一键激活网络全息守护。
+        <!-- 关闭代理时的极简状态说明 -->
+        <div v-if="!proxyActive" class="idle-tips-container">
+          <div class="idle-title">网络接管已暂停</div>
+          <div class="idle-desc">
+            系统代理与 TUN 虚拟网卡已释放，当前处于本地直连状态。点击上方核心即可重新接管流量。
           </div>
         </div>
       </div>
@@ -413,7 +421,7 @@ onUnmounted(() => {
   gap: 24px;
   align-items: center;
   width: 100%;
-  height: 260px; /* 锁死上部高度，保证对称呼吸感 */
+  flex: 1; /* 取消固定的高度，让上部布局自动伸展填满页面剩余空间 */
 }
 
 /* 移除 control-wing 和 stats-wing 的包装背景，完全高透悬浮并底部对齐 */
@@ -422,8 +430,8 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 24px; /* 调宽至 24px，使 2 个胶囊在垂直对齐下高贵舒展 */
   justify-content: flex-end; /* 左右内容底对齐 */
-  height: 100%;
-  padding-bottom: 10px; /* 精调底部内边距，使胶囊物理底部与大圆环下边缘完全齐平 */
+  height: 100%; /* 允许两侧组件根据外层容器拉伸 */
+  padding-bottom: 10px; /* 精调底部内边距 */
 }
 
 /* ---- 化方为圆：高透胶囊药丸 (Sleek Stadium Pill) ---- */
@@ -579,6 +587,7 @@ onUnmounted(() => {
 }
 
 .energy-ring {
+  position: relative;
   width: 240px;
   height: 240px;
   border-radius: 50%;
@@ -586,6 +595,27 @@ onUnmounted(() => {
   background: var(--energy-active);
   box-shadow: var(--shadow-glow-cyan);
   transition: background 0.6s ease-in-out, box-shadow 0.6s ease-in-out, transform var(--duration-normal) var(--ease-out);
+  z-index: 1;
+}
+
+/* 极光弥散发光层 */
+.energy-ring::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 50%;
+  background: inherit;
+  filter: blur(28px);
+  opacity: 0.8;
+  z-index: -1;
+  transition: opacity 0.6s ease-in-out;
+}
+
+.energy-core:not(.connected) .energy-ring::before {
+  opacity: 0;
 }
 
 .energy-core:hover .energy-ring {
@@ -624,9 +654,43 @@ onUnmounted(() => {
   transition: color 0.6s ease-in-out, text-shadow 0.6s ease-in-out;
 }
 
+.energy-status-text.active-badge {
+  font-size: var(--text-sm);
+  letter-spacing: 2px;
+  margin-top: 4px;
+}
+
+.core-active-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  opacity: 0.8;
+  animation: pulse-line 3s infinite ease-in-out; /* 频率与外层大圆环(breathing-core)的3s保持绝对一致 */
+}
+
+@keyframes pulse-line {
+  0% { opacity: 0.4; transform: scaleY(0.95); }
+  50% { opacity: 1; transform: scaleY(1.05); filter: drop-shadow(0 0 8px currentColor); }
+  100% { opacity: 0.4; transform: scaleY(0.95); }
+}
+
 .energy-status-text.idle {
   color: var(--text-secondary);
   text-shadow: none;
+  transition: color 0.3s ease;
+}
+
+.core-idle-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
+}
+
+/* Hover 时让文字和图标同时亮起，给予明确的点按暗示 */
+.energy-core:hover .core-idle-icon,
+.energy-core:hover .energy-status-text.idle {
+  color: var(--text-primary);
 }
 
 /* ---- 下部：折线图底座 ---- */
@@ -635,6 +699,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-height: 0; /* 允许折线图内部自适应伸缩而不溢出 */
+  max-height: 200px; /* 调小图表占据的垂直高度，避免过于抢戏 */
+  margin-top: auto; /* 当存在剩余空间时，将图表推至最底部 */
 }
 
 /* 使用 Vue :deep 穿透修改折线图自带卡片的样式，强制 24px 大圆角与高度撑满 */
@@ -679,7 +745,7 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.shield-tips-container {
+.idle-tips-container {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -687,37 +753,10 @@ onUnmounted(() => {
   max-width: 420px;
   opacity: 0;
   transform: translateY(12px);
-  animation: fadeInShield 0.8s forwards var(--ease-out);
+  animation: fadeInIdle 0.8s forwards var(--ease-out);
 }
 
-.shield-icon {
-  width: 44px;
-  height: 44px;
-  color: var(--text-tertiary);
-  margin-bottom: 12px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: var(--layer-1);
-  border: 1px solid var(--border-normal);
-  border-radius: 50%;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.5s ease-in-out;
-}
-
-.shield-svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* 兄弟选择器联动：当大圆环被悬浮时，下方的盾牌组件亮起呼吸青光！ */
-.energy-core:hover + .shield-tips-container .shield-icon {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan-glow);
-  box-shadow: 0 0 16px var(--accent-cyan-glow);
-}
-
-.shield-title {
+.idle-title {
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   color: var(--text-primary);
@@ -725,13 +764,13 @@ onUnmounted(() => {
   letter-spacing: 1px;
 }
 
-.shield-desc {
+.idle-desc {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
   line-height: 1.6;
 }
 
-@keyframes fadeInShield {
+@keyframes fadeInIdle {
   to {
     opacity: 1;
     transform: translateY(0);

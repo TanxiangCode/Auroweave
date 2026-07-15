@@ -100,7 +100,7 @@ impl CoreManager {
             }
         };
 
-        // 将 sing-box 进程绑定到 Windows Job Object，确保 auroweave-svc 死后 sing-box 也必死
+        // 将 sing-box 进程绑定到 Windows Job Object，确保 AuroDaemon 死后 sing-box 也必死
         #[cfg(target_os = "windows")]
         if let Some(child_pid) = child.id() {
             unsafe {
@@ -126,8 +126,8 @@ impl CoreManager {
                         }
                     }
                     // 注意：这里我们故意泄漏（不 Close） job 句柄。
-                    // 这样 job object 就和当前的 auroweave-svc 进程寿命绑定在一起，
-                    // auroweave-svc 退出时，操作系统会自动关闭 job 句柄，从而触发 KILL_ON_JOB_CLOSE 强制杀死 sing-box。
+                    // 这样 job object 就和当前的 AuroDaemon 进程寿命绑定在一起，
+                    // AuroDaemon 退出时，操作系统会自动关闭 job 句柄，从而触发 KILL_ON_JOB_CLOSE 强制杀死 sing-box。
                 }
             }
         }

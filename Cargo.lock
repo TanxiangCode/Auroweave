@@ -3,6 +3,22 @@
 version = 3
 
 [[package]]
+name = "AuroDaemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "windows-service",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -269,22 +285,6 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "auroweave-svc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "windows-service",
  "windows-sys 0.52.0",
 ]
 

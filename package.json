@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "build:svc": "cargo clean -p auroweave-svc && cargo build -p auroweave-svc && node -e \"fs.copyFileSync('target/debug/AuroDaemon.exe', 'src-tauri/resources/AuroDaemon.exe')\"",
+    "build:svc": "cargo clean && cargo build && node -e \"fs.copyFileSync('target/debug/AuroDaemon.exe', 'src-tauri/resources/AuroDaemon.exe')\"",
     "uninstall:svc": "powershell -Command \"Start-Process -FilePath 'target/debug/AuroDaemon.exe' -ArgumentList 'uninstall' -Verb RunAs -Wait\"",
     "preview": "vite preview",
     "tauri": "tauri dev",

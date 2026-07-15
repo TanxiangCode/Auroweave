@@ -68,11 +68,11 @@ fn main() {
         }
         _ => {
             println!("未知子命令。用法:");
-            println!("  auroweave-svc install-service --singbox <path> - 安装为 Windows 服务并锁定 Token");
-            println!("  auroweave-svc install-task    --singbox <path> - 安装为提权计划任务（本地运行模式使用）");
-            println!("  auroweave-svc uninstall                        - 停止并卸载所有 Windows 服务/计划任务");
-            println!("  auroweave-svc run                              - 以服务主体方式由 SCM 拉起运行 (默认)");
-            println!("  auroweave-svc run-task                         - 由计划任务提权启动的 sing-box 托管模式");
+            println!("  AuroDaemon install-service --singbox <path> - 安装为 Windows 服务并锁定 Token");
+            println!("  AuroDaemon install-task    --singbox <path> - 安装为提权计划任务（本地运行模式使用）");
+            println!("  AuroDaemon uninstall                        - 停止并卸载所有 Windows 服务/计划任务");
+            println!("  AuroDaemon run                              - 以服务主体方式由 SCM 拉起运行 (默认)");
+            println!("  AuroDaemon run-task                         - 由计划任务提权启动的 sing-box 托管模式");
         }
     }
 }

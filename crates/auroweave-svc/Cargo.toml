@@ -1,5 +1,5 @@
 [package]
-name = "auroweave-svc"
+name = "AuroDaemon"
 version = "0.1.0"
 authors = ["TanXiang"]
 edition = "2021"
