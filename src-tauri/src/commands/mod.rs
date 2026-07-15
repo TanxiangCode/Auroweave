@@ -5,3 +5,4 @@ pub mod subscription;
 pub mod settings;
 pub mod speedtest;
 pub mod routing;
+pub mod logging;

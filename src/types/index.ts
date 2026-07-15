@@ -188,7 +188,7 @@ export interface AppSettings {
   connection_timeout_secs: number;
 
   core: {
-    runMode: "direct" | "service";
+    runMode: "local" | "service";
     service: {
       installedVersion: string | null;
       lastKnownStatus: "running" | "stopped" | "not_installed" | "error";

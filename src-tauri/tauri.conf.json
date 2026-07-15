@@ -44,7 +44,7 @@
     ],
     "resources": {
       "sidecar-bin/": "sidecar-bin/",
-      "resources/auroweave-svc.exe": "auroweave-svc.exe"
+      "resources/AuroDaemon.exe": "AuroDaemon.exe"
     }
   }
 }

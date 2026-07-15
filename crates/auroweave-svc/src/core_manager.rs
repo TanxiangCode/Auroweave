@@ -2,11 +2,9 @@
 /// 作者: TanXiang
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::process::Child;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
 
-pub const SINGBOX_VERSION: &str = "1.13.14";
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoreStatus {
@@ -17,25 +15,21 @@ pub enum CoreStatus {
 }
 
 pub struct CoreManager {
-    process: Arc<Mutex<Option<Child>>>,
+    pid: Arc<Mutex<Option<u32>>>,
     status: Arc<Mutex<CoreStatus>>,
 }
 
 impl CoreManager {
     pub fn new() -> Self {
         Self {
-            process: Arc::new(Mutex::new(None)),
+            pid: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(CoreStatus::Stopped)),
         }
     }
 
     pub async fn get_status(&self) -> (CoreStatus, Option<u32>) {
         let status = self.status.lock().await.clone();
-        let pid = if let Some(ref child) = *self.process.lock().await {
-            child.id()
-        } else {
-            None
-        };
+        let pid = *self.pid.lock().await;
         (status, pid)
     }
 
@@ -64,29 +58,39 @@ impl CoreManager {
 
         // 写入配置缓存文件
         let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-        let cache_dir = PathBuf::from(program_data).join("Auroweave");
+        let cache_dir = PathBuf::from(program_data).join("Auroweave").join("config");
         if let Err(e) = std::fs::create_dir_all(&cache_dir) {
             let err_msg = format!("创建服务缓存目录失败: {}", e);
             *status_guard = CoreStatus::Error(err_msg.clone());
             return Err(err_msg);
         }
         let config_path = cache_dir.join("config.json");
+        let has_tun = config_content.contains("\"type\": \"tun\"") || config_content.contains("\"type\":\"tun\"");
+        info!("正在写入服务缓存配置文件，总长度: {}, 是否携带 TUN inbound: {}", config_content.len(), has_tun);
         if let Err(e) = std::fs::write(&config_path, config_content) {
             let err_msg = format!("写入配置文件失败: {}", e);
             *status_guard = CoreStatus::Error(err_msg.clone());
             return Err(err_msg);
         }
 
-        info!("启动 sing-box: {:?} run -c {:?}", binary_path, config_path);
+        info!("启动 sing-box: {:?} run -c {:?}, 携带 TUN: {}", binary_path, config_path, has_tun);
 
         use std::process::Stdio;
-        let mut child = match tokio::process::Command::new(&binary_path)
-            .arg("run")
+        let mut cmd = tokio::process::Command::new(&binary_path);
+        cmd.arg("run")
             .arg("-c")
             .arg(&config_path)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stderr(Stdio::piped());
+            
+        #[cfg(target_os = "windows")]
+        {
+
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = match cmd.spawn()
         {
             Ok(c) => c,
             Err(e) => {
@@ -95,6 +99,38 @@ impl CoreManager {
                 return Err(err_msg);
             }
         };
+
+        // 将 sing-box 进程绑定到 Windows Job Object，确保 auroweave-svc 死后 sing-box 也必死
+        #[cfg(target_os = "windows")]
+        if let Some(child_pid) = child.id() {
+            unsafe {
+                use windows_sys::Win32::System::JobObjects::{CreateJobObjectW, AssignProcessToJobObject, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE};
+                use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+                use windows_sys::Win32::Foundation::CloseHandle;
+                
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job != 0 {
+                    let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                    let success = SetInformationJobObject(
+                        job,
+                        JobObjectExtendedLimitInformation,
+                        &info as *const _ as *const std::ffi::c_void,
+                        std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32
+                    );
+                    if success != 0 {
+                        let proc_handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, child_pid);
+                        if proc_handle != 0 {
+                            AssignProcessToJobObject(job, proc_handle);
+                            CloseHandle(proc_handle);
+                        }
+                    }
+                    // 注意：这里我们故意泄漏（不 Close） job 句柄。
+                    // 这样 job object 就和当前的 auroweave-svc 进程寿命绑定在一起，
+                    // auroweave-svc 退出时，操作系统会自动关闭 job 句柄，从而触发 KILL_ON_JOB_CLOSE 强制杀死 sing-box。
+                }
+            }
+        }
 
         // 取出 stdout/stderr 管道输出日志
         let stdout = child.stdout.take();
@@ -144,69 +180,116 @@ impl CoreManager {
             }
         }
 
-        let process_clone = self.process.clone();
+        let pid_val = child.id().unwrap_or(0);
+        *self.pid.lock().await = Some(pid_val);
+        *status_guard = CoreStatus::Running;
+
+        let pid_clone = self.pid.clone();
         let status_clone = self.status.clone();
         
-        // 开启监听进程退出的任务
-        *self.process.lock().await = Some(child);
-        *status_guard = CoreStatus::Running;
-        
+        // 开启监听进程退出的任务，将 child 的所有权直接转移进去，避免任何多重 wait 卡死
         tokio::spawn(async move {
-            let mut p_guard = process_clone.lock().await;
-            if let Some(ref mut child) = *p_guard {
-                match child.wait().await {
-                    Ok(status) => {
-                        info!("sing-box 进程退出，状态为: {:?}", status);
-                    }
-                    Err(e) => {
-                        error!("监听进程退出时发生异常: {}", e);
-                    }
+            info!("开始监听 sing-box 进程退出 (PID: {})", pid_val);
+            match child.wait().await {
+                Ok(status) => {
+                    info!("sing-box 进程 (PID: {}) 退出，状态为: {:?}", pid_val, status);
+                }
+                Err(e) => {
+                    error!("监听进程 (PID: {}) 退出时发生异常: {}", pid_val, e);
                 }
             }
-            *process_clone.lock().await = None;
+            // 清理 PID 和状态
+            *pid_clone.lock().await = None;
             *status_clone.lock().await = CoreStatus::Stopped;
         });
 
-        info!("sing-box 托管进程启动成功");
+        info!("sing-box 托管进程启动成功，PID: {}", pid_val);
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<(), String> {
-        let mut proc_guard = self.process.lock().await;
-        if let Some(mut child) = proc_guard.take() {
-            info!("正在停止 sing-box 进程...");
-            if let Err(e) = child.kill().await {
-                warn!("杀死 sing-box 进程警告: {}", e);
-            }
-            // 等待退出
-            let _ = child.wait().await;
-            info!("sing-box 进程已终止");
+        let pid_opt = {
+            let mut pid_guard = self.pid.lock().await;
+            pid_guard.take()
+        };
+
+        if let Some(pid) = pid_opt {
+            info!("正在终止 sing-box 进程 (PID: {})...", pid);
+            Self::kill_process_by_pid(pid);
+            
+            // 简单等待一下以确保进程释放
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            info!("sing-box 进程 (PID: {}) 终止命令已发出", pid);
         }
+
         *self.status.lock().await = CoreStatus::Stopped;
         Ok(())
     }
 
+    fn kill_process_by_pid(pid: u32) {
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let _ = std::process::Command::new("taskkill")
+                .arg("/F")
+                .arg("/PID")
+                .arg(pid.to_string())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(pid.to_string())
+                .status();
+        }
+    }
+
     fn resolve_binary_path() -> Result<PathBuf, String> {
-        // 服务是以其自身所在的 Program Files 目录为基准寻找同级目录下的 sing-box 二进制
+        let mut candidate_dirs = Vec::new();
+
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                // 1. 尝试寻找当前 exe 所在目录下的 sing-box-1.13.14.exe
-                let target = exe_dir.join(format!("sing-box-{}.exe", SINGBOX_VERSION));
-                if target.exists() {
-                    return Ok(target);
-                }
-                // 2. 尝试寻找当前 exe 所在目录下的 sing-box.exe
-                let target_generic = exe_dir.join("sing-box.exe");
-                if target_generic.exists() {
-                    return Ok(target_generic);
-                }
-                // 3. 尝试寻找 sidecar 候选路径（便于开发调试服务）
-                let debug_path = exe_dir.join(format!("../../../src-tauri/sidecar-bin/windows-x64/sing-box-{}.exe", SINGBOX_VERSION));
-                if debug_path.exists() {
-                    return Ok(debug_path);
+                candidate_dirs.push(exe_dir.to_path_buf());
+                // 尝试寻找 sidecar 候选路径（便于开发调试服务）
+                candidate_dirs.push(exe_dir.join("../../../src-tauri/sidecar-bin/windows-x64"));
+            }
+        }
+
+        let mut latest_path = None;
+        let mut latest_time = std::time::SystemTime::UNIX_EPOCH;
+
+        for dir in candidate_dirs {
+            if !dir.exists() || !dir.is_dir() { continue; }
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_file() { continue; }
+                    
+                    let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                    
+                    let is_match = file_name.starts_with("sing-box") && file_name.ends_with(".exe");
+
+                    if is_match {
+                        if let Ok(metadata) = std::fs::metadata(&path) {
+                            if let Ok(modified) = metadata.modified() {
+                                if modified > latest_time {
+                                    latest_time = modified;
+                                    latest_path = Some(path);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-        Err("在服务所在目录下找不到任何 sing-box 可执行二进制文件".to_string())
+
+        if let Some(path) = latest_path {
+            return Ok(path);
+        }
+
+        Err("在候选目录下找不到任何 sing-box 可执行二进制文件".to_string())
     }
 }

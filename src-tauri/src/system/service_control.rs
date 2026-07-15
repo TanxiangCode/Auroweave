@@ -113,14 +113,14 @@ mod win {
         use tauri::Manager;
         
         let mut svc_path = match app_handle.path().resource_dir() {
-            Ok(dir) => dir.join("resources").join("auroweave-svc.exe"),
+            Ok(dir) => dir.join("resources").join("AuroDaemon.exe"),
             Err(_) => std::path::PathBuf::new(),
         };
 
         if !svc_path.exists() {
             if let Ok(exe_path) = std::env::current_exe() {
                 if let Some(exe_dir) = exe_path.parent() {
-                    let debug_path = exe_dir.join("auroweave-svc.exe");
+                    let debug_path = exe_dir.join("AuroDaemon.exe");
                     if debug_path.exists() {
                         svc_path = debug_path;
                     }
@@ -197,8 +197,13 @@ pub fn stop_service() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-pub fn install_service_uac(app_handle: &tauri::AppHandle) -> Result<(), String> {
-    win::execute_uac_action(app_handle, "install")
+pub fn install_service_uac(app_handle: &tauri::AppHandle, run_mode: &str, singbox_path: &std::path::Path) -> Result<(), String> {
+    let action = if run_mode == "service" {
+        format!("install-service --singbox \"{}\"", singbox_path.to_string_lossy())
+    } else {
+        format!("install-task --singbox \"{}\"", singbox_path.to_string_lossy())
+    };
+    win::execute_uac_action(app_handle, &action)
 }
 
 #[cfg(target_os = "windows")]
@@ -206,43 +211,160 @@ pub fn uninstall_service_uac(app_handle: &tauri::AppHandle) -> Result<(), String
     win::execute_uac_action(app_handle, "uninstall")
 }
 
-// 计划任务控制方法 (Direct 模式静默提权)
+// 计划任务控制方法 (Local 模式静默提权)
 #[cfg(target_os = "windows")]
-pub fn run_direct_tun_task() -> Result<(), String> {
-    tracing::info!("执行 schtasks /run /tn AuroweaveDirectTunTask");
-    let status = std::process::Command::new("schtasks")
-        .arg("/run")
+pub fn run_direct_tun_task(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    
+    // 前置检查：即使计划任务存在，如果底层可执行文件丢失，也需要提示重新提权安装
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    let target_svc_path = std::path::PathBuf::from(&program_data).join("Auroweave").join("bin").join("AuroDaemon.exe");
+    if !target_svc_path.exists() {
+        return Err("底层服务程序文件缺失，请重新执行一键安装提权组件".to_string());
+    }
+
+    // 写入当前主进程的 PID 供后台看门狗轮询退出
+    let pid = std::process::id();
+    let config_dir = crate::get_config_dir();
+    let pid_file = config_dir.join("parent.pid");
+    let _ = std::fs::write(pid_file, pid.to_string());
+    
+    // 生成 manifest.json 以供服务自更新
+    let manifest_file = config_dir.join("manifest.json");
+    use tauri::Manager;
+    let mut svc_path = app_handle.path().resource_dir().unwrap_or_default().join("resources").join("AuroDaemon.exe");
+    if !svc_path.exists() {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let debug_path = exe_dir.join("AuroDaemon.exe");
+                if debug_path.exists() {
+                    svc_path = debug_path;
+                }
+            }
+        }
+    }
+    
+    let singbox_path = crate::core::sidecar::SidecarManager::resolve_binary_path()
+        .unwrap_or_else(|_| std::path::PathBuf::new());
+        
+    fn compute_sha256(path: &std::path::Path) -> String {
+        use sha2::{Sha256, Digest};
+        use std::io::Read;
+        use std::sync::{OnceLock, Mutex};
+        use std::collections::HashMap;
+        use std::time::SystemTime;
+
+        static HASH_CACHE: OnceLock<Mutex<HashMap<String, (SystemTime, u64, String)>>> = OnceLock::new();
+        let cache_mutex = HASH_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        
+        let metadata = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(_) => return String::new(),
+        };
+        let mtime = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        let size = metadata.len();
+        let path_str = path.to_string_lossy().to_string();
+
+        if let Ok(cache) = cache_mutex.lock() {
+            if let Some((cached_mtime, cached_size, cached_hash)) = cache.get(&path_str) {
+                if *cached_mtime == mtime && *cached_size == size {
+                    return cached_hash.clone();
+                }
+            }
+        }
+
+        if let Ok(mut file) = std::fs::File::open(path) {
+            let mut hasher = Sha256::new();
+            // 扩大缓冲区至 64KB，显著提升大文件的磁盘 I/O 读取速度
+            let mut buffer = [0; 65536];
+            while let Ok(n) = file.read(&mut buffer) {
+                if n == 0 { break; }
+                hasher.update(&buffer[..n]);
+            }
+            let hash = hasher.finalize();
+            let hash_str = hash.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+            
+            if let Ok(mut cache) = cache_mutex.lock() {
+                cache.insert(path_str, (mtime, size, hash_str.clone()));
+            }
+            
+            hash_str
+        } else {
+            String::new()
+        }
+    }
+    
+    let svc_hash = compute_sha256(&svc_path);
+    let singbox_hash = compute_sha256(&singbox_path);
+    
+    let manifest = serde_json::json!({
+        "svc_path": svc_path.to_string_lossy(),
+        "svc_hash": svc_hash,
+        "singbox_path": singbox_path.to_string_lossy(),
+        "singbox_hash": singbox_hash
+    });
+    
+    let _ = std::fs::write(manifest_file, manifest.to_string());
+
+    log::info!("执行 schtasks /run /tn AuroweaveDirectTunTask");
+    let mut cmd = std::process::Command::new("schtasks");
+    cmd.arg("/run")
         .arg("/tn")
         .arg("AuroweaveDirectTunTask")
-        .status()
+        .creation_flags(CREATE_NO_WINDOW);
+        
+    let status = cmd.status()
         .map_err(|e| format!("无法启动 schtasks 命令: {}", e))?;
     if !status.success() {
-        return Err("启动提权计划任务失败，请确认是否已成功安装服务（静默任务随服务一并安装）".to_string());
+        return Err("启动提权计划任务失败，请确认是否已成功安装提权组件（可通过主界面一键安装）".to_string());
     }
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 pub fn stop_direct_tun_task() -> Result<(), String> {
-    tracing::info!("执行 schtasks /end /tn AuroweaveDirectTunTask");
-    let _ = std::process::Command::new("schtasks")
-        .arg("/end")
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    
+    log::info!("执行 schtasks /end /tn AuroweaveDirectTunTask");
+    let mut cmd = std::process::Command::new("schtasks");
+    cmd.arg("/end")
         .arg("/tn")
         .arg("AuroweaveDirectTunTask")
+        .creation_flags(CREATE_NO_WINDOW);
+        
+    let _ = cmd.status();
+
+    // 强杀所有可能残留的后台提权进程
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "AuroDaemon.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
         .status();
+        
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "sing-box.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 pub fn query_direct_tun_task_running() -> Result<bool, String> {
-    let output = std::process::Command::new("schtasks")
-        .arg("/query")
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    
+    let mut cmd = std::process::Command::new("schtasks");
+    cmd.arg("/query")
         .arg("/tn")
         .arg("AuroweaveDirectTunTask")
         .arg("/fo")
         .arg("CSV")
         .arg("/nh")
-        .output()
+        .creation_flags(CREATE_NO_WINDOW);
+        
+    let output = cmd.output()
         .map_err(|e| format!("查询计划任务状态失败: {}", e))?;
     if !output.status.success() {
         return Ok(false);
@@ -271,6 +393,32 @@ pub fn query_direct_tun_task_running() -> Result<bool, String> {
     Ok(running)
 }
 
+#[cfg(target_os = "windows")]
+pub fn query_singbox_process_running() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    
+    let mut cmd = std::process::Command::new("tasklist");
+    cmd.arg("/FO")
+        .arg("CSV")
+        .arg("/NH")
+        .creation_flags(CREATE_NO_WINDOW);
+        
+    let output = cmd.output();
+    
+    if let Ok(out) = output {
+        let stdout_str = String::from_utf8_lossy(&out.stdout);
+        for line in stdout_str.lines() {
+            let lower = line.to_lowercase();
+            // 简单判断进程名中是否包含 sing-box
+            if lower.contains("\"sing-box") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 // 非 Windows 平台空桩实现
 #[cfg(not(target_os = "windows"))]
 pub fn query_service_status() -> Result<String, String> {
@@ -288,7 +436,7 @@ pub fn stop_service() -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn install_service_uac(_app_handle: &tauri::AppHandle) -> Result<(), String> {
+pub fn install_service_uac(_app_handle: &tauri::AppHandle, _run_mode: &str, _singbox_path: &std::path::Path) -> Result<(), String> {
     Err("当前平台不支持系统服务模式".to_string())
 }
 
@@ -298,7 +446,7 @@ pub fn uninstall_service_uac(_app_handle: &tauri::AppHandle) -> Result<(), Strin
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn run_direct_tun_task() -> Result<(), String> {
+pub fn run_direct_tun_task(_app_handle: &tauri::AppHandle) -> Result<(), String> {
     Err("当前平台不支持静默提权任务".to_string())
 }
 
@@ -310,4 +458,9 @@ pub fn stop_direct_tun_task() -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn query_direct_tun_task_running() -> Result<bool, String> {
     Ok(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn query_singbox_process_running() -> bool {
+    false
 }

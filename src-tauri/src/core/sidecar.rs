@@ -7,8 +7,6 @@ use tokio::process::Child;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
-pub const SINGBOX_VERSION: &str = "1.13.14";
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarStatus {
     Stopped,
@@ -173,72 +171,68 @@ impl SidecarManager {
     }
 
     /// 多路径候选自动匹配算法（防止工作目录或解压版本引起的找不到路径）
-    fn resolve_binary_path() -> Result<PathBuf, AppError> {
-        let mut candidates = Vec::new();
+    pub fn resolve_binary_path() -> Result<PathBuf, AppError> {
+        let mut candidate_dirs = Vec::new();
 
         #[cfg(target_os = "windows")]
         {
-            candidates.push(format!(
-                "src-tauri/sidecar-bin/windows-x64/sing-box-{}.exe",
-                SINGBOX_VERSION
-            ));
-            candidates.push(format!(
-                "sidecar-bin/windows-x64/sing-box-{}.exe",
-                SINGBOX_VERSION
-            ));
-            candidates.push(
-                "src-tauri/sidecar-bin/windows-x64/sing-box-1.11.4.exe".to_string(),
-            );
-            candidates.push("sidecar-bin/windows-x64/sing-box-1.11.4.exe".to_string());
+            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/windows-x64"));
+            candidate_dirs.push(PathBuf::from("sidecar-bin/windows-x64"));
         }
 
         #[cfg(target_os = "macos")]
         {
-            candidates.push(format!(
-                "src-tauri/sidecar-bin/macos-universal/sing-box-{}",
-                SINGBOX_VERSION
-            ));
-            candidates.push(format!(
-                "sidecar-bin/macos-universal/sing-box-{}",
-                SINGBOX_VERSION
-            ));
-            candidates.push(
-                "src-tauri/sidecar-bin/macos-universal/sing-box-1.11.4".to_string(),
-            );
-            candidates.push("sidecar-bin/macos-universal/sing-box-1.11.4".to_string());
+            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/macos-universal"));
+            candidate_dirs.push(PathBuf::from("sidecar-bin/macos-universal"));
         }
 
-        // 检查程序运行路径（针对生产构建产物）
         if let Ok(exe_path) = std::env::current_exe() {
             if let Some(exe_dir) = exe_path.parent() {
-                #[cfg(target_os = "windows")]
-                candidates.push(
-                    exe_dir
-                        .join(format!("sing-box-{}.exe", SINGBOX_VERSION))
-                        .to_string_lossy()
-                        .to_string(),
-                );
-                #[cfg(target_os = "macos")]
-                candidates.push(
-                    exe_dir
-                        .join(format!("sing-box-{}", SINGBOX_VERSION))
-                        .to_string_lossy()
-                        .to_string(),
-                );
+                candidate_dirs.push(exe_dir.to_path_buf());
             }
         }
 
-        for path_str in &candidates {
-            let path = PathBuf::from(path_str);
-            if path.exists() {
-                return Ok(path);
+        // 也查找 %ProgramData%\Auroweave\bin 目录 (服务安装后的路径)
+        let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        candidate_dirs.push(PathBuf::from(program_data).join("Auroweave").join("bin"));
+
+        let mut latest_path = None;
+        let mut latest_time = std::time::SystemTime::UNIX_EPOCH;
+
+        for dir in candidate_dirs {
+            if !dir.exists() || !dir.is_dir() { continue; }
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_file() { continue; }
+                    
+                    let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                    
+                    #[cfg(target_os = "windows")]
+                    let is_match = file_name.starts_with("sing-box") && file_name.ends_with(".exe");
+                    
+                    #[cfg(not(target_os = "windows"))]
+                    let is_match = file_name.starts_with("sing-box") && !file_name.contains("."); // 避免匹配 .tar.gz 或其他压缩包
+
+                    if is_match {
+                        if let Ok(metadata) = std::fs::metadata(&path) {
+                            if let Ok(modified) = metadata.modified() {
+                                if modified > latest_time {
+                                    latest_time = modified;
+                                    latest_path = Some(path);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        let err_msg = format!(
-            "找不到 sing-box 二进制文件 (尝试路径: {:?})，请运行 download-sidecar 脚本",
-            candidates
-        );
+        if let Some(path) = latest_path {
+            return Ok(path);
+        }
+
+        let err_msg = "找不到 sing-box 二进制文件，请运行 download-sidecar 脚本或通过界面下载".to_string();
         error!("{}", err_msg);
         Err(AppError::Sidecar(err_msg))
     }

@@ -20,6 +20,7 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-log = "2"
 
 # 序列化
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +44,7 @@ sysinfo = "0.31"
 # 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+log = "0.4"
 
 # 错误处理
 thiserror = "1"
@@ -53,6 +55,8 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # UUID（连接计数器等）
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-single-instance = "2.0.0-rc.5"
+sha2 = "0.10.9"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",

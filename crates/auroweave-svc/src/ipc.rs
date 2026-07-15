@@ -89,9 +89,12 @@ impl IpcServer {
                     pid: None,
                 };
                 let _ = server.write_all(&serde_json::to_vec(&resp).unwrap()).await;
+                error!("解析请求 JSON 失败: {}", e);
                 return Err(format!("解析请求 JSON 失败: {}", e));
             }
         };
+
+        info!("收到客户端 IPC 请求: action={}", request.action);
 
         // 校验 Token
         if request.token.is_empty() || request.token != self.token {
@@ -102,6 +105,7 @@ impl IpcServer {
                 pid: None,
             };
             let _ = server.write_all(&serde_json::to_vec(&resp).unwrap()).await;
+            error!("客户端安全 Token 校验失败，Token 不匹配！");
             return Err("客户端 Token 校验未通过".to_string());
         }
 
@@ -117,14 +121,20 @@ impl IpcServer {
                 let (status, pid) = self.core_manager.get_status().await;
                 response.status = status_to_str(status);
                 response.pid = pid;
+                info!("IPC GET_STATUS: status={}, pid={:?}", response.status, response.pid);
             }
             "RELOAD_CONFIG" => {
                 if let Some(config_param) = request.config {
                     // 自适应判断：如果参数是一个物理文件路径则读取其内容，避开 IPC 管道大文件分包截断
                     let config_content = if std::path::Path::new(&config_param).exists() {
+                        info!("检测到物理配置文件路径: {:?}", config_param);
                         match std::fs::read_to_string(&config_param) {
-                            Ok(content) => content,
+                            Ok(content) => {
+                                info!("成功读取配置文件内容，长度: {}", content.len());
+                                content
+                            }
                             Err(e) => {
+                                error!("系统服务读取配置文件失败: {}", e);
                                 response.success = false;
                                 response.status = "error".to_string();
                                 response.error = Some(format!("系统服务读取配置文件失败: {}", e));
@@ -134,6 +144,7 @@ impl IpcServer {
                             }
                         }
                     } else {
+                        info!("直接以文本形式接收配置参数，长度: {}", config_param.len());
                         config_param
                     };
 
@@ -142,29 +153,36 @@ impl IpcServer {
                             let (status, pid) = self.core_manager.get_status().await;
                             response.status = status_to_str(status);
                             response.pid = pid;
+                            info!("重载内核配置并成功拉起，当前状态: {}, PID: {:?}", response.status, response.pid);
                         }
                         Err(e) => {
+                            error!("启动 sing-box 失败: {}", e);
                             response.success = false;
                             response.status = "error".to_string();
                             response.error = Some(e);
                         }
                     }
                 } else {
+                    error!("重载配置失败，参数为空");
                     response.success = false;
                     response.status = "error".to_string();
                     response.error = Some("配置内容或路径不能为空".to_string());
                 }
             }
             "SHUTDOWN_CORE" => {
+                info!("请求停止内核服务...");
                 if let Err(e) = self.core_manager.stop().await {
+                    error!("停止内核核心服务失败: {}", e);
                     response.success = false;
                     response.status = "error".to_string();
                     response.error = Some(e);
                 } else {
                     response.status = "stopped".to_string();
+                    info!("内核服务停止成功");
                 }
             }
             _ => {
+                error!("未知指令 action: {}", request.action);
                 response.success = false;
                 response.status = "error".to_string();
                 response.error = Some(format!("未知的操作指令: {}", request.action));

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Download sing-box 1.13.14 binary for macOS (Universal) / Linux
+# Download sing-box 1.14.0 binary for macOS (Universal) / Linux
 # Author: TanXiang
 
 set -e
 
-VERSION="1.13.14"
+VERSION="1.14.0-alpha.43"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 

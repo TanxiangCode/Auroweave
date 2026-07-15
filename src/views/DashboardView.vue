@@ -3,7 +3,7 @@
  * Dashboard 首页 — 环绕双翼镜像对称布局
  * 作者: TanXiang
  */
-import { onMounted, computed, ref } from "vue";
+import { onMounted, onUnmounted, computed, ref } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
@@ -11,6 +11,7 @@ import { useFluidWave } from "@/composables/useFluidWave";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
+import { info as logInfo, error as logError, warn as logWarn } from "@tauri-apps/plugin-log";
 import SpeedChart from "@/components/charts/SpeedChart.vue";
 
 const router = useRouter();
@@ -101,54 +102,68 @@ const inboundMode = computed({
   async set(val: "system" | "tun") {
     if (operating.value) return;
     operating.value = true;
+    logInfo(`[DashboardView] 用户点击切换网络接管模式为: ${val}`);
+
+    const originalVal = settingsStore.settings.tun_enabled;
+    const isTun = val === "tun";
+    
+    // 乐观更新：立刻在前端呈现开关变动
+    settingsStore.settings.tun_enabled = isTun;
 
     // 开启非阻塞的异步微任务以平滑过渡 UI 选中状态
     setTimeout(async () => {
       try {
         if (!proxyActive.value) {
-          await invoke("tun_set_enabled", { enabled: val === "tun" });
-          settingsStore.settings.tun_enabled = (val === "tun");
+          logInfo(`[DashboardView] 代理未激活，仅标记设置 tun_enabled = ${isTun}`);
+          await invoke("tun_set_enabled", { enabled: isTun });
           return;
         }
 
         if (val === "system") {
-          await invoke("tun_set_enabled", { enabled: false });
-          settingsStore.settings.tun_enabled = false;
-          await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
-          if (proxyStore.proxyMode === "direct") {
-            await proxyStore.changeProxyMode("rule");
+          logInfo("[DashboardView] 切换为普通系统代理模式，正在卸载 TUN...");
+          const res: any = await invoke("tun_set_enabled", { enabled: false });
+          if (res.success) {
+            if (proxyStore.proxyMode === "direct") {
+              await proxyStore.changeProxyMode("rule");
+            }
+          } else {
+             settingsStore.settings.tun_enabled = originalVal; // 回滚
           }
         } else if (val === "tun") {
-          const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
+          logInfo("[DashboardView] 切换为 TUN 虚拟网卡模式...");
+          const res: any = await invoke("tun_set_enabled", { enabled: true });
           if (!res.success) {
+            logWarn(`[DashboardView] 启动 TUN 失败: ${res.error}，提示用户一键提权安装服务...`);
             const confirmInstall = confirm(
               "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
             );
             if (confirmInstall) {
+              logInfo("[DashboardView] 用户同意提权安装服务，开始调用 service_install...");
               const installRes: any = await invoke("service_install");
               if (installRes.success) {
+                logInfo("[DashboardView] 服务安装成功，重新尝试启动 TUN...");
                 const retryRes: any = await invoke("tun_set_enabled", { enabled: true });
                 if (retryRes.success) {
-                  settingsStore.settings.tun_enabled = true;
-                  await invoke("sysproxy_set", { enabled: false, port: 0 });
+                  logInfo("[DashboardView] 重试启动 TUN 成功");
                   await proxyStore.changeProxyMode("direct");
                   return;
+                } else {
+                  logError(`[DashboardView] 服务安装后，重试启动 TUN 依然失败: ${retryRes.error}`);
                 }
+              } else {
+                logError(`[DashboardView] 提权服务安装失败: ${installRes.error}`);
               }
             }
-            settingsStore.settings.tun_enabled = false;
-            await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
-            if (proxyStore.proxyMode === "direct") {
-              await proxyStore.changeProxyMode("rule");
-            }
+            logWarn("[DashboardView] 启动 TUN 失败，静默回滚乐观状态");
+            settingsStore.settings.tun_enabled = originalVal; // 回滚
             return;
           }
-          settingsStore.settings.tun_enabled = true;
-          await invoke("sysproxy_set", { enabled: false, port: 0 });
+          logInfo("[DashboardView] 启动 TUN 成功");
           await proxyStore.changeProxyMode("direct");
         }
-      } catch (e) {
-        console.error("切换接管模式错误: ", e);
+      } catch (e: any) {
+        logError(`[DashboardView] 切换接管模式发生致命错误: ${e.message || e}`);
+        settingsStore.settings.tun_enabled = originalVal; // 回滚
       } finally {
         operating.value = false;
       }
@@ -162,17 +177,16 @@ async function toggleProxy() {
   operating.value = true;
 
   const nextActive = !proxyActive.value;
-  // 乐观更新：立刻在前端呈现开关变动，消除 1.5 秒的同步等待卡顿！
+  // 乐观更新：立刻在前端呈现开关变动
   proxyActive.value = nextActive;
 
   setTimeout(async () => {
     try {
       if (nextActive) {
         if (settingsStore.settings.tun_enabled) {
-          const res: { success: boolean } = await invoke("tun_set_enabled", { enabled: true });
+          const res: any = await invoke("tun_set_enabled", { enabled: true });
           if (res.success) {
             settingsStore.settings.tun_enabled = true;
-            await invoke("sysproxy_set", { enabled: false, port: 0 });
             await proxyStore.changeProxyMode("direct");
           } else {
             const confirmInstall = confirm(
@@ -184,7 +198,6 @@ async function toggleProxy() {
                 const retryRes: any = await invoke("tun_set_enabled", { enabled: true });
                 if (retryRes.success) {
                   settingsStore.settings.tun_enabled = true;
-                  await invoke("sysproxy_set", { enabled: false, port: 0 });
                   await proxyStore.changeProxyMode("direct");
                   return;
                 }
@@ -192,12 +205,10 @@ async function toggleProxy() {
             }
             proxyActive.value = false;
             settingsStore.settings.tun_enabled = false;
-            await invoke("sysproxy_set", { enabled: false, port: 0 });
           }
         } else {
           await invoke("tun_set_enabled", { enabled: false });
           settingsStore.settings.tun_enabled = false;
-          await invoke("sysproxy_set", { enabled: true, port: settingsStore.settings.mixed_port });
           if (proxyStore.proxyMode === "direct") {
             await proxyStore.changeProxyMode("rule");
           }
@@ -205,11 +216,11 @@ async function toggleProxy() {
       } else {
         await settingsStore.updateSettings({ tun_enabled: false, proxy_mode: "direct" });
         settingsStore.settings.tun_enabled = false;
-        await invoke("sysproxy_set", { enabled: false, port: 0 });
         proxyStore.$patch({ proxyMode: "direct" });
       }
     } catch (e) {
       console.error("开关代理错误: ", e);
+      proxyActive.value = !nextActive; // 回滚乐观更新
     } finally {
       operating.value = false;
     }
@@ -236,16 +247,39 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
+let statusTimer: ReturnType<typeof setInterval> | null = null;
+
+async function checkRunningStatus() {
+  if (operating.value) return; // 在变更过程中避免覆盖乐观状态
+  try {
+    const runningRes: any = await invoke("core_query_running");
+    if (runningRes.success) {
+      proxyActive.value = runningRes.data;
+    }
+  } catch (e: any) {
+    console.error("轮询内核状态异常:", e);
+  }
+}
+
 onMounted(async () => {
   await settingsStore.fetchSettings();
   proxyStore.fetchGroups();
-  // 根据 settings 本地配置初始化大开关状态 (在 direct 且 tun 关的状况下为未接管)
-  const isDirect = proxyStore.proxyMode === "direct";
-  const isTun = settingsStore.settings.tun_enabled;
-  if (isDirect && !isTun) {
+  
+  try {
+    await checkRunningStatus();
+    logInfo(`[DashboardView] 初始化核心运行状态: ${proxyActive.value ? '运行中' : '未运行'}`);
+  } catch (e: any) {
     proxyActive.value = false;
-  } else {
-    proxyActive.value = true;
+    logError(`[DashboardView] 获取核心运行状态异常: ${e.message || e}`);
+  }
+
+  // 启动定时轮询，每 3 秒同步一次状态
+  statusTimer = setInterval(checkRunningStatus, 3000);
+});
+
+onUnmounted(() => {
+  if (statusTimer) {
+    clearInterval(statusTimer);
   }
 });
 </script>

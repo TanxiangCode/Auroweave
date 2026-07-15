@@ -10,18 +10,29 @@ use core::sidecar::SidecarManager;
 use speedtest::scheduler::SpeedTestScheduler;
 use std::sync::Arc;
 use tauri::Manager;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+/// 获取统一数据根目录：C:\ProgramData\Auroweave
+/// 服务、GUI 主程序共用此目录，SYSTEM 用户和普通用户均可访问。
+pub fn get_data_root() -> std::path::PathBuf {
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    std::path::PathBuf::from(program_data).join("Auroweave")
+}
+
+/// 获取配置子目录：%ProgramData%\Auroweave\config\
+pub fn get_config_dir() -> std::path::PathBuf {
+    get_data_root().join("config")
+}
+
+/// 获取日志子目录：%ProgramData%\Auroweave\logs\
+pub fn get_log_dir() -> std::path::PathBuf {
+    get_data_root().join("logs")
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("auroweave=debug,tauri=warn")
-        }))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
-    tracing::info!("Auroweave 启动中...");
+    // 确保日志目录存在
+    let log_dir = get_log_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
 
     let sidecar_manager = Arc::new(SidecarManager::new());
     let speedtest_scheduler = Arc::new(SpeedTestScheduler::new());
@@ -29,6 +40,35 @@ pub fn run() {
     tauri::Builder::default()
         .manage(sidecar_manager.clone())
         .manage(speedtest_scheduler.clone())
+        // 注册单例插件，确保只运行一个实例
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // 如果尝试启动新实例，将其聚焦（可以触发某些事件）
+            let _ = app.get_webview_window("main").map(|w| {
+                let _ = w.set_focus();
+            });
+        }))
+        // tauri-plugin-log：前端+后端统一写入同一日志文件
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                // 输出到文件（追加模式）
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Folder {
+                        path: log_dir.clone(),
+                        file_name: Some("auroweave".to_string()),
+                    }
+                ))
+                // 同时输出到 Webview DevTools 控制台
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Webview
+                ))
+                // 日志级别：默认 Trace
+                .level(log::LevelFilter::Trace)
+                // Tauri 内部框架仅记录 Warn 以上，减少噪音
+                .level_for("tauri", log::LevelFilter::Warn)
+                .level_for("tao", log::LevelFilter::Warn)
+                .level_for("wry", log::LevelFilter::Warn)
+                .build()
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -38,6 +78,7 @@ pub fn run() {
             commands::proxy::proxy_select_node,
             commands::proxy::proxy_get_mode,
             commands::proxy::proxy_set_mode,
+            commands::proxy::proxy_get_singbox_version,
             commands::proxy::sysproxy_set,
             commands::proxy::app_restart_as_admin,
             commands::subscription::subscription_import,
@@ -63,121 +104,38 @@ pub fn run() {
             commands::routing::routing_get_processes,
             commands::routing::routing_get_app_rules,
             commands::routing::routing_save_app_rule,
+            // 日志管理命令
+            commands::logging::log_read_app,
+            commands::logging::log_read_service,
+            commands::logging::log_clear_all,
+            commands::settings::core_query_running,
         ])
         .setup(move |app| {
             let _window = app.get_webview_window("main")
                 .expect("找不到主窗口，请检查 tauri.conf.json 中的窗口配置");
 
+            // 执行旧数据迁移（首次启动时将 %APPDATA% 数据迁移到 %ProgramData%）
+            system::startup::migrate_legacy_data(app.handle());
+
             // 初始化全局 ClashAPI 端口
             let (_, clash_port) = speedtest::get_configured_ports(app.handle());
             core::clash_api::set_clash_api_port(clash_port);
 
-            tracing::info!("Tauri 窗口已创建");
+            log::info!("[app] Auroweave 启动 | 数据根目录: {:?}", get_data_root());
+            log::info!("[app] Tauri 主窗口已创建");
 
-            let config_dir = app.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
-            let config_path = config_dir.join("config.json");
-
-            if config_path.exists() {
-                // 在启动前，将最新的设置配置项同步到 config.json 中
-                let _ = commands::settings::rebuild_config_from_settings(app.handle());
-
-                let settings = commands::settings::settings_get_internal(app.handle());
-                let app_handle = app.handle().clone();
-                let sm = sidecar_manager.clone();
-                let path_str = config_path.to_string_lossy().to_string();
-
-                tauri::async_runtime::spawn(async move {
-                    if settings.core.run_mode == "service" {
-                        // 系统服务模式自愈
-                        let status = crate::system::service_control::query_service_status().unwrap_or_default();
-                        if status == "not_installed" {
-                            tracing::warn!("系统服务未安装，启动时自动回退为直接运行模式");
-                            let mut patch_settings = settings.clone();
-                            patch_settings.core.run_mode = "direct".to_string();
-                            patch_settings.core.service.last_fallback_reason = Some("not_installed".to_string());
-                            let _ = commands::settings::update_settings_internal(&app_handle, serde_json::to_value(patch_settings).unwrap());
-                            
-                            let _ = sm.start(&path_str).await;
-                            if settings.tun_enabled {
-                                let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-                            } else {
-                                let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                            }
-                        } else {
-                            if status == "stopped" {
-                                if let Err(e) = crate::system::service_control::start_service() {
-                                    tracing::error!("系统服务启动失败: {}，回退为直接运行模式", e);
-                                    let mut patch_settings = settings.clone();
-                                    patch_settings.core.run_mode = "direct".to_string();
-                                    patch_settings.core.service.last_fallback_reason = Some("start_failed".to_string());
-                                    let _ = commands::settings::update_settings_internal(&app_handle, serde_json::to_value(patch_settings).unwrap());
-                                    
-                                    let _ = sm.start(&path_str).await;
-                                    if settings.tun_enabled {
-                                        let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-                                    } else {
-                                        let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                                    }
-                                    return;
-                                }
-                            }
-                            
-                            // 同步配置至服务
-                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                            if let Err(e) = commands::settings::sync_config_to_service(&app_handle).await {
-                                tracing::error!("配置同步至服务失败: {}，回退为直接运行模式", e);
-                                let mut patch_settings = settings.clone();
-                                patch_settings.core.run_mode = "direct".to_string();
-                                patch_settings.core.service.last_fallback_reason = Some("start_failed".to_string());
-                                let _ = commands::settings::update_settings_internal(&app_handle, serde_json::to_value(patch_settings).unwrap());
-                                
-                                let _ = sm.start(&path_str).await;
-                                if settings.tun_enabled {
-                                    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-                                } else {
-                                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                                }
-                            } else {
-                                if settings.tun_enabled {
-                                    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-                                } else {
-                                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                                }
-                            }
-                        }
-                    } else {
-                        // 直接运行模式
-                        if settings.tun_enabled {
-                            // 启动前同步配置到服务目录，并由计划任务静默拉起
-                            let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-                            let cache_dir = std::path::PathBuf::from(program_data).join("Auroweave");
-                            let _ = std::fs::create_dir_all(&cache_dir);
-                            let cache_config_path = cache_dir.join("config.json");
-                            let _ = std::fs::copy(&config_path, &cache_config_path);
-
-                            if let Err(e) = crate::system::service_control::run_direct_tun_task() {
-                                tracing::error!("启动时直接模式下静默拉起 TUN 失败: {}", e);
-                            }
-                            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-                        } else {
-                            if let Err(e) = sm.start(&path_str).await {
-                                tracing::warn!("启动 sing-box 失败: {}", e);
-                            } else {
-                                let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                            }
-                        }
-                    }
-                });
-            } else {
-                tracing::info!("尚未检测到系统配置目录中的 config.json，等待用户导入订阅后拉起");
-            }
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = system::startup::apply_core_mode_with_fallback(&app_handle).await {
+                    log::error!("[app] 核心自愈与拉起发生错误: {}", e);
+                }
+            });
 
             // 使用条件编译：只在开发模式下生效
             #[cfg(debug_assertions)]
             {
-                // 获取你的主窗口实例（Tauri默认主窗口标签为 "main"）
                 if let Some(window) = app.get_webview_window("main") {
-                    window.open_devtools(); // 自动打开内部调试器
+                    window.open_devtools();
                 }
             }
 
@@ -187,12 +145,15 @@ pub fn run() {
         .expect("Tauri 构建失败")
         .run(move |app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                log::info!("[app] 程序正在退出，清理网络代理...");
                 let _ = system::sysproxy::set_system_proxy(false, 0);
                 let settings = commands::settings::settings_get_internal(app_handle);
                 if settings.core.run_mode == "service" {
+                    log::info!("[app] 服务模式退出：停止系统服务");
                     let _ = system::service_control::stop_service();
                     std::thread::sleep(std::time::Duration::from_millis(1500));
                 } else {
+                    log::info!("[app] 直接运行模式退出：停止计划任务 TUN 和 sing-box");
                     let _ = system::service_control::stop_direct_tun_task();
                     let sidecar_manager = app_handle.state::<std::sync::Arc<SidecarManager>>().inner().clone();
                     tauri::async_runtime::block_on(async move {

@@ -23,16 +23,24 @@ pub struct IpcResponse {
 pub async fn send_ipc_request(action: &str, config_content: Option<&str>) -> Result<IpcResponse, String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    log::info!("[ipc_client] 准备发送 IPC 请求: action={}, 参数长度={}", action, config_content.map(|c| c.len()).unwrap_or(0));
+
     // 读取受保护的安全 Token
     let token = match load_token() {
         Ok(t) => t,
-        Err(e) => return Err(format!("本地服务验证 Token 获取失败: {}", e)),
+        Err(e) => {
+            log::error!("[ipc_client] 获取安全令牌 Token 失败: {}", e);
+            return Err(format!("本地服务验证 Token 获取失败: {}", e));
+        }
     };
 
     // 连接服务管道
     let mut client = match tokio::net::windows::named_pipe::ClientOptions::new().open(PIPE_NAME) {
         Ok(c) => c,
-        Err(e) => return Err(format!("无法连接至服务控制管道 (可能服务未运行): {}", e)),
+        Err(e) => {
+            log::error!("[ipc_client] 无法打开具名管道连接: {}", e);
+            return Err(format!("无法连接至服务控制管道 (可能服务未运行): {}", e));
+        }
     };
 
     let req = IpcRequest {
@@ -49,12 +57,14 @@ pub async fn send_ipc_request(action: &str, config_content: Option<&str>) -> Res
     let mut buf = vec![0u8; 65536];
     let n = client.read(&mut buf).await.map_err(|e| format!("读取管道响应失败: {}", e))?;
     if n == 0 {
-        return Err("服务未返回任何响应数据".to_string());
+        log::error!("[ipc_client] 管道已断开且无返回数据");
+        return Err("服务未返回任何响应 data".to_string());
     }
 
     let resp: IpcResponse = serde_json::from_slice(&buf[..n])
         .map_err(|e| format!("解析管道返回数据失败: {}", e))?;
 
+    log::info!("[ipc_client] 收到 IPC 管道反馈: success={}, status={}", resp.success, resp.status);
     Ok(resp)
 }
 

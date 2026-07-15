@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   speed_test_timeout_secs: 5,
   connection_timeout_secs: 15,
   core: {
-    runMode: "direct",
+    runMode: "local",
     service: {
       installedVersion: null,
       lastKnownStatus: "not_installed",

@@ -39,7 +39,7 @@ const errorMsg = ref("");
 let statusTimer: ReturnType<typeof setInterval> | null = null;
 
 const runMode = computed(() => {
-  return settingsStore.settings.core?.runMode || "direct";
+  return settingsStore.settings.core?.runMode || "local";
 });
 
 onMounted(() => {
@@ -64,53 +64,53 @@ async function refreshStatus() {
 }
 
 // 切换模式控制流
-async function selectMode(mode: "direct" | "service") {
+async function selectMode(mode: "local" | "service") {
   if (operating.value) return;
   errorMsg.value = "";
+  operating.value = true;
 
-  if (mode === "direct") {
-    operating.value = true;
+  setTimeout(async () => {
     try {
-      const patch = {
-        core: {
-          runMode: "direct" as const,
-          service: { ...settingsStore.settings.core.service, lastKnownStatus: "stopped" as const }
-        }
-      };
-      await settingsStore.updateSettings(patch);
-      await refreshStatus();
-    } catch (e: any) {
-      errorMsg.value = e.message || "切换至直接运行模式失败";
-    } finally {
-      operating.value = false;
-    }
-  } else {
-    // 切换到系统服务
-    operating.value = true;
-    try {
-      const res = await serviceQueryStatus();
-      if (res.success && res.data) {
-        serviceStatus.value = res.data;
-        if (res.data.lastKnownStatus === "not_installed") {
-          // 未安装：弹出 UAC 提权询问
-          showConfirmModal.value = true;
-        } else {
-          // 已安装：直接切换并存盘
-          const patch = {
-            core: {
-              ...settingsStore.settings.core,
-              runMode: "service" as const
-            }
-          };
-          await settingsStore.updateSettings(patch);
+      if (mode === "local") {
+        const patch = {
+          core: {
+            runMode: "local" as const,
+            service: { ...settingsStore.settings.core.service, lastKnownStatus: "stopped" as const }
+          }
+        };
+        // 乐观更新
+        settingsStore.settings.core.runMode = "local";
+        await settingsStore.updateSettings(patch);
+        await refreshStatus();
+      } else {
+        const res = await serviceQueryStatus();
+        if (res.success && res.data) {
+          serviceStatus.value = res.data;
+          if (res.data.lastKnownStatus === "not_installed") {
+            // 未安装：弹出 UAC 提权询问
+            showConfirmModal.value = true;
+          } else {
+            // 已安装：直接切换并存盘
+            const patch = {
+              core: {
+                ...settingsStore.settings.core,
+                runMode: "service" as const
+              }
+            };
+            // 乐观更新
+            settingsStore.settings.core.runMode = "service";
+            await settingsStore.updateSettings(patch);
+          }
         }
       }
     } catch (e: any) {
-      errorMsg.value = e.message || "获取服务状态失败";
+      errorMsg.value = e.message || "切换运行模式失败";
+      // 发生错误时重新拉取设置，恢复正确的 UI 状态
+      await settingsStore.fetchSettings();
     } finally {
       operating.value = false;
     }
-  }
+  }, 50);
 }
 
 // UAC 安装服务
@@ -259,12 +259,12 @@ const statusText = computed(() => {
     <div class="mode-selector-wrap">
       <button 
         class="mode-btn" 
-        :class="{ active: runMode === 'direct' }"
+        :class="{ active: runMode === 'local' }"
         :disabled="operating"
-        @click="selectMode('direct')"
+        @click="selectMode('local')"
       >
-        <span class="btn-title">💻 直接运行模式 (Direct)</span>
-        <span class="btn-desc">GUI 直接拉起内核子进程。开启 TUN 需要每次弹出管理员 UAC 确认，适合轻量代理或普通端口转发用户。</span>
+        <span class="btn-title">💻 本地运行模式 (Local)</span>
+        <span class="btn-desc">GUI 结合提权任务托管内核子进程。开启 TUN 需要首次提权配置计划任务，此后即免弹窗运行。</span>
       </button>
       <button 
         class="mode-btn" 
@@ -278,8 +278,8 @@ const statusText = computed(() => {
     </div>
 
     <!-- 提示直连模式开启 TUN 的小警告 -->
-    <div v-if="runMode === 'direct' && settingsStore.settings.tun_enabled" class="fallback-banner warning">
-      ⚠️ 当前为直接运行模式，启用 TUN 时启动应用将每次弹出系统 UAC 确认。推荐切换至<strong>系统服务模式</strong>以获得流畅的无干扰体验。
+    <div v-if="runMode === 'local' && settingsStore.settings.tun_enabled" class="fallback-banner warning">
+      ⚠️ 当前为本地运行模式，如果您尚未一键提权安装组件，启用 TUN 将提示提权。推荐切换至<strong>系统服务模式</strong>以获得流畅的开机自启体验。
     </div>
 
     <!-- 切换失败错误展示 -->

@@ -83,9 +83,9 @@
       <div class="setting-item">
         <div class="item-label">
           <span>Sing-box 内核版本</span>
-          <span class="sub-label">系统锁定嵌入侧载核心 v{{ SINGBOX_VERSION }} (100% 规则对齐)</span>
+          <span class="sub-label">系统内嵌侧载核心 v{{ singboxVersion }} (100% 规则对齐)</span>
         </div>
-        <span class="version-tag">v{{ SINGBOX_VERSION }}</span>
+        <span class="version-tag">v{{ singboxVersion }}</span>
       </div>
 
       <!-- 配置重置 -->
@@ -107,7 +107,7 @@
 import { ref, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
-import { SINGBOX_VERSION } from "@/constants";
+import { invoke } from "@tauri-apps/api/core";
 import SvgIcon from "@/components/common/SvgIcon.vue";
 
 const props = defineProps<{
@@ -116,9 +116,9 @@ const props = defineProps<{
 
 const settingsStore = useSettingsStore();
 const toast = useToast();
-
 const highlightTopology = ref(false);
 const topologyItemRef = ref<HTMLDivElement | null>(null);
+const singboxVersion = ref<string>("加载中...");
 
 onMounted(() => {
   if (props.highlightTarget === "topology") {
@@ -127,6 +127,16 @@ onMounted(() => {
       highlightTopology.value = false;
     }, 3000);
   }
+  
+  invoke<any>("proxy_get_singbox_version").then(res => {
+    if (res.success && res.data) {
+      singboxVersion.value = res.data;
+    } else {
+      singboxVersion.value = "未知";
+    }
+  }).catch(() => {
+    singboxVersion.value = "无法获取";
+  });
 });
 
 async function save() {

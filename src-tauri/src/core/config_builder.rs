@@ -14,7 +14,6 @@ pub struct ConfigBuilder {
     outbounds: Vec<ParsedOutbound>,
     mixed_port: u16,
     clash_api_port: u16,
-    log_path: Option<String>,
 }
 
 impl ConfigBuilder {
@@ -23,7 +22,6 @@ impl ConfigBuilder {
             outbounds,
             mixed_port: 7890,
             clash_api_port: 9090,
-            log_path: None,
         }
     }
 
@@ -34,11 +32,6 @@ impl ConfigBuilder {
         if clash_api_port > 0 {
             self.clash_api_port = clash_api_port;
         }
-        self
-    }
-
-    pub fn with_log_path(mut self, log_path: String) -> Self {
-        self.log_path = Some(log_path);
         self
     }
 
@@ -138,11 +131,9 @@ impl ConfigBuilder {
             ])
         };
 
-        let log_output = self.log_path.clone().unwrap_or_else(|| "box.log".to_string());
         let config = json!({
             "log": {
                 "level": "info",
-                "output": log_output,
                 "timestamp": true
             },
             "dns": {

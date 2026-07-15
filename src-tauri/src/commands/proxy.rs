@@ -3,7 +3,7 @@
 use crate::core::clash_api::ClashApiClient;
 use crate::error::{ApiResponse, AppError};
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProxyGroup {
@@ -128,12 +128,12 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
             400,
         );
     }
-    tracing::info!("切换代理模式: {}", mode);
+    log::info!("[proxy] 切换代理模式: {}", mode);
 
     let mut settings = crate::commands::settings::settings_get_internal(&app_handle);
     settings.proxy_mode = mode.clone();
     
-    let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| std::path::PathBuf::from("config"));
+    let config_dir = crate::get_config_dir();
     let settings_path = config_dir.join("settings.json");
     if let Ok(content) = serde_json::to_string_pretty(&settings) {
         let _ = std::fs::write(&settings_path, content);
@@ -142,28 +142,11 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
     // 重新构建 config.json
     let _ = crate::commands::settings::rebuild_config_from_settings(&app_handle);
 
-    let sidecar_manager = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
-    let config_path = config_dir.join("config.json");
-    let config_path_str = config_path.to_string_lossy().to_string();
+    let running_res = crate::commands::settings::core_query_running(app_handle.clone()).await;
+    let is_running = running_res.data.unwrap_or(false);
 
-    // 核心判定：若需要接管 (rule/global) 且进程当前没在跑，说明需要重新拉起后台核心
-    if (mode == "rule" || mode == "global") && sidecar_manager.get_status() != crate::core::sidecar::SidecarStatus::Running {
-        tracing::info!("sing-box 处于停止状态，开始重新拉起进程...");
-        match sidecar_manager.start(&config_path_str).await {
-            Ok(_) => {
-                if settings.tun_enabled {
-                    let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
-                } else {
-                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                }
-                return ApiResponse::ok(());
-            }
-            Err(e) => return ApiResponse::err(e, 500),
-        }
-    }
-
-    // 若进程在运行中，直接通过 Clash API 发送 patch
-    if sidecar_manager.get_status() == crate::core::sidecar::SidecarStatus::Running {
+    // 若进程在运行中，直接通过 Clash API 发送 patch，不重启进程
+    if is_running {
         let client = ClashApiClient::default();
         let body = serde_json::json!({ "mode": mode });
         match client.patch_configs(body).await {
@@ -178,18 +161,27 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
             Err(e) => ApiResponse::err(e, 500),
         }
     } else {
-        // 若核心停止运行，且处于直连且未启用 TUN (完全释放网络)，则注销 Windows 系统代理
-        if mode == "direct" && !settings.tun_enabled {
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+        // 核心判定：若需要接管 (rule/global) 且进程没跑，说明需要重新拉起后台核心
+        if mode == "rule" || mode == "global" {
+            log::info!("[proxy] sing-box 处于停止状态，开始重新拉起进程...");
+            match crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
+                Ok(_) => ApiResponse::ok(()),
+                Err(e) => ApiResponse::err(e, 500),
+            }
+        } else {
+            // 若核心停止运行，且处于直连且未启用 TUN (完全释放网络)，则注销 Windows 系统代理
+            if mode == "direct" && !settings.tun_enabled {
+                let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+            }
+            ApiResponse::ok(())
         }
-        ApiResponse::ok(())
     }
 }
 
 /// 强制设置 Windows 系统代理开启或注销 (供前端总开关与自救调用)
 #[tauri::command]
 pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
-    tracing::info!("强制设置系统代理状态: enabled={}, port={}", enabled, port);
+    log::info!("[proxy] 强制设置系统代理状态: enabled={}, port={}", enabled, port);
     let _ = crate::system::sysproxy::set_system_proxy(enabled, port);
     ApiResponse::ok(())
 }
@@ -197,7 +189,7 @@ pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
 /// 以管理员身份提权重启当前 Auroweave 程序
 #[tauri::command]
 pub async fn app_restart_as_admin(app_handle: tauri::AppHandle) -> ApiResponse<()> {
-    tracing::info!("准备以管理员身份提权重启程序");
+    log::info!("[proxy] 准备以管理员身份提权重启程序");
     if let Ok(current_exe) = std::env::current_exe() {
         let exe_path = current_exe.to_string_lossy().to_string();
         
@@ -222,4 +214,27 @@ pub async fn app_restart_as_admin(app_handle: tauri::AppHandle) -> ApiResponse<(
         }
     }
     ApiResponse::err("以管理员身份提权重启失败".to_string(), 500)
+}
+
+/// 获取内核版本号
+#[tauri::command]
+pub async fn proxy_get_singbox_version() -> ApiResponse<String> {
+    match crate::core::sidecar::SidecarManager::resolve_binary_path() {
+        Ok(path) => {
+            if let Ok(output) = std::process::Command::new(path).arg("version").output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // 提取版本号（sing-box version 1.14.0）
+                for line in stdout.lines() {
+                    if line.starts_with("sing-box version ") {
+                        let version = line.replace("sing-box version ", "").trim().to_string();
+                        return ApiResponse::ok(version);
+                    }
+                }
+                ApiResponse::ok(stdout.lines().next().unwrap_or("Unknown").to_string())
+            } else {
+                ApiResponse::err("无法执行内核程序", 500)
+            }
+        }
+        Err(_) => ApiResponse::err("未找到内核程序", 404),
+    }
 }
