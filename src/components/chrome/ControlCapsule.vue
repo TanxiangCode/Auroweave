@@ -136,10 +136,8 @@ function handleSettingsClick() {
         <SvgIcon name="audit" :size="13" />
       </button>
     </div>
-    
-    <div class="capsule-divider" />
 
-    <!-- 1. ⚙️ 设置按钮 (在设置页内高亮) -->
+    <!-- ⚙️ 设置按钮 (在设置页内高亮) -->
     <button
       class="capsule-btn settings-btn"
       :class="{ active: route.path === '/settings' }"
@@ -149,7 +147,7 @@ function handleSettingsClick() {
       <SvgIcon name="settings" :size="13" />
     </button>
 
-    <!-- 2. 非 macOS 平台下的窗口控制按钮群 (设置与关闭分割间距遵循 SETTINGS_CLOSE_MIN_GAP_PX 防误触) -->
+    <!-- 非 macOS 平台下的窗口控制按钮群 (设置与关闭分割间距遵循 SETTINGS_CLOSE_MIN_GAP_PX 防误触) -->
     <template v-if="!isMac">
       <div
         class="capsule-divider"
@@ -158,7 +156,9 @@ function handleSettingsClick() {
 
       <div class="window-controls">
         <button class="capsule-btn minimize-btn" title="最小化" @click="handleMinimize">
-          ─
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
         </button>
 
         <button
@@ -166,11 +166,20 @@ function handleSettingsClick() {
           :title="isMaximized ? '还原' : '最大化'"
           @click="handleToggleMaximize"
         >
-          {{ isMaximized ? '❐' : '⬜' }}
+          <svg v-if="!isMaximized" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          </svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="9" width="12" height="12" rx="2"></rect>
+            <path d="M9 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4"></path>
+          </svg>
         </button>
 
         <button class="capsule-btn close-btn" title="关闭" @click="handleClose">
-          ✕
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
         </button>
       </div>
     </template>
