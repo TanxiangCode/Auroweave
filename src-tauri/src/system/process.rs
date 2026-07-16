@@ -8,10 +8,8 @@ pub const PROCESS_NAME_SINGBOX: &str = "sing-box";
 
 /// 高效检查指定进程名的进程是否存活
 pub fn check_processes_running(keywords: &[&str]) -> std::collections::HashMap<String, bool> {
-    use sysinfo::{ProcessRefreshKind, RefreshKind};
-    let mut sys = System::new_with_specifics(
-        RefreshKind::new().with_processes(ProcessRefreshKind::new())
-    );
+    let mut sys = System::new_all();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
     
     let mut results = std::collections::HashMap::new();
     for kw in keywords {
