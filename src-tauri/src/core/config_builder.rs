@@ -120,16 +120,21 @@ impl ConfigBuilder {
         server_domains.sort();
         server_domains.dedup();
 
-        let dns_rules = if server_domains.is_empty() {
-            json!([])
+        let mut dns_rules = if server_domains.is_empty() {
+            vec![]
         } else {
-            json!([
-                {
-                    "domain": server_domains,
-                    "server": "local"
-                }
-            ])
+            vec![json!({
+                "domain": server_domains,
+                "server": "local"
+            })]
         };
+
+        dns_rules.push(json!({
+            "rule_set": "geosite-cn",
+            "server": "local"
+        }));
+
+        let dns_rules = json!(dns_rules);
 
         let config = json!({
             "log": {
@@ -164,10 +169,27 @@ impl ConfigBuilder {
             "outbounds": final_outbounds,
             "route": {
                 "default_domain_resolver": "local",
+                "rule_set": [
+                    {
+                        "tag": "geosite-cn",
+                        "type": "remote",
+                        "format": "binary",
+                        "url": "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
+                        "download_detour": "proxy"
+                    },
+                    {
+                        "tag": "geoip-cn",
+                        "type": "remote",
+                        "format": "binary",
+                        "url": "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
+                        "download_detour": "proxy"
+                    }
+                ],
                 "rules": [
                     { "action": "sniff" },
                     { "protocol": "dns", "action": "hijack-dns" },
-                    { "ip_is_private": true, "outbound": "direct" }
+                    { "ip_is_private": true, "outbound": "direct" },
+                    { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" }
                 ],
                 "final": "proxy",
                 "auto_detect_interface": true
