@@ -55,6 +55,7 @@ pub struct AppSettings {
     pub speed_test_url: String,
     pub speed_test_timeout_secs: u64,
     pub connection_timeout_secs: u64,
+    pub enable_app_traffic_tracking: bool,
 
     #[serde(default = "default_core_settings")]
     pub core: CoreSettings,
@@ -84,6 +85,7 @@ impl Default for AppSettings {
             speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000".to_string(),
             speed_test_timeout_secs: 5,
             connection_timeout_secs: 15,
+            enable_app_traffic_tracking: true,
             core: default_core_settings(),
         }
     }

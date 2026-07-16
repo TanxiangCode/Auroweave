@@ -11,11 +11,22 @@ use speedtest::scheduler::SpeedTestScheduler;
 use std::sync::Arc;
 use tauri::Manager;
 
-/// 获取统一数据根目录：C:\ProgramData\Auroweave
+/// 获取统一数据根目录：Windows 为 C:\ProgramData\Auroweave，macOS 为 /Library/Application Support/Auroweave
 /// 服务、GUI 主程序共用此目录，SYSTEM 用户和普通用户均可访问。
 pub fn get_data_root() -> std::path::PathBuf {
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    std::path::PathBuf::from(program_data).join("Auroweave")
+    #[cfg(target_os = "windows")]
+    {
+        let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        std::path::PathBuf::from(program_data).join("Auroweave")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::path::PathBuf::from("/Library/Application Support/Auroweave")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::path::PathBuf::from("/var/lib/Auroweave")
+    }
 }
 
 /// 获取配置子目录：%ProgramData%\Auroweave\config\
@@ -109,6 +120,10 @@ pub fn run() {
             commands::logging::log_read_service,
             commands::logging::log_clear_all,
             commands::settings::core_query_running,
+            
+            // 流量统计命令
+            commands::stats::get_traffic_history,
+            commands::stats::get_app_traffic_stats,
         ])
         .setup(move |app| {
             let _window = app.get_webview_window("main")
@@ -130,6 +145,9 @@ pub fn run() {
                     log::error!("[app] 核心自愈与拉起发生错误: {}", e);
                 }
             });
+
+            // 启动后台流量监控
+            core::traffic_monitor::start_monitor(app.handle().clone());
 
             // 使用条件编译：只在开发模式下生效
             #[cfg(debug_assertions)]

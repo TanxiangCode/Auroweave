@@ -6,3 +6,4 @@ pub mod settings;
 pub mod speedtest;
 pub mod routing;
 pub mod logging;
+pub mod stats;

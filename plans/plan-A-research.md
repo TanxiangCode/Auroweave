@@ -28,13 +28,13 @@
 
 ---
 
-### A-2 sing-box 1.13.14 工具链验证
+### A-2 sing-box 1.14.0 工具链验证
 
 **输出文件**：`docs/research/sing-box兼容性说明.md`
 
-- [ ] 下载 sing-box 1.13.14 二进制（Windows x64 + macOS Universal）
+- [ ] 下载 sing-box 1.14.0 二进制（Windows x64 + macOS Universal）
 - [ ] 验证 `sing-box run --config config.json` 子进程调用可行性
-- [ ] 验证 ClashAPI 接口（`/proxies`、`/traffic` WebSocket 等）与 Sing-box 1.13.14 的实际响应格式
+- [ ] 验证 ClashAPI 接口（`/proxies`、`/traffic` WebSocket 等）与 Sing-box 1.14.0 的实际响应格式
 - [ ] 验证负载均衡出站（`loadbalance` 类型）的 JSON 配置格式，记录与旧版差异
 - [ ] 验证 `.srs` 规则集编译工具链（`sing-box rule-set compile`）子进程调用
 

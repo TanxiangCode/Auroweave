@@ -198,12 +198,34 @@ impl IpcServer {
 
     fn load_token() -> Result<String, String> {
         let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-        let token_path = std::path::PathBuf::from(program_data).join("Auroweave").join("token.txt");
+        let token_path = std::path::PathBuf::from(program_data).join("Auroweave").join("data").join("ipc_token.bin");
         if !token_path.exists() {
             return Err("Token 文件不存在".to_string());
         }
-        let content = std::fs::read_to_string(token_path).map_err(|e| e.to_string())?;
-        Ok(content.trim().to_string())
+        let content = std::fs::read(token_path).map_err(|e| e.to_string())?;
+        
+        use aes_gcm::{
+            aead::{Aead, KeyInit},
+            Aes256Gcm, Nonce,
+        };
+        const TOKEN_KEY: &[u8; 32] = b"AuroweaveIPCSecretKey2026_Secure";
+        
+        if content.len() < 12 {
+            return Err("Token 文件已损坏".to_string());
+        }
+        
+        let key: &aes_gcm::Key<Aes256Gcm> = TOKEN_KEY.into();
+        let cipher = Aes256Gcm::new(key);
+        let nonce = Nonce::from_slice(&content[..12]);
+        let ciphertext = &content[12..];
+        
+        let plaintext = cipher.decrypt(nonce, ciphertext)
+            .map_err(|_| "Token 解密失败".to_string())?;
+            
+        let token_str = String::from_utf8(plaintext)
+            .map_err(|_| "Token UTF-8 解析失败".to_string())?;
+            
+        Ok(token_str.trim().to_string())
     }
 }
 

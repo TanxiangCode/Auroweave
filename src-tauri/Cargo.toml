@@ -57,6 +57,9 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-single-instance = "2.0.0-rc.5"
 sha2 = "0.10.9"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+lazy_static = "1.5.0"
+aes-gcm = "0.10.3"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",

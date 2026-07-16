@@ -89,8 +89,8 @@
 
 ### 🔴 最高优先级
 
-#### [A-2] sing-box 1.13.14 工具链验证
-- 下载 sing-box 1.13.14 二进制
+#### [A-2] sing-box 1.14.0 工具链验证
+- 下载 sing-box 1.14.0 二进制
 - 验证 ClashAPI 接口格式
 - 验证 `loadbalance` 出站 JSON 格式
 

@@ -58,7 +58,7 @@ let mut child = tokio::process::Command::new(&binary_path)
 
 **文件**：`scripts/download-sidecar.ps1`（Windows）/ `scripts/download-sidecar.sh`（macOS）
 
-- [ ] 从 sing-box GitHub Releases 下载 v1.13.14 对应平台二进制
+- [ ] 从 sing-box GitHub Releases 下载 v1.14.0 对应平台二进制
 - [ ] 校验 SHA256 哈希
 - [ ] 解压并放置到 `sidecar-bin/windows-x64/` 或 `sidecar-bin/macos-universal/`
 
@@ -167,7 +167,7 @@ fn detect_format(content: &str) -> SubscriptionFormat { ... }
 |---|---|
 | sing-box 子进程权限不足（TUN 模式需管理员/root） | 先实现系统代理模式，TUN 模式在模块 H 的 TunPanel 单独处理 |
 | Clash/V2ray 订阅格式解析不完整 | 先支持最常见的 Mihomo YAML + Base64，其余格式迭代补充 |
-| ClashAPI 与 sing-box 1.13.14 响应格式差异 | 参考模块 A 的兼容性报告，做字段防御性读取 |
+| ClashAPI 与 sing-box 1.14.0 响应格式差异 | 参考模块 A 的兼容性报告，做字段防御性读取 |
 
 ---
 

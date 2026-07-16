@@ -9,10 +9,13 @@
  * - 与 connectionStore 的 totalDownload/Upload 联动并读取持久化
  * - 提供重置清空大盘数据交互
  */
-import { computed } from "vue";
+import { computed, ref, onMounted, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { useConnectionStore } from "@/stores/connection.store";
 import { storeToRefs } from "pinia";
 import SvgIcon from "@/components/common/SvgIcon.vue";
+
+const timeDimension = ref<"day" | "month" | "year">("day");
 
 const connectionStore = useConnectionStore();
 const { totalDownload, totalUpload } = storeToRefs(connectionStore);
@@ -36,22 +39,55 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
-// 模拟自适应分时柱状数据
-const hourlyData = computed(() => {
-  const ratios = [
-    0.04, 0.02, 0.01, 0.01, 0.02, 0.03, 0.06, 0.11,
-    0.09, 0.07, 0.13, 0.21, 0.17, 0.10, 0.08, 0.09,
-    0.15, 0.25, 0.32, 0.22, 0.14, 0.11, 0.07, 0.05
-  ];
-  const maxRatio = Math.max(...ratios);
-  const total = totalDownload.value + totalUpload.value;
-  
-  return ratios.map((ratio, i) => {
-    const hour = String(i).padStart(2, "0") + ":00";
-    const bytes = Math.floor(total * ratio * 0.08); // 柱状精细分配
-    const heightPercent = maxRatio > 0 ? (ratio / maxRatio) * 75 : 0;
-    return { hour, bytes, heightPercent };
-  });
+// 真实历史流量数据
+interface ChartPoint {
+  label: string;
+  bytes: number;
+  heightPercent: number;
+}
+const chartData = ref<ChartPoint[]>([]);
+
+async function fetchTrafficHistory() {
+  try {
+    const res: any = await invoke("get_traffic_history", { dimension: timeDimension.value });
+    if (res.success && res.data) {
+      const data = res.data;
+      const totalBytesArr = data.map((d: any) => d.download_bytes + d.upload_bytes);
+      const maxBytes = Math.max(...totalBytesArr, 1);
+      
+      chartData.value = data.map((d: any) => {
+        const bytes = d.download_bytes + d.upload_bytes;
+        return {
+          label: d.label,
+          bytes,
+          heightPercent: (bytes / maxBytes) * 75
+        };
+      });
+    }
+  } catch (e) {
+    console.error("获取流量历史失败", e);
+  }
+}
+
+// 应用程序流量排行
+const topApps = ref<any[]>([]);
+
+async function fetchAppTraffic() {
+  try {
+    const res: any = await invoke("get_app_traffic_stats");
+    if (res.success && res.data) {
+      topApps.value = res.data;
+    }
+  } catch (e) {
+    console.error("获取应用流量失败", e);
+  }
+}
+
+watch(timeDimension, fetchTrafficHistory);
+
+onMounted(() => {
+  fetchTrafficHistory();
+  fetchAppTraffic();
 });
 
 // 自适应环形百分比协议配额数据
@@ -138,9 +174,18 @@ const protocols = computed(() => {
 
     <!-- 中部及下部图表面板 -->
     <section class="charts-grid">
-      <!-- 24小时分时流量柱状图 -->
+      <!-- 分时流量柱状图 -->
       <div class="chart-box glass-effect">
-        <h3 class="chart-box-title">近 24 小时流量分时对比趋势 (柱状)</h3>
+        <div class="chart-box-header">
+          <h3 class="chart-box-title">
+            {{ timeDimension === 'day' ? '近 24 小时' : timeDimension === 'month' ? '近 30 天' : '近 12 个月' }}流量对比趋势
+          </h3>
+          <div class="dimension-switcher">
+            <button :class="{ active: timeDimension === 'day' }" @click="timeDimension = 'day'">日</button>
+            <button :class="{ active: timeDimension === 'month' }" @click="timeDimension = 'month'">月</button>
+            <button :class="{ active: timeDimension === 'year' }" @click="timeDimension = 'year'">年</button>
+          </div>
+        </div>
         <div class="bar-chart-wrapper">
           <svg class="bar-chart-svg" viewBox="0 0 800 240">
             <!-- 渐变定义 -->
@@ -156,33 +201,39 @@ const protocols = computed(() => {
             <line x1="40" y1="120" x2="760" y2="120" stroke="var(--border-subtle)" stroke-dasharray="4 4" />
             <line x1="40" y1="200" x2="760" y2="200" stroke="var(--border-strong)" />
 
-            <!-- 绘制 24 个柱子 -->
-            <g v-for="(bar, i) in hourlyData" :key="i">
+            <!-- 绘制柱子 -->
+            <g v-for="(bar, i) in chartData" :key="i">
               <!-- 发光背景柱 -->
               <rect
-                :x="45 + i * 30"
+                :x="45 + i * ((760 - 45) / chartData.length)"
                 :y="200 - bar.heightPercent"
-                width="16"
+                :width="Math.max(4, 16 - (chartData.length / 5))"
                 :height="bar.heightPercent"
                 fill="url(#barGrad)"
                 rx="3"
                 class="bar-rect"
               >
-                <title>{{ bar.hour }} - 流量: {{ formatBytes(bar.bytes) }}</title>
+                <title>{{ bar.label }} - 流量: {{ formatBytes(bar.bytes) }}</title>
               </rect>
             </g>
 
-            <!-- 时间轴刻度 -->
-            <text x="45" y="220" class="svg-text" text-anchor="middle">00:00</text>
-            <text x="225" y="220" class="svg-text" text-anchor="middle">06:00</text>
-            <text x="405" y="220" class="svg-text" text-anchor="middle">12:00</text>
-            <text x="585" y="220" class="svg-text" text-anchor="middle">18:00</text>
-            <text x="735" y="220" class="svg-text" text-anchor="middle">23:00</text>
+            <!-- X 轴刻度：因为现在是从接口真实返回的 24/30/12 个点，可以直接利用数据的 label 进行等分渲染 -->
+            <text 
+              v-for="(bar, i) in chartData" 
+              :key="i"
+              :x="45 + i * ((760 - 45) / Math.max(chartData.length, 1)) + (16/2)" 
+              y="220" 
+              class="svg-text" 
+              text-anchor="middle"
+              :opacity="(i % Math.ceil(chartData.length / 6) === 0 || i === chartData.length - 1) ? 1 : 0"
+            >
+              {{ bar.label }}
+            </text>
           </svg>
         </div>
       </div>
 
-      <!-- 下部：连接协议配额环形图 -->
+      <!-- 下部左侧：连接协议配额环形图 -->
       <div class="chart-box glass-effect">
         <h3 class="chart-box-title">各连接协议数据流占比分析 (环形)</h3>
         <div class="donut-chart-wrapper">
@@ -224,6 +275,24 @@ const protocols = computed(() => {
               <span class="legend-dot" :style="{ backgroundColor: p.color }"></span>
               <span class="legend-name">{{ p.name }}</span>
               <span class="legend-val">{{ formatBytes(p.value) }} ({{ p.percent }})</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下部右侧：应用程序流量 Top 10 -->
+      <div class="chart-box glass-effect app-stats-box">
+        <h3 class="chart-box-title">应用程序流量消耗 (近 24 小时)</h3>
+        <div class="app-list">
+          <div v-if="topApps.length === 0" class="empty-tip">暂无应用流量数据或未开启追踪</div>
+          <div v-else class="app-item" v-for="(app, index) in topApps" :key="index">
+            <div class="app-info">
+              <span class="app-rank">{{ index + 1 }}</span>
+              <span class="app-name">{{ app.process_name }}</span>
+            </div>
+            <div class="app-bytes">
+              <span class="app-down">↓ {{ formatBytes(app.download_bytes) }}</span>
+              <span class="app-up">↑ {{ formatBytes(app.upload_bytes) }}</span>
             </div>
           </div>
         </div>
@@ -344,8 +413,12 @@ const protocols = computed(() => {
 
 .charts-grid {
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: 1fr 1fr;
   gap: 20px;
+}
+
+.charts-grid > .chart-box:first-child {
+  grid-column: 1 / -1;
 }
 
 .chart-box {
@@ -355,10 +428,111 @@ const protocols = computed(() => {
   gap: 16px;
 }
 
+.app-stats-box {
+  min-height: 200px;
+}
+
+.app-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  max-height: 300px;
+}
+
+.app-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--layer-2);
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast);
+}
+
+.app-item:hover {
+  background: var(--layer-3);
+}
+
+.app-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-rank {
+  font-family: var(--font-mono, monospace);
+  color: var(--accent-cyan);
+  font-weight: var(--weight-bold);
+  width: 20px;
+}
+
+.app-name {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.app-bytes {
+  display: flex;
+  gap: 16px;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+}
+
+.app-down {
+  color: var(--accent-cyan);
+}
+
+.app-up {
+  color: var(--accent-purple, #b388ff);
+}
+
+.empty-tip {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  text-align: center;
+  padding: 20px 0;
+}
+
+.chart-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .chart-box-title {
   font-size: var(--text-sm);
   color: var(--text-primary);
   font-weight: var(--weight-bold);
+}
+
+.dimension-switcher {
+  display: flex;
+  background: var(--layer-2);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+
+.dimension-switcher button {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.dimension-switcher button:hover {
+  color: var(--text-secondary);
+}
+
+.dimension-switcher button.active {
+  background: var(--layer-3);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
 .bar-chart-wrapper {

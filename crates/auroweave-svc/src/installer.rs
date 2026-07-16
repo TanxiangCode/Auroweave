@@ -293,14 +293,34 @@ pub fn uninstall() -> Result<(), String> {
 
 fn setup_token() -> Result<(), String> {
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let cache_dir = PathBuf::from(program_data).join("Auroweave");
-    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+    let data_dir = PathBuf::from(program_data).join("Auroweave").join("data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("创建数据目录失败: {}", e))?;
 
-    let token_path = cache_dir.join("token.txt");
+    let token_path = data_dir.join("ipc_token.bin");
     
     if !token_path.exists() {
+        use aes_gcm::{
+            aead::{Aead, KeyInit},
+            Aes256Gcm, Nonce,
+        };
+        const TOKEN_KEY: &[u8; 32] = b"AuroweaveIPCSecretKey2026_Secure";
+        
         let token = uuid::Uuid::new_v4().to_string();
-        std::fs::write(&token_path, &token).map_err(|e| format!("写入 Token 失败: {}", e))?;
+        
+        let key: &aes_gcm::Key<Aes256Gcm> = TOKEN_KEY.into();
+        let cipher = Aes256Gcm::new(key);
+        
+        let nonce_uuid = uuid::Uuid::new_v4();
+        let nonce_bytes: [u8; 12] = nonce_uuid.as_bytes()[0..12].try_into().unwrap();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        
+        let ciphertext = cipher.encrypt(nonce, token.as_bytes())
+            .map_err(|e| format!("加密 Token 失败: {:?}", e))?;
+            
+        let mut encrypted_data = nonce.to_vec();
+        encrypted_data.extend_from_slice(&ciphertext);
+        
+        std::fs::write(&token_path, &encrypted_data).map_err(|e| format!("写入 Token 失败: {}", e))?;
         info!("生成新 Token 成功。");
     }
 
@@ -336,7 +356,7 @@ fn setup_token() -> Result<(), String> {
 
 fn cleanup_token() -> Result<(), String> {
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let token_path = PathBuf::from(program_data).join("Auroweave").join("token.txt");
+    let token_path = PathBuf::from(program_data).join("Auroweave").join("data").join("ipc_token.bin");
     if token_path.exists() {
         let _ = std::fs::remove_file(token_path);
     }

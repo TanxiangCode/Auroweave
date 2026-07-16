@@ -186,6 +186,7 @@ export interface AppSettings {
   speed_test_url: string;
   speed_test_timeout_secs: number;
   connection_timeout_secs: number;
+  enable_app_traffic_tracking: boolean;
 
   core: {
     runMode: "local" | "service";

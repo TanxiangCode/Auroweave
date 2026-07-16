@@ -32,6 +32,14 @@
         </div>
         <input type="checkbox" v-model="settingsStore.settings.auto_start" class="switch" @change="save" />
       </div>
+
+      <div class="setting-item">
+        <div class="item-label">
+          <span>应用流量统计追踪</span>
+          <span class="sub-label">允许在后台收集并统计各个应用程序消耗的流量</span>
+        </div>
+        <input type="checkbox" v-model="settingsStore.settings.enable_app_traffic_tracking" class="switch" @change="save" />
+      </div>
     </div>
   </div>
 </template>

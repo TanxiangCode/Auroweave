@@ -67,7 +67,7 @@
 **文件**：`src-tauri/src/update/`
 
 - [ ] 从 sing-box GitHub Releases API 检查最新版本
-- [ ] 与当前锁定版本（1.13.14）比较，提示用户是否升级
+- [ ] 与当前锁定版本（1.14.0）比较，提示用户是否升级
 - [ ] 下载新版本二进制（SHA256 校验）
 - [ ] 替换 `sidecar-bin/` 中的旧版本，重启 sidecar
 - [ ] 新版本验证：启动后检查 `sing-box version` 输出
@@ -88,7 +88,7 @@
 
 ## 关键数据结构
 
-### config.json 骨架（Sing-box 1.13.14 格式）
+### config.json 骨架（Sing-box 1.14.0 格式）
 
 ```json
 {

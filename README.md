@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)](https://github.com/auroweave/auroweave)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-orange)](https://tauri.app)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green)](https://vuejs.org)
-[![Sing-box](https://img.shields.io/badge/sing--box-1.13.14-purple)](https://sing-box.sagernet.org)
+[![Sing-box](https://img.shields.io/badge/sing--box-1.14.0-purple)](https://sing-box.sagernet.org)
 
 *专为开发者与网络极客打造 — 极简至上 · 绝对透明 · 本地安全*
 
@@ -83,7 +83,7 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 | **路由** | Vue Router 4 |
 | **动效** | CSS Transition / `conic-gradient` + rAF / View Transitions API |
 | **桌面壳** | Tauri 2.0 (Rust) |
-| **代理核心** | Sing-box 1.13.14 (sidecar 模式) |
+| **代理核心** | Sing-box 1.14.0 (sidecar 模式) |
 | **进程审计** | Rust `sysinfo` |
 | **日志** | Rust `tracing` |
 | **测试** | Vitest (前端) + Cargo test (Rust) + Playwright (E2E) |
