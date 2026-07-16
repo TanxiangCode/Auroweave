@@ -47,7 +47,18 @@ export function translateConnection(
   for (const item of SEMANTIC_RULES) {
     if (item.pattern.test(domain)) {
       icon = item.icon;
-      semanticText = item.text;
+      // 核心修复：不能纯根据正则判定，必须结合真实出站（outbound）结果修正文案，杜绝“UI造假”
+      let presetText = item.text;
+      
+      if (isDirect && presetText.includes("加速")) {
+        // 本该走代理，但实际直连了
+        semanticText = presetText.replace("加速", "穿透 (可能未代理)");
+      } else if (!isDirect && !isBlock && presetText.includes("直连")) {
+        // 本该直连，但实际走了代理
+        semanticText = presetText.replace("直连", "被强制代理");
+      } else {
+        semanticText = presetText;
+      }
       break;
     }
   }
