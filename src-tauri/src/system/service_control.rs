@@ -350,18 +350,12 @@ pub fn stop_direct_tun_task() -> Result<(), String> {
 
     if has_daemon {
         log::info!("AuroDaemon 残留，执行强杀...");
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", &format!("{}.exe", crate::system::process::PROCESS_NAME_DAEMON)])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+        crate::system::process::force_kill_process(&format!("{}.exe", crate::system::process::PROCESS_NAME_DAEMON));
     }
         
     if has_singbox {
         log::info!("sing-box 残留，执行强杀...");
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", &format!("{}.exe", crate::system::process::PROCESS_NAME_SINGBOX)])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+        crate::system::process::force_kill_process(&format!("{}.exe", crate::system::process::PROCESS_NAME_SINGBOX));
     }
 
     Ok(())

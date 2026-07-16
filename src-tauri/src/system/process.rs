@@ -35,6 +35,19 @@ pub fn is_process_running(keyword: &str) -> bool {
     *check_processes_running(&[keyword]).get(keyword).unwrap_or(&false)
 }
 
+/// 根据可执行文件名强制结束进程 (Windows Only)
+#[cfg(target_os = "windows")]
+pub fn force_kill_process(exe_name: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.args(["/F", "/IM", exe_name])
+       .creation_flags(CREATE_NO_WINDOW);
+       
+    cmd.status().map(|s| s.success()).unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemProcess {
     pub pid: u32,
