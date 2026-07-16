@@ -1,6 +1,6 @@
 # TASK.md — Auroweave 主任务追踪
 
-> 最后更新：2026-07-04
+> 最后更新：2026-07-16
 > 各模块详细计划见 [`plans/`](plans/) 目录
 
 ---
@@ -18,8 +18,9 @@
 | G | Audit 语义化看板 | ✅ 已完成 | M4 | [plan-G-audit.md](plans/plan-G-audit.md) |
 | H | 设置页面九大面板 | ✅ 已完成 | M5 | [plan-H-settings.md](plans/plan-H-settings.md) |
 | I | 联调、测试与打包 | ✅ 已完成 | M5 | [plan-I-release.md](plans/plan-I-release.md) |
-| J | Routing · 拓扑画布 | 🔵 低优先级 | M6 | [plan-J-topology.md](plans/plan-J-topology.md) |
+| J | Routing · 拓扑画布 | 🔵 低优先级 | M7 | [plan-J-topology.md](plans/plan-J-topology.md) |
 | K | 视觉设计系统 | ✅ 已完成 | M2 | [plan-K-visual.md](plans/plan-K-visual.md) |
+| L | 数据与安全架构升级 | ✅ 已完成 | M6 | 流量持久化与 IPC Token 加密 |
 
 **图例**：✅ 已完成 / 🔄 进行中 / ⏳ 待开始 / 🔵 低优先级（可选）/ ❌ 阻塞
 
@@ -50,6 +51,10 @@
 ### ✅ M5 — 设置页面九大面板与发布打包（已完成 2026-07-04）
 - **目标**：完成九大分类设置面板、性能模式全局动效降级、反向精准锚定与全量打包发布
 - **交付物**：九大分类设置面板 (`General`, `Subscription`, `RouteMode`, `Dns`, `Tun`, `Automation`, `Hotkey`, `Privacy`, `Advanced`)、`data-perf-mode="reduced"` 性能模式总开关、`vitest` 单元测试用例集、`v0.1.0` 生产环境全量编译。
+
+### ✅ M6 — 数据与安全架构升级（已完成 2026-07-16）
+- **目标**：实现核心流量追踪的持久化，应用程序流量耗费统计，以及跨端通信的安全加固。
+- **交付物**：基于 `rusqlite` 的 SQLite 本地数据库持久化引擎（`traffic_hourly`与应用表）、`traffic_monitor.rs` 独立循环采集进程、AES-GCM 加密的守护进程令牌（`ipc_token.bin`），以及真实流量驱动的 `StatsView` 动态柱状图和排行榜。
 
 ---
 
