@@ -129,8 +129,8 @@ pub async fn apply_core_mode_with_fallback(
                 } else {
                     info!("[app] 回退直接模式 TUN 计划任务触发成功，等待进程启动...");
                     let mut is_running = false;
-                    for _ in 0..10 {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    for _ in 0..25 {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                         if crate::system::service_control::query_singbox_process_running() {
                             is_running = true;
                             break;
@@ -188,8 +188,8 @@ pub async fn apply_core_mode_with_fallback(
             } else {
                 info!("[app] 计划任务 TUN 触发成功，等待进程启动...");
                 let mut is_running = false;
-                for _ in 0..10 {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                for _ in 0..25 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                     if crate::system::service_control::query_singbox_process_running() {
                         is_running = true;
                         break;
