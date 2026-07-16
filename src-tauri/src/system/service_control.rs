@@ -336,16 +336,33 @@ pub fn stop_direct_tun_task() -> Result<(), String> {
         
     let _ = cmd.status();
 
-    // 强杀所有可能残留的后台提权进程
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/IM", "AuroDaemon.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
+    // 等待计划任务退出信号生效
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // 使用共用的模块函数高效检测残留进程
+    let running_status = crate::system::process::check_processes_running(&[
+        crate::system::process::PROCESS_NAME_DAEMON,
+        crate::system::process::PROCESS_NAME_SINGBOX,
+    ]);
+    
+    let has_daemon = *running_status.get(crate::system::process::PROCESS_NAME_DAEMON).unwrap_or(&false);
+    let has_singbox = *running_status.get(crate::system::process::PROCESS_NAME_SINGBOX).unwrap_or(&false);
+
+    if has_daemon {
+        log::info!("AuroDaemon 残留，执行强杀...");
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", &format!("{}.exe", crate::system::process::PROCESS_NAME_DAEMON)])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
         
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/IM", "sing-box.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
+    if has_singbox {
+        log::info!("sing-box 残留，执行强杀...");
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", &format!("{}.exe", crate::system::process::PROCESS_NAME_SINGBOX)])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
 
     Ok(())
 }
@@ -395,28 +412,7 @@ pub fn query_direct_tun_task_running() -> Result<bool, String> {
 
 #[cfg(target_os = "windows")]
 pub fn query_singbox_process_running() -> bool {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    
-    let mut cmd = std::process::Command::new("tasklist");
-    cmd.arg("/FO")
-        .arg("CSV")
-        .arg("/NH")
-        .creation_flags(CREATE_NO_WINDOW);
-        
-    let output = cmd.output();
-    
-    if let Ok(out) = output {
-        let stdout_str = String::from_utf8_lossy(&out.stdout);
-        for line in stdout_str.lines() {
-            let lower = line.to_lowercase();
-            // 简单判断进程名中是否包含 sing-box
-            if lower.contains("\"sing-box") {
-                return true;
-            }
-        }
-    }
-    false
+    crate::system::process::is_process_running(crate::system::process::PROCESS_NAME_SINGBOX)
 }
 
 // 非 Windows 平台空桩实现

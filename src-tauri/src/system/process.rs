@@ -3,6 +3,38 @@
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
+pub const PROCESS_NAME_DAEMON: &str = "aurodaemon";
+pub const PROCESS_NAME_SINGBOX: &str = "sing-box";
+
+/// 高效检查指定进程名的进程是否存活
+pub fn check_processes_running(keywords: &[&str]) -> std::collections::HashMap<String, bool> {
+    use sysinfo::{ProcessRefreshKind, RefreshKind};
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new().with_processes(ProcessRefreshKind::new())
+    );
+    
+    let mut results = std::collections::HashMap::new();
+    for kw in keywords {
+        results.insert(kw.to_string(), false);
+    }
+    
+    for process in sys.processes().values() {
+        let name = process.name().to_string_lossy().to_lowercase();
+        for kw in keywords {
+            if name.contains(&kw.to_lowercase()) {
+                results.insert(kw.to_string(), true);
+            }
+        }
+    }
+    
+    results
+}
+
+/// 快捷检查单一进程是否存活
+pub fn is_process_running(keyword: &str) -> bool {
+    *check_processes_running(&[keyword]).get(keyword).unwrap_or(&false)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemProcess {
     pub pid: u32,
