@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   command_palette_hotkey: "CommandOrControl+Space",
   speed_test_urls: DEFAULT_SPEED_TEST_URLS,
   auto_group_on_import: true,
+  enable_app_traffic_tracking: true,
 
   mixed_port: 7890,
   clash_api_port: 9090,
