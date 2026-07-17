@@ -1,5 +1,26 @@
 /// Windows 具名管道 IPC 服务端
 /// 作者: TanXiang
+///
+/// 运行在 AuroDaemon 系统服务/计划任务进程内，通过具名管道 `\\.\pipe\Auroweave.Core.Control`
+/// 接收主程序（Tauri 前端）发送的控制指令。
+///
+/// IPC 服务流程：
+/// 1. **管道创建**：使用 SDDL 安全描述符创建管道，允许 SYSTEM/Administrators 完全控制，
+///    Authenticated Users 读写访问
+/// 2. **连接等待**：循环创建管道实例并等待客户端连接
+/// 3. **请求处理**：每个客户端连接 spawn 独立任务处理，支持并发请求
+/// 4. **Token 校验**：验证请求中的 Token 与安装时生成的加密 Token 是否匹配
+/// 5. **指令分发**：根据 action 字段分发到 CoreManager 的对应方法
+///
+/// 支持的指令：
+/// - `GET_STATUS`：查询内核运行状态和 PID
+/// - `RELOAD_CONFIG`：重载配置并重启内核（config 可为文件路径或配置文本）
+/// - `SHUTDOWN_CORE`：停止内核进程
+///
+/// 安全设计：
+/// - 管道使用 SDDL 限制访问权限，仅允许已认证用户连接
+/// - 每个请求必须携带正确的 Token，防止未授权进程发送指令
+/// - Token 使用 AES-256-GCM 加密存储，密钥硬编码在二进制中
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::NamedPipeServer;
@@ -10,8 +31,11 @@ const PIPE_NAME: &str = r"\\.\pipe\Auroweave.Core.Control";
 
 #[derive(Debug, serde::Deserialize)]
 pub struct IpcRequest {
-    pub action: String, // "GET_STATUS" | "RELOAD_CONFIG" | "SHUTDOWN_CORE"
+    /// 操作指令: "GET_STATUS" | "RELOAD_CONFIG" | "SHUTDOWN_CORE"
+    pub action: String,
+    /// 安全令牌（AES-256-GCM 解密后的明文，用于身份验证）
     pub token: String,
+    /// 可选的配置内容或配置文件路径（仅 RELOAD_CONFIG 使用）
     pub config: Option<String>,
 }
 
@@ -34,6 +58,13 @@ impl IpcServer {
         Self { core_manager, token }
     }
 
+    /// 启动 IPC 服务端并阻塞运行，直到收到关闭信号
+    ///
+    /// 运行流程：
+    /// 1. 循环创建安全具名管道实例
+    /// 2. 使用 `tokio::select!` 同时等待客户端连接和关闭信号
+    /// 3. 客户端连接后 spawn 独立任务处理请求
+    /// 4. 收到关闭信号时退出循环
     pub async fn run(self: Arc<Self>, mut shutdown_rx: tokio::sync::oneshot::Receiver<()>) {
         info!("IPC 服务端开始运行，管道地址: {}", PIPE_NAME);
 
@@ -72,7 +103,15 @@ impl IpcServer {
         }
     }
 
+    /// 处理单个客户端连接
+    ///
+    /// 处理流程：
+    /// 1. 读取请求数据并反序列化为 `IpcRequest`
+    /// 2. 校验 Token（空或不匹配则拒绝）
+    /// 3. 根据 action 分发指令到 CoreManager
+    /// 4. 序列化响应并写回管道
     async fn handle_client(&self, mut server: NamedPipeServer) -> Result<(), String> {
+        // ---- 步骤1: 读取并解析请求数据 ----
         let mut buffer = vec![0u8; 65536];
         let n = server.read(&mut buffer).await.map_err(|e| e.to_string())?;
         if n == 0 {
@@ -96,7 +135,8 @@ impl IpcServer {
 
         info!("收到客户端 IPC 请求: action={}", request.action);
 
-        // 校验 Token
+        // ---- 步骤2: 校验安全 Token ----
+        // Token 为空或不匹配则拒绝请求，防止未授权进程控制内核
         if request.token.is_empty() || request.token != self.token {
             let resp = IpcResponse {
                 success: false,
@@ -116,6 +156,7 @@ impl IpcServer {
             pid: None,
         };
 
+        // ---- 步骤3: 根据 action 分发指令 ----
         match request.action.as_str() {
             "GET_STATUS" => {
                 let (status, pid) = self.core_manager.get_status().await;
@@ -124,6 +165,9 @@ impl IpcServer {
                 info!("IPC GET_STATUS: status={}, pid={:?}", response.status, response.pid);
             }
             "RELOAD_CONFIG" => {
+                // 重载配置并重启内核
+                // 自适应判断：config 参数可能是文件路径或配置文本内容
+                // 若为文件路径则服务端直接读取，避开 IPC 管道 64KB 缓冲区的大文件截断问题
                 if let Some(config_param) = request.config {
                     // 自适应判断：如果参数是一个物理文件路径则读取其内容，避开 IPC 管道大文件分包截断
                     let config_content = if std::path::Path::new(&config_param).exists() {
@@ -196,6 +240,12 @@ impl IpcServer {
         Ok(())
     }
 
+    /// 加载并解密 IPC 安全令牌
+    ///
+    /// 解密流程：
+    /// 1. 读取 `%ProgramData%\Auroweave\data\ipc_token.bin` 加密文件
+    /// 2. 前 12 字节为 AES-GCM Nonce，剩余部分为密文
+    /// 3. 使用硬编码的 AES-256 密钥解密，得到明文 Token
     fn load_token() -> Result<String, String> {
         let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
         let token_path = std::path::PathBuf::from(program_data).join("Auroweave").join("data").join("ipc_token.bin");
@@ -229,6 +279,9 @@ impl IpcServer {
     }
 }
 
+/// 将 CoreStatus 枚举转换为字符串状态码
+///
+/// 用于 IPC 响应中的 status 字段: stopped / starting / running / error
 fn status_to_str(status: CoreStatus) -> String {
     match status {
         CoreStatus::Stopped => "stopped".to_string(),
@@ -238,6 +291,14 @@ fn status_to_str(status: CoreStatus) -> String {
     }
 }
 
+/// 创建安全具名管道
+///
+/// 使用 SDDL 安全描述符创建管道，权限分配：
+/// - SYSTEM (SY): 完全控制
+/// - Administrators (BA): 完全控制
+/// - Authenticated Users (AU): 读写访问
+///
+/// 管道模式: 双工 + 字节流 + OVERLAPPED 异步 I/O
 fn create_secure_named_pipe(pipe_name: &str) -> Result<NamedPipeServer, String> {
     use windows_sys::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_READMODE_BYTE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES};
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED;

@@ -130,15 +130,13 @@ export const useProxyStore = defineStore("proxy", () => {
     }
   }
 
-  async function selectNode(groupTag: string, nodeTag: string) {
-    console.log('selectNode')
-    const group = groups.value.find((g) => g.tag === groupTag);
+async function selectNode(groupTag: string, nodeTag: string) {
+const group = groups.value.find((g) => g.tag === groupTag);
     if (group && group.type !== "selector") {
       return { success: false, error: "该策略组为自动或非手动选择类型，不支持手动切换节点", code: 400 };
     }
-    const res = await selectGroupNode(groupTag, nodeTag);
-    console.log(res)
-    if (res.success) {
+const res = await selectGroupNode(groupTag, nodeTag);
+if (res.success) {
       // 乐观更新 groups 中的 now 字段（左侧分组列表的"当前节点"文字）
       const group = groups.value.find((g) => g.tag === groupTag);
       if (group) group.now = nodeTag;

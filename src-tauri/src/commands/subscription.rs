@@ -1,5 +1,8 @@
 /// IPC 命令 — 订阅管理
 /// 作者: TanXiang
+///
+/// 订阅信息持久化到 config_dir/subscriptions.json
+/// 流程: 导入 → 拉取 → 解析 → 生成config.json → 拉起/热重载 → 持久化订阅元数据
 use crate::core::clash_api::ClashApiClient;
 use crate::core::config_builder::ConfigBuilder;
 use crate::core::parser::{parse_subscription_content, SubscriptionFormat};
@@ -22,7 +25,42 @@ pub struct Subscription {
     pub node_count: Option<u32>,
 }
 
+/// 获取订阅持久化文件路径
+fn get_subscriptions_path() -> std::path::PathBuf {
+    crate::get_config_dir().join("subscriptions.json")
+}
+
+/// 从磁盘读取所有已保存的订阅
+fn load_subscriptions() -> Vec<Subscription> {
+    let path = get_subscriptions_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    match fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// 将订阅列表写入磁盘
+fn save_subscriptions(subs: &[Subscription]) -> Result<(), AppError> {
+    let path = get_subscriptions_path();
+    let json = serde_json::to_string_pretty(subs)
+        .map_err(|e| AppError::Io(format!("序列化订阅列表失败: {}", e)))?;
+    fs::write(&path, json)
+        .map_err(|e| AppError::Io(format!("写入订阅列表失败: {}", e)))?;
+    Ok(())
+}
+
 /// 导入订阅并生成/热重载/拉起 sing-box
+///
+/// 完整流程:
+/// 1. HTTP 拉取订阅内容 (15s 超时)
+/// 2. 自动识别格式 (Singbox JSON / Clash YAML / V2ray Base64)
+/// 3. ConfigBuilder 生成 config.json (备份旧配置)
+/// 4. 尝试 ClashAPI 热重载 → 失败则拉起子进程 → 再失败则回滚备份
+/// 5. 根据 proxy_mode 同步系统代理状态
+/// 6. 持久化订阅元信息到 subscriptions.json
 #[tauri::command]
 pub async fn subscription_import(
     app_handle: AppHandle,
@@ -135,6 +173,7 @@ pub async fn subscription_import(
         let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
     }
 
+    // 6. 持久化订阅元数据到 subscriptions.json
     let sub = Subscription {
         id: uuid::Uuid::new_v4().to_string(),
         name,
@@ -144,25 +183,84 @@ pub async fn subscription_import(
         node_count: Some(node_count),
     };
 
+    let mut all_subs = load_subscriptions();
+    all_subs.push(sub.clone());
+    if let Err(e) = save_subscriptions(&all_subs) {
+        log::warn!("[subscription] 持久化订阅列表失败: {}", e);
+    }
+
     Ok(ApiResponse::ok(sub))
 }
 
-/// 获取所有已保存订阅
+/// 获取所有已保存订阅（从 subscriptions.json 读取）
 #[tauri::command]
 pub async fn subscription_get_all() -> ApiResponse<Vec<Subscription>> {
-    ApiResponse::ok(vec![])
+    ApiResponse::ok(load_subscriptions())
 }
 
-/// 删除订阅
+/// 删除订阅（从 subscriptions.json 中移除对应记录）
 #[tauri::command]
 pub async fn subscription_delete(id: String) -> ApiResponse<()> {
     log::info!("[subscription] 删除订阅: {}", id);
+    let mut all_subs = load_subscriptions();
+    let before_len = all_subs.len();
+    all_subs.retain(|s| s.id != id);
+    if all_subs.len() < before_len {
+        if let Err(e) = save_subscriptions(&all_subs) {
+            return ApiResponse::err(format!("删除订阅失败: {}", e), 500);
+        }
+        log::info!("[subscription] 订阅 {} 已删除", id);
+    }
     ApiResponse::ok(())
 }
 
-/// 刷新订阅
+/// 刷新订阅（重新拉取 URL 并更新节点）
 #[tauri::command]
-pub async fn subscription_refresh(id: String) -> ApiResponse<Subscription> {
+pub async fn subscription_refresh(
+    app_handle: AppHandle,
+    id: String,
+    sidecar_manager: State<'_, Arc<SidecarManager>>,
+) -> Result<ApiResponse<Subscription>, AppError> {
     log::info!("[subscription] 刷新订阅: {}", id);
-    ApiResponse::err("订阅刷新功能准备就绪", 501)
+
+    let mut all_subs = load_subscriptions();
+    let sub = match all_subs.iter().find(|s| s.id == id) {
+        Some(s) => s.clone(),
+        None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
+    };
+
+    // 复用导入逻辑重新拉取
+    let result = subscription_import(
+        app_handle,
+        sub.name.clone(),
+        sub.url.clone(),
+        true,
+        sidecar_manager,
+    ).await;
+
+    match result {
+        Ok(resp) if resp.success => {
+            if let Some(new_sub) = resp.data {
+                let new_format = new_sub.format.clone();
+                let new_last_updated = new_sub.last_updated;
+                let new_node_count = new_sub.node_count;
+                // 更新持久化记录（保持原 ID 不变）
+                for s in all_subs.iter_mut() {
+                    if s.id == id {
+                        s.last_updated = new_last_updated;
+                        s.node_count = new_node_count;
+                        s.format = new_format.clone();
+                    }
+                }
+                let _ = save_subscriptions(&all_subs);
+                let mut updated = new_sub;
+                updated.id = id;
+                Ok(ApiResponse::ok(updated))
+            } else {
+                Ok(ApiResponse::err("刷新成功但返回数据异常", 500))
+            }
+        }
+        Ok(resp) => Ok(ApiResponse::err(resp.error.unwrap_or_else(|| "刷新订阅失败".to_string()), resp.code.unwrap_or(500))),
+        Err(e) => Ok(ApiResponse::err(e.to_string(), 500)),
+    }
 }

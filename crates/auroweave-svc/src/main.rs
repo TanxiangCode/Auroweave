@@ -6,6 +6,7 @@ mod service;
 mod core_manager;
 mod ipc;
 mod updater;
+mod utils;
 
 use tracing::error;
 

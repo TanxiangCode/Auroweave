@@ -1,6 +1,29 @@
 /// Windows 系统服务与计划任务提权安装器
 /// 作者: TanXiang
-
+///
+/// 负责 AuroDaemon 提权组件的安装、卸载和安全加固。提供两种安装模式：
+///
+/// 1. **服务模式** (`install_service`)：
+///    - 注册 Windows 系统服务 `AuroweaveCoreService`，由 SCM 管理，以 SYSTEM 权限运行
+///    - 服务启动方式: `SERVICE_DEMAND_START`（手动启动，非开机自启）
+///    - 设置服务安全描述符: SYSTEM/Admin 完全控制，Authenticated Users 可启停查询
+///    - 额外创建计划任务 `AuroweaveDirectTunTask` 作为本地模式 TUN 提权的备用
+///
+/// 2. **计划任务模式** (`install_task`)：
+///    - 仅注册计划任务 `AuroweaveDirectTunTask`，不注册系统服务
+///    - 适用于本地运行模式，仅需 TUN 静默提权而不需要常驻服务
+///
+/// 安装流程（两种模式共同）：
+/// 1. 复制二进制文件到 `%ProgramData%\Auroweave\bin`（AuroDaemon.exe + sing-box.exe）
+/// 2. 对 bin 目录进行安全加锁（SDDL: SYSTEM/Admin 完全控制，Users 只读执行）
+/// 3. 生成 IPC 安全 Token（AES-256-GCM 加密存储）
+/// 4. 创建计划任务 XML（最高权限 + 隐藏 + 免 UAC 触发）
+///
+/// 卸载流程 (`uninstall`)：
+/// 1. 停止并删除系统服务
+/// 2. 清理 IPC Token 文件
+/// 3. 删除计划任务
+/// 4. 递归删除 bin 目录
 use std::path::PathBuf;
 use tracing::info;
 use windows_sys::Win32::Foundation::LocalFree;
@@ -23,13 +46,21 @@ extern "system" {
 const SERVICE_NAME: &str = "AuroweaveCoreService";
 const DISPLAY_NAME: &str = "Auroweave Core Service";
 
-/// 复制二进制文件到 %ProgramData%\Auroweave\bin
+/// 复制二进制文件到 `%ProgramData%\Auroweave\bin`
+///
+/// 复制流程：
+/// 1. 创建 bin 目录
+/// 2. 复制自身 (AuroDaemon.exe) 到目标位置（覆盖旧文件）
+/// 3. 复制 sing-box.exe：
+///    - 若传入 singbox_src_path 则从指定路径复制
+///    - 否则在同级目录下搜索 sing-box*.exe 并选择最新版本
+/// 4. 返回 AuroDaemon.exe 的目标路径
 fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
     std::fs::create_dir_all(&bin_dir).map_err(|e| format!("创建服务二进制目录失败: {}", e))?;
 
-    // 1. 复制自身
+    // 1. 复制自身 (AuroDaemon.exe) 到目标位置
     let current_exe = std::env::current_exe().map_err(|e| format!("获取自身路径失败: {}", e))?;
     let target_svc_path = bin_dir.join("AuroDaemon.exe");
     
@@ -40,7 +71,8 @@ fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
         .map_err(|e| format!("复制 AuroDaemon.exe 失败: {}", e))?;
     info!("已复制 AuroDaemon.exe 至 {:?}", target_svc_path);
 
-    // 2. 复制 sing-box
+    // 2. 复制 sing-box.exe
+    // 优先使用传入的路径，未传入时在同级目录搜索最新版本
     if let Some(src_path_str) = singbox_src_path {
         let src_path = PathBuf::from(src_path_str);
         if src_path.exists() {
@@ -95,7 +127,14 @@ fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
     Ok(target_svc_path)
 }
 
-/// 锁定二进制目录的安全权限，防止普通用户写入和篡改
+/// 锁定二进制目录的安全权限
+///
+/// 使用 SDDL 安全描述符设置 bin 目录权限：
+/// - SYSTEM (SY): 完全控制 (FA)
+/// - Administrators (BA): 完全控制 (FA)
+/// - Authenticated Users (AU): 读取和执行 (FRGX)，禁止写入和篡改
+///
+/// 防止普通用户修改或替换提权组件二进制文件，避免提权漏洞。
 fn secure_bin_dir(bin_dir: &std::path::Path) -> Result<(), String> {
     // SYSTEM(SY) 和 Administrators(BA) 拥有完全控制，Authenticated Users(AU) 拥有读取和执行权限
     let file_sddl = "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRGX;;;AU)";
@@ -127,10 +166,19 @@ fn secure_bin_dir(bin_dir: &std::path::Path) -> Result<(), String> {
 }
 
 /// 注册 Windows 系统服务 + 计划任务（服务运行模式）
+///
+/// 完整安装流程：
+/// 1. 停止并删除已存在的同名服务（确保覆盖安装干净性）
+/// 2. 复制二进制文件到 `%ProgramData%\Auroweave\bin`
+/// 3. 对 bin 目录进行安全加锁
+/// 4. 通过 SCM 创建服务项（手动启动 + OWN_PROCESS）
+/// 5. 设置服务安全描述符（允许 Users 免 UAC 启停）
+/// 6. 生成 IPC 安全 Token
+/// 7. 创建计划任务 `AuroweaveDirectTunTask`（本地模式备用）
 pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
     info!("开始以服务模式安装提权组件...");
 
-    // 先尝试停止并删除已存在的同名服务，确保覆盖安装的干净性
+    // 步骤1: 停止并删除已存在的同名服务，确保覆盖安装的干净性
     let service_name_w: Vec<u16> = SERVICE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_ALL_ACCESS);
@@ -148,6 +196,7 @@ pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
         }
     }
 
+    // 步骤2-3: 复制二进制文件 + 对 bin 目录进行安全加锁
     let svc_path = copy_binaries(singbox_src_path)?;
     
     // 对 bin 目录进行加锁
@@ -155,6 +204,7 @@ pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
         secure_bin_dir(parent)?;
     }
 
+    // 步骤4-5: 通过 SCM 创建服务项并设置安全描述符
     let binary_path_str = format!("\"{}\" run", svc_path.to_string_lossy());
     let binary_path_w: Vec<u16> = binary_path_str.encode_utf16().chain(std::iter::once(0)).collect();
     let display_name_w: Vec<u16> = DISPLAY_NAME.encode_utf16().chain(std::iter::once(0)).collect();
@@ -221,9 +271,11 @@ pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
         CloseServiceHandle(scm);
     }
 
+    // 步骤6: 生成 IPC 安全 Token
     info!("系统服务配置成功。正在生成 IPC Token...");
     setup_token()?;
 
+    // 步骤7: 创建计划任务（本地模式 TUN 提权备用）
     if let Err(e) = create_direct_tun_task(&svc_path) {
         info!("创建静默提权任务失败（警告）: {}", e);
     }
@@ -233,9 +285,16 @@ pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
 }
 
 /// 仅注册计划任务（本地运行模式）
+///
+/// 安装流程：
+/// 1. 复制二进制文件到 `%ProgramData%\Auroweave\bin`
+/// 2. 对 bin 目录进行安全加锁
+/// 3. 生成 IPC 安全 Token
+/// 4. 创建计划任务 `AuroweaveDirectTunTask`
 pub fn install_task(singbox_src_path: Option<&str>) -> Result<(), String> {
     info!("开始以计划任务模式安装提权组件...");
 
+    // 步骤1-2: 复制二进制文件 + 对 bin 目录进行安全加锁
     let svc_path = copy_binaries(singbox_src_path)?;
     
     // 对 bin 目录进行加锁
@@ -243,9 +302,11 @@ pub fn install_task(singbox_src_path: Option<&str>) -> Result<(), String> {
         secure_bin_dir(parent)?;
     }
 
+    // 步骤3: 生成 IPC 安全 Token
     info!("配置 Token...");
     setup_token()?;
 
+    // 步骤4: 创建计划任务
     if let Err(e) = create_direct_tun_task(&svc_path) {
         return Err(format!("创建静默提权计划任务失败: {}", e));
     }
@@ -254,9 +315,17 @@ pub fn install_task(singbox_src_path: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// 卸载所有提权组件
+///
+/// 卸载流程：
+/// 1. 停止并删除 Windows 系统服务
+/// 2. 清理 IPC Token 文件
+/// 3. 删除计划任务 `AuroweaveDirectTunTask`
+/// 4. 递归删除 `%ProgramData%\Auroweave\bin` 目录
 pub fn uninstall() -> Result<(), String> {
     info!("开始卸载 Windows 系统服务与提权组件...");
     
+    // 步骤1: 停止并删除系统服务
     let service_name_w: Vec<u16> = SERVICE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
 
     unsafe {
@@ -275,10 +344,11 @@ pub fn uninstall() -> Result<(), String> {
         }
     }
 
+    // 步骤2-3: 清理 Token + 删除计划任务
     let _ = cleanup_token();
     let _ = remove_direct_tun_task();
 
-    // 递归删除 %ProgramData%\Auroweave\bin 目录
+    // 步骤4: 递归删除 bin 目录
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
     if bin_dir.exists() {
@@ -291,6 +361,15 @@ pub fn uninstall() -> Result<(), String> {
     Ok(())
 }
 
+/// 生成并加密存储 IPC 安全 Token
+///
+/// 流程：
+/// 1. 创建数据目录 `%ProgramData%\Auroweave\data`
+/// 2. 若 Token 文件不存在则生成新 Token：
+///    - 生成 UUID v4 作为 Token 明文
+///    - 生成随机 Nonce（UUID 前 12 字节）
+///    - 使用 AES-256-GCM 加密，拼接 Nonce + 密文写入文件
+/// 3. 对 Token 文件设置安全描述符（SYSTEM/Admin 完全控制，Users 只读）
 fn setup_token() -> Result<(), String> {
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     let data_dir = PathBuf::from(program_data).join("Auroweave").join("data");
@@ -354,15 +433,45 @@ fn setup_token() -> Result<(), String> {
     Ok(())
 }
 
+/// 删除 IPC Token 文件
 fn cleanup_token() -> Result<(), String> {
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let token_path = PathBuf::from(program_data).join("Auroweave").join("data").join("ipc_token.bin");
-    if token_path.exists() {
-        let _ = std::fs::remove_file(token_path);
-    }
-    Ok(())
+let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+let token_path = PathBuf::from(program_data).join("Auroweave").join("data").join("ipc_token.bin");
+if token_path.exists() {
+let _ = std::fs::remove_file(token_path);
+}
+Ok(())
 }
 
+/// 读取 Windows Machine GUID（HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid）
+/// 每台机器唯一标识，用于派生 IPC Token 加密密钥
+fn read_machine_guid() -> Option<String> {
+let output = std::process::Command::new("reg")
+    .args(["query", r"HKLM\SOFTWARE\Microsoft\Cryptography", "/v", "MachineGuid"])
+    .output()
+    .ok()?;
+let stdout = String::from_utf8_lossy(&output.stdout);
+for line in stdout.lines() {
+    if line.contains("MachineGuid") {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 {
+            return Some(parts[parts.len() - 1].to_string());
+        }
+    }
+}
+None
+}
+
+/// 创建静默提权计划任务
+///
+/// 通过 `schtasks /create /xml` 导入预定义的任务 XML：
+/// - 以当前用户身份运行，HighestAvailable 最高权限
+/// - 隐藏窗口 (Hidden=true)，不弹出 UAC
+/// - AllowStartOnDemand=true，允许通过 `schtasks /run` 手动触发
+/// - ExecutionTimeLimit=PT0S，无超时限制
+/// - Action: 执行 AuroDaemon.exe `run-task` 子命令
+///
+/// XML 以 UTF-16LE BOM 编码写入临时文件，确保 schtasks 正确解析中文路径。
 fn create_direct_tun_task(svc_path: &std::path::Path) -> Result<(), String> {
     let task_name = "AuroweaveDirectTunTask";
     let svc_path_str = svc_path.to_string_lossy();
@@ -456,6 +565,7 @@ r#"<?xml version="1.0" encoding="UTF-16"?>
     }
 }
 
+/// 删除静默提权计划任务
 fn remove_direct_tun_task() -> Result<(), String> {
     let task_name = "AuroweaveDirectTunTask";
     info!("正在删除静默提权计划任务: {}", task_name);

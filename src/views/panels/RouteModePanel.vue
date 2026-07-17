@@ -41,8 +41,8 @@
           @change="save"
         />
       </div>
-      </div>
     </div>
+  </div>
   </template>
 
 <script setup lang="ts">
@@ -60,8 +60,10 @@ async function save() {
 }
 
 async function saveMode() {
+  // proxyStore.changeProxyMode 内部已通过 proxy_set_mode 保存设置并重建配置
+  // 这里不再调用 save()，避免重复保存导致不必要的内核重启
   await proxyStore.changeProxyMode(settingsStore.settings.proxy_mode);
-  await save();
+  toast.success("代理模式已切换");
 }
 </script>
 

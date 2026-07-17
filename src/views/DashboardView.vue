@@ -8,6 +8,7 @@ import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useFluidWave } from "@/composables/useFluidWave";
+import type { ApiResponse } from "@/types";
 import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
@@ -121,7 +122,7 @@ const inboundMode = computed({
 
         if (val === "system") {
           logInfo("[DashboardView] 切换为普通系统代理模式，正在卸载 TUN...");
-          const res: any = await invoke("tun_set_enabled", { enabled: false });
+          const res: ApiResponse = await invoke("tun_set_enabled", { enabled: false });
           if (res.success) {
             if (proxyStore.proxyMode === "direct") {
               await proxyStore.changeProxyMode("rule");
@@ -131,20 +132,20 @@ const inboundMode = computed({
           }
         } else if (val === "tun") {
           logInfo("[DashboardView] 切换为 TUN 虚拟网卡模式...");
-          const res: any = await invoke("tun_set_enabled", { enabled: true });
-          if (!res.success) {
+const res: ApiResponse = await invoke("tun_set_enabled", { enabled: true });
+if (!res.success) {
             logWarn(`[DashboardView] 启动 TUN 失败: ${res.error}，提示用户一键提权安装服务...`);
             const confirmInstall = confirm(
               "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
             );
             if (confirmInstall) {
               logInfo("[DashboardView] 用户同意提权安装服务，开始调用 service_install...");
-              const installRes: any = await invoke("service_install");
-              if (installRes.success) {
-                logInfo("[DashboardView] 服务安装成功，重新尝试启动 TUN...");
-                const retryRes: any = await invoke("tun_set_enabled", { enabled: true });
-                if (retryRes.success) {
-                  logInfo("[DashboardView] 重试启动 TUN 成功");
+const installRes: ApiResponse = await invoke("service_install");
+if (installRes.success) {
+logInfo("[DashboardView] 服务安装成功，重新尝试启动 TUN...");
+const retryRes: ApiResponse = await invoke("tun_set_enabled", { enabled: true });
+if (retryRes.success) {
+logInfo("[DashboardView] 重试启动 TUN 成功");
                   await proxyStore.changeProxyMode("direct");
                   return;
                 } else {
@@ -161,8 +162,8 @@ const inboundMode = computed({
           logInfo("[DashboardView] 启动 TUN 成功");
           await proxyStore.changeProxyMode("direct");
         }
-      } catch (e: any) {
-        logError(`[DashboardView] 切换接管模式发生致命错误: ${e.message || e}`);
+} catch (e: unknown) {
+logError(`[DashboardView] 切换接管模式发生致命错误: ${e instanceof Error ? e.message : e}`);
         settingsStore.settings.tun_enabled = originalVal; // 回滚
       } finally {
         operating.value = false;
@@ -184,18 +185,18 @@ async function toggleProxy() {
     try {
       if (nextActive) {
         if (settingsStore.settings.tun_enabled) {
-          const res: any = await invoke("tun_set_enabled", { enabled: true });
-          if (res.success) {
-            settingsStore.settings.tun_enabled = true;
+const res: ApiResponse = await invoke("tun_set_enabled", { enabled: true });
+if (res.success) {
+settingsStore.settings.tun_enabled = true;
             await proxyStore.changeProxyMode("direct");
           } else {
             const confirmInstall = confirm(
               "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
             );
             if (confirmInstall) {
-              const installRes: any = await invoke("service_install");
-              if (installRes.success) {
-                const retryRes: any = await invoke("tun_set_enabled", { enabled: true });
+const installRes: ApiResponse = await invoke("service_install");
+if (installRes.success) {
+const retryRes: ApiResponse = await invoke("tun_set_enabled", { enabled: true });
                 if (retryRes.success) {
                   settingsStore.settings.tun_enabled = true;
                   await proxyStore.changeProxyMode("direct");
@@ -252,12 +253,12 @@ let statusTimer: ReturnType<typeof setInterval> | null = null;
 async function checkRunningStatus() {
   if (operating.value) return; // 在变更过程中避免覆盖乐观状态
   try {
-    const runningRes: any = await invoke("core_query_running");
+    const runningRes: ApiResponse<boolean> = await invoke("core_query_running");
     if (runningRes.success) {
       proxyActive.value = runningRes.data;
     }
-  } catch (e: any) {
-    console.error("轮询内核状态异常:", e);
+} catch (e: unknown) {
+console.error("轮询内核状态异常:", e);
   }
 }
 
@@ -268,9 +269,9 @@ onMounted(async () => {
   try {
     await checkRunningStatus();
     logInfo(`[DashboardView] 初始化核心运行状态: ${proxyActive.value ? '运行中' : '未运行'}`);
-  } catch (e: any) {
-    proxyActive.value = false;
-    logError(`[DashboardView] 获取核心运行状态异常: ${e.message || e}`);
+} catch (e: unknown) {
+proxyActive.value = false;
+logError(`[DashboardView] 获取核心运行状态异常: ${e instanceof Error ? e.message : e}`);
   }
 
   // 启动定时轮询，每 3 秒同步一次状态

@@ -5,6 +5,22 @@
 /// 1. 整理出站节点（去重、自动按地区分类成 urltest 分组）
 /// 2. 构建 DNS 路由、RuleSet 和 Inbounds（Mixed 动态监听端口）
 /// 3. 配置 ClashAPI 动态监听端口
+///
+/// 配置生成流程：
+/// 1. **节点处理**：遍历所有 ParsedOutbound，提取 tag 列表并按地区自动分组
+///    - 每个地区创建一个 `urltest` 类型出站（自动测速选最优节点）
+///    - 创建全局 `balance` 出站（`loadbalance` 类型，负载均衡所有节点）
+///    - 创建 `Auto` 选择器出站（包含所有地区分组 + balance）
+/// 2. **Inbounds**：创建 Mixed 入站（HTTP+SOCKS5 混合代理），监听 mixed_port
+///    - 若启用 TUN，额外创建 TUN 虚拟网卡入站
+/// 3. **DNS 配置**：配置国内/国外 DNS 分流，使用 fake-ip 模式
+/// 4. **路由规则**：配置 RuleSet（geosite/geoip），按域名和 IP 分流
+/// 5. **ClashAPI**：配置外部控制器，监听 clash_api_port
+///
+/// 地区检测策略（`detect_region`）：
+/// - 优先匹配国旗 emoji（最精确）
+/// - 其次匹配中文关键词（香港、日本、美国等）
+/// - 最后使用英文缩写单词边界匹配（避免 "us" 误匹配 "Russia"）
 use super::parser::ParsedOutbound;
 use crate::error::AppError;
 use serde_json::{json, Value};
@@ -17,6 +33,7 @@ pub struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
+    /// 创建配置生成器，默认端口 mixed=7890, clash_api=9090
     pub fn new(outbounds: Vec<ParsedOutbound>) -> Self {
         Self {
             outbounds,
@@ -25,6 +42,7 @@ impl ConfigBuilder {
         }
     }
 
+    /// 设置混合代理端口和 Clash API 端口（仅当传入值 > 0 时生效）
     pub fn with_ports(mut self, mixed_port: u16, clash_api_port: u16) -> Self {
         if mixed_port > 0 {
             self.mixed_port = mixed_port;
@@ -36,15 +54,22 @@ impl ConfigBuilder {
     }
 
     /// 生成完整的 sing-box 1.11+ / 1.13+ / 1.14+ 兼容 config.json
+    ///
+    /// 配置构建流程：
+    /// 1. 节点遍历：提取 tag 列表、原始 JSON，并按地区分组
+    /// 2. 出站构建：direct/block 基础出站 → proxy 选择器 → auto/balance → 地区分组 → 节点原始出站
+    /// 3. DNS 规则：提取节点服务器域名 → 国内域名走 local DNS → 其余走 remote DNS
+    /// 4. 组装最终 JSON：log + dns + inbounds + outbounds + route + experimental
     pub fn build(&self) -> Result<Value, AppError> {
         if self.outbounds.is_empty() {
             return Err(AppError::Config("没有可用节点，无法生成 config.json".to_string()));
         }
 
+        // ---- 阶段1: 遍历节点，提取 tag 和原始 JSON，按地区分组 ----
         let mut node_tags = Vec::new();
         let mut raw_outbounds = Vec::new();
 
-        // 地区分组 mapping
+        // 地区分组映射: region -> [tag1, tag2, ...]
         let mut region_map: HashMap<String, Vec<String>> = HashMap::new();
 
         for out in &self.outbounds {
@@ -57,11 +82,15 @@ impl ConfigBuilder {
 
         let mut final_outbounds = Vec::new();
 
-        // 1. Direct 与 Block 基础出站
+        // ---- 阶段2: 构建出站列表（按优先级顺序） ----
+        // 出站顺序决定了 selector 中的可选项排列，也影响 sing-box 内部出站索引
+
+        // 2a. Direct 与 Block 基础出站（直连和阻断，必须存在）
         final_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
-        // 2. Selector "proxy" (主出站)
+        // 2b. Selector "proxy" 主出站（用户可手动切换的聚合选择器）
+        // 包含：auto(自动测速) → balance(负载均衡) → 各地区分组 → 所有节点
         let mut proxy_group_list = vec!["auto".to_string(), "balance".to_string()];
         for (region, _) in &region_map {
             proxy_group_list.push(format!("{}-auto", region));
@@ -74,7 +103,7 @@ impl ConfigBuilder {
             "outbounds": proxy_group_list
         }));
 
-        // 3. 全局 "auto" urltest 出站
+        // 2c. 全局 "auto" urltest 出站（自动测速选最优节点，覆盖所有节点）
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "auto",
@@ -84,17 +113,18 @@ impl ConfigBuilder {
             "idle_timeout": "30m"
         }));
 
-        // 3.1 全局 "balance" 默认负载均衡/自动选择出站
+        // 2d. 全局 "balance" 负载均衡出站 (sing-box 1.14+ loadbalance)
+        // 注意: 必须使用 loadbalance 类型而非 urltest，否则只选最低延迟节点而非负载均衡
         final_outbounds.push(json!({
-            "type": "urltest",
+            "type": "loadbalance",
             "tag": "balance",
             "outbounds": node_tags,
-            "url": "https://www.gstatic.com/generate_204",
+            "strategy": "round_robin",
             "interval": "15m",
             "idle_timeout": "30m"
         }));
 
-        // 4. 地区 urltest 出站
+        // 2e. 地区 urltest 出站（每个地区一个自动测速分组）
         for (region, tags) in region_map {
             final_outbounds.push(json!({
                 "type": "urltest",
@@ -106,10 +136,14 @@ impl ConfigBuilder {
             }));
         }
 
-        // 5. 节点具体出站
+        // 2f. 节点具体出站（原始解析得到的 JSON，放在最后）
         final_outbounds.extend(raw_outbounds);
 
+        // ---- 阶段3: 构建 DNS 规则 ----
+        // 提取所有节点的服务器域名，确保这些域名走 local DNS 解析
+        // 避免代理节点的服务器域名被 remote DNS 解析导致死循环
         let mut server_domains = Vec::new();
+        // 过滤掉 IP 地址和空字符串，只保留域名
         for out in &self.outbounds {
             if let Some(server) = out.raw_json.get("server").and_then(|s| s.as_str()) {
                 if server.parse::<std::net::IpAddr>().is_err() && !server.is_empty() {
@@ -117,9 +151,14 @@ impl ConfigBuilder {
                 }
             }
         }
+        // 排序去重
         server_domains.sort();
         server_domains.dedup();
 
+        // DNS 规则构建：
+        // 规则1（如有）: 节点服务器域名 → local DNS（防止代理域名被 remote DNS 解析导致死循环）
+        // 规则2: geosite-cn 域名 → local DNS（国内域名走国内 DNS）
+        // 未匹配的域名 → 走 final: remote DNS（国外域名走代理 DNS）
         let mut dns_rules = if server_domains.is_empty() {
             vec![]
         } else {
@@ -136,12 +175,15 @@ impl ConfigBuilder {
 
         let dns_rules = json!(dns_rules);
 
+        // ---- 阶段4: 组装最终 JSON 配置 ----
+        // 结构: log → dns → inbounds → outbounds → route → experimental
         let config = json!({
             "log": {
                 "level": "info",
                 "timestamp": true
             },
             "dns": {
+                // DNS 服务器: remote(8.8.8.8 经代理) + local(223.5.5.5 直连)
                 "servers": [
                       {
                         "detour": "proxy",
@@ -159,6 +201,7 @@ impl ConfigBuilder {
                 "final": "remote"
             },
             "inbounds": [
+                // Mixed 入站: HTTP + SOCKS5 混合代理监听
                 {
                     "type": "mixed",
                     "tag": "mixed-in",
@@ -169,6 +212,7 @@ impl ConfigBuilder {
             "outbounds": final_outbounds,
             "route": {
                 "default_domain_resolver": "local",
+                // RuleSet: geosite-cn 和 geoip-cn（远程二进制格式，经代理下载）
                 "rule_set": [
                     {
                         "tag": "geosite-cn",
@@ -185,6 +229,12 @@ impl ConfigBuilder {
                         "download_detour": "proxy"
                     }
                 ],
+                // 路由规则按顺序匹配:
+                // 1. sniff: 嗅探协议（从 TLS ClientHello / HTTP Host 提取域名）
+                // 2. hijack-dns: DNS 请求劫持到 sing-box 内部 DNS 模块
+                // 3. ip_is_private: 私有网络地址直连（局域网不走代理）
+                // 4. geosite-cn + geoip-cn: 国内域名和 IP 直连
+                // 5. final: proxy（其余全部走代理）
                 "rules": [
                     { "action": "sniff" },
                     { "protocol": "dns", "action": "hijack-dns" },
@@ -195,6 +245,7 @@ impl ConfigBuilder {
                 "auto_detect_interface": true
             },
             "experimental": {
+                // ClashAPI 外部控制器: 供前端实时查询延迟、切换节点、流量统计
                 "clash_api": {
                     "external_controller": format!("127.0.0.1:{}", self.clash_api_port),
                     "secret": ""
@@ -207,21 +258,47 @@ impl ConfigBuilder {
 }
 
 /// 识别节点 tag 属于哪个地区 (HK, JP, US, TW, SG, KR, OTHER)
+///
+/// 匹配策略（按优先级）：
+/// 1. 国旗 emoji 直接匹配
+/// 2. 中文关键词精确匹配（避免子串误匹配）
+/// 3. 英文缩写使用「单词边界」匹配，避免 "us" 误匹配 "Russia" 等
 fn detect_region(tag: &str) -> String {
     let lower = tag.to_lowercase();
-    if lower.contains("hk") || lower.contains("香港") || tag.contains("🇭🇰") {
-        "HK".to_string()
-    } else if lower.contains("jp") || lower.contains("日本") || tag.contains("🇯🇵") {
-        "JP".to_string()
-    } else if lower.contains("us") || lower.contains("美国") || lower.contains("美國") || tag.contains("🇺🇸") {
-        "US".to_string()
-    } else if lower.contains("tw") || lower.contains("台湾") || lower.contains("臺灣") || tag.contains("🇹🇼") {
-        "TW".to_string()
-    } else if lower.contains("sg") || lower.contains("新加坡") || tag.contains("🇸🇬") {
-        "SG".to_string()
-    } else if lower.contains("kr") || lower.contains("韩国") || lower.contains("韓國") || tag.contains("🇰🇷") {
-        "KR".to_string()
-    } else {
-        "OTHER".to_string()
-    }
+
+    // emoji 优先匹配
+    if tag.contains("🇭🇰") { return "HK".to_string(); }
+    if tag.contains("🇯🇵") { return "JP".to_string(); }
+    if tag.contains("🇺🇸") { return "US".to_string(); }
+    if tag.contains("🇹🇼") { return "TW".to_string(); }
+    if tag.contains("🇸🇬") { return "SG".to_string(); }
+    if tag.contains("🇰🇷") { return "KR".to_string(); }
+
+    // 中文关键词
+    if lower.contains("香港") { return "HK".to_string(); }
+    if lower.contains("日本") { return "JP".to_string(); }
+    if lower.contains("美国") || lower.contains("美國") { return "US".to_string(); }
+    if lower.contains("台湾") || lower.contains("臺灣") || lower.contains("台灣") { return "TW".to_string(); }
+    if lower.contains("新加坡") { return "SG".to_string(); }
+    if lower.contains("韩国") || lower.contains("韓國") { return "KR".to_string(); }
+
+    // 英文缩写使用单词边界匹配，避免 "us" 匹配 "Russia"
+    // 分隔符包括空格、标点、连字符等
+    let tokens = tokenize_tag(&lower);
+    if tokens.iter().any(|&t| t == "hk" || t == "hongkong" || t == "hong") { return "HK".to_string(); }
+    if tokens.iter().any(|&t| t == "jp" || t == "japan") { return "JP".to_string(); }
+    if tokens.iter().any(|&t| t == "us" || t == "usa" || t == "united" || t == "america") { return "US".to_string(); }
+    if tokens.iter().any(|&t| t == "tw" || t == "taiwan") { return "TW".to_string(); }
+    if tokens.iter().any(|&t| t == "sg" || t == "singapore") { return "SG".to_string(); }
+    if tokens.iter().any(|&t| t == "kr" || t == "korea") { return "KR".to_string(); }
+
+    "OTHER".to_string()
+}
+
+/// 将节点 tag 拆分为小写单词列表用于精确匹配
+/// 分隔符: 空格、连字符、下划线、方括号、管道符、各种标点
+fn tokenize_tag(s: &str) -> Vec<&str> {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect()
 }

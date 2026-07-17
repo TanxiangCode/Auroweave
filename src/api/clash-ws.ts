@@ -5,6 +5,7 @@
 import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
+  WS_RECONNECT_MAX_RETRIES,
 } from "@/constants";
 import type { TrafficSnapshot, Connection } from "@/types";
 import { useSettingsStore } from "@/stores/settings.store";
@@ -81,6 +82,11 @@ class WsClient<T> {
 
   private scheduleReconnect(): void {
     if (this.stopped) return;
+    // 超过最大重试次数后停止重连，避免无限重连耗尽资源
+    if (this.retryCount >= WS_RECONNECT_MAX_RETRIES) {
+      this.options.onStatusChange?.("error");
+      return;
+    }
     const delay = Math.min(
       WS_RECONNECT_DELAY_MS * Math.pow(2, this.retryCount),
       WS_RECONNECT_MAX_DELAY_MS

@@ -120,6 +120,14 @@ pub async fn proxy_get_mode() -> ApiResponse<String> {
 }
 
 /// 切换代理模式
+///
+/// 完整流程:
+/// 1. 校验模式合法性 (global / rule / direct)
+/// 2. 通过 update_settings_internal 统一保存 proxy_mode 到 settings.json（避免绕过统一逻辑）
+/// 3. 重建 config.json 以反映新模式
+/// 4. 若内核已运行 → ClashAPI patch 热切换模式 + 同步系统代理
+/// 5. 若内核未运行且新模式需要接管 (rule/global) → apply_core_mode_with_fallback 拉起进程
+/// 6. 若内核未运行且直连 + 未启用 TUN → 注销系统代理
 #[tauri::command]
 pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiResponse<()> {
     if !["global", "rule", "direct"].contains(&mode.as_str()) {
@@ -130,14 +138,15 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
     }
     log::info!("[proxy] 切换代理模式: {}", mode);
 
-    let mut settings = crate::commands::settings::settings_get_internal(&app_handle);
-    settings.proxy_mode = mode.clone();
-    
-    let config_dir = crate::get_config_dir();
-    let settings_path = config_dir.join("settings.json");
-    if let Ok(content) = serde_json::to_string_pretty(&settings) {
-        let _ = std::fs::write(&settings_path, content);
+    // 统一通过 update_settings_internal 保存 proxy_mode，避免绕过设置保存逻辑
+    let patch = serde_json::json!({ "proxy_mode": mode.clone() });
+    if let Err(e) = crate::commands::settings::update_settings_internal(&app_handle, patch) {
+        log::error!("[proxy] 保存 proxy_mode 失败: {}", e);
+        return ApiResponse::err(format!("保存代理模式失败: {}", e), 500);
     }
+
+    // 重新读取保存后的设置，用于后续判断
+    let settings = crate::commands::settings::settings_get_internal(&app_handle);
 
     // 重新构建 config.json
     let _ = crate::commands::settings::rebuild_config_from_settings(&app_handle);
@@ -189,31 +198,36 @@ pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
 /// 以管理员身份提权重启当前 Auroweave 程序
 #[tauri::command]
 pub async fn app_restart_as_admin(app_handle: tauri::AppHandle) -> ApiResponse<()> {
-    log::info!("[proxy] 准备以管理员身份提权重启程序");
-    if let Ok(current_exe) = std::env::current_exe() {
-        let exe_path = current_exe.to_string_lossy().to_string();
-        
-        #[cfg(target_os = "windows")]
-        {
-            // 通过 PowerShell 执行 Start-Process -Verb RunAs 提权运行当前 exe
-            let status = std::process::Command::new("powershell")
-                .args(&[
-                    "-NoProfile",
-                    "-WindowStyle", "Hidden",
-                    "-Command",
-                    &format!("Start-Process -FilePath '{}' -Verb RunAs", exe_path)
-                ])
-                .status();
-            
-            if status.is_ok() {
-                // 注销系统代理，防止退出时残留
-                let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-                app_handle.exit(0);
-                return ApiResponse::ok(());
-            }
-        }
-    }
-    ApiResponse::err("以管理员身份提权重启失败".to_string(), 500)
+log::info!("[proxy] 准备以管理员身份提权重启程序");
+if let Ok(current_exe) = std::env::current_exe() {
+let exe_path = current_exe.to_string_lossy().to_string();
+
+#[cfg(target_os = "windows")]
+{
+// 通过 PowerShell 执行 Start-Process -Verb RunAs 提权运行当前 exe
+// 安全防护：对 exe_path 中的单引号进行转义，防止 PowerShell 命令注入
+// PowerShell 单引号字符串中，单引号用两个连续单引号表示
+let escaped_path = exe_path.replace('\'', "''");
+let ps_command = format!("Start-Process -FilePath '{}' -Verb RunAs", escaped_path);
+
+let status = std::process::Command::new("powershell")
+.args(&[
+"-NoProfile",
+"-WindowStyle", "Hidden",
+"-Command",
+&ps_command
+])
+.status();
+
+if status.is_ok() {
+// 注销系统代理，防止退出时残留
+let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+app_handle.exit(0);
+return ApiResponse::ok(());
+}
+}
+}
+ApiResponse::err("以管理员身份提权重启失败".to_string(), 500)
 }
 
 /// 获取内核版本号

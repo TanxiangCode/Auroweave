@@ -1,5 +1,9 @@
 /// 系统进程枚举与状态读取
 /// 作者: TanXiang
+///
+/// 使用 sysinfo crate 获取进程列表。性能注意：
+/// 使用 System::new() + refresh_processes() 而非 System::new_all()，
+/// 避免采集不必要的 CPU/内存/磁盘信息。
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
@@ -7,8 +11,10 @@ pub const PROCESS_NAME_DAEMON: &str = "aurodaemon";
 pub const PROCESS_NAME_SINGBOX: &str = "sing-box";
 
 /// 高效检查指定进程名的进程是否存活
+///
+/// 仅刷新进程列表，不采集 CPU/内存等额外信息，性能优于 System::new_all()
 pub fn check_processes_running(keywords: &[&str]) -> std::collections::HashMap<String, bool> {
-    let mut sys = System::new_all();
+    let mut sys = System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
     
     let mut results = std::collections::HashMap::new();
@@ -54,8 +60,10 @@ pub struct SystemProcess {
 }
 
 /// 获取当前系统活跃应用进程列表
+///
+/// 仅刷新进程列表，过滤系统基底进程（PID < 100），按名称去重排序。
 pub fn get_active_processes() -> Vec<SystemProcess> {
-    let mut sys = System::new_all();
+    let mut sys = System::new();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
 
     let mut list = Vec::new();

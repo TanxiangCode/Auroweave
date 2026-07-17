@@ -249,18 +249,41 @@ pub async fn sync_config_to_service(_app_handle: &tauri::AppHandle) -> Result<()
 }
 
 /// 保存设置
+///
+/// 性能优化：仅当内核相关字段（mixed_port, clash_api_port, proxy_mode,
+/// tun_enabled, run_mode）发生变化时才触发 apply_core_mode_with_fallback 重启内核，
+/// 避免修改主题、性能模式等无关设置时产生不必要的内核重启。
 #[tauri::command]
 pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Value) -> ApiResponse<()> {
     log::info!("[settings] 保存设置，补丁: {:?}", patch);
+
+    // 记录保存前的设置，用于后续比较内核相关字段是否变化
+    let old_settings = settings_get_internal(&app_handle);
+
     if let Err(e) = update_settings_internal(&app_handle, patch) {
         return ApiResponse::err(format!("写入设置失败: {}", e), 500);
     }
-    
-    // 统一通过自愈恢复逻辑应用配置和重载内核
-    if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
-        return ApiResponse::err(e, 500);
+
+    // 读取保存后的设置
+    let new_settings = settings_get_internal(&app_handle);
+
+    // 判断内核相关字段是否变化
+    let core_changed = old_settings.mixed_port != new_settings.mixed_port
+        || old_settings.clash_api_port != new_settings.clash_api_port
+        || old_settings.proxy_mode != new_settings.proxy_mode
+        || old_settings.tun_enabled != new_settings.tun_enabled
+        || old_settings.core.run_mode != new_settings.core.run_mode;
+
+    if core_changed {
+        log::info!("[settings] 检测到内核相关字段变化，触发配置重载和内核重启");
+        // 统一通过自愈恢复逻辑应用配置和重载内核
+        if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
+            return ApiResponse::err(e, 500);
+        }
+    } else {
+        log::info!("[settings] 内核相关字段未变化，跳过内核重启");
     }
-    
+
     ApiResponse::ok(())
 }
 
@@ -284,8 +307,9 @@ pub async fn settings_inject_terminal_proxy(
 /// 导出诊断日志（返回日志文件路径）
 #[tauri::command]
 pub async fn settings_export_diagnostic_log(app_handle: tauri::AppHandle) -> ApiResponse<String> {
-    let config_dir = crate::get_config_dir();
-    let log_path = config_dir.join("logs").join("auroweave.log");
+    // 注意：日志文件由 lib.rs 中 tauri-plugin-log 写入到 get_log_dir() 目录
+    // get_log_dir() = get_data_root()/logs，不能误用 get_config_dir()/logs
+    let log_path = crate::get_log_dir().join("auroweave.log");
     
     if !log_path.exists() {
         return ApiResponse::err("诊断日志不存在，请先运行核心服务", 404);
@@ -441,8 +465,9 @@ pub async fn service_stop() -> ApiResponse<()> {
 /// 读取系统服务运行日志
 #[tauri::command]
 pub async fn service_read_log() -> ApiResponse<String> {
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let log_path = std::path::PathBuf::from(program_data).join("Auroweave").join("service.log");
+    // 守护进程 AuroDaemon 将日志写入 ProgramData/Auroweave/logs/service.log
+    // 参见 crates/auroweave-svc/src/main.rs 的 init_file_logging()
+    let log_path = crate::get_log_dir().join("service.log");
     if !log_path.exists() {
         return ApiResponse::err("系统服务运行日志文件不存在".to_string(), 404);
     }
