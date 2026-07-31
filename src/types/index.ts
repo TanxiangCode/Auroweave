@@ -114,12 +114,44 @@ export interface Subscription {
   format: SubscriptionFormat;
   last_updated?: number;
   node_count?: number;
+  is_active?: boolean;
   traffic?: {
     upload: number;
     download: number;
     total: number;
     expire?: number;
   };
+}
+
+// ============================================================
+// 节点排序与自定义分组
+// ============================================================
+
+export type NodeSortKey = "default" | "name" | "latency" | "protocol";
+export type SortOrder = "asc" | "desc";
+
+export interface NodeSortConfig {
+  key: NodeSortKey;
+  order: SortOrder;
+}
+
+/** 自定义分组匹配规则类型 */
+export type GroupMatchType = "keyword" | "regex" | "protocol";
+
+/** 自定义分组规则定义 */
+export interface CustomGroupRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  match_type: GroupMatchType;
+  /** 关键词列表 (match_type=keyword 时生效) */
+  keywords: string[];
+  /** 正则表达式 (match_type=regex 时生效) */
+  pattern: string;
+  /** 协议类型 (match_type=protocol 时生效, 如 vmess, trojan) */
+  protocols: string[];
+  /** 排序优先级，数字越小越靠前 */
+  order: number;
 }
 
 export type SpeedTestStatus = "idle" | "testing_latency" | "testing_speed" | "done" | "error";

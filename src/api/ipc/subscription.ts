@@ -37,3 +37,14 @@ export async function refreshSubscription(
     SUBSCRIPTION_FETCH_TIMEOUT_MS
   );
 }
+
+/** 切换/激活订阅（切换当前使用的订阅配置） */
+export async function activateSubscription(
+  id: string
+): Promise<ApiResponse<Subscription>> {
+  return invokeWithTimeout<ApiResponse<Subscription>>(
+    "subscription_activate",
+    { id },
+    SUBSCRIPTION_FETCH_TIMEOUT_MS
+  );
+}

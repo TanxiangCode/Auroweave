@@ -111,6 +111,14 @@ export const useProxyStore = defineStore("proxy", () => {
       });
       groups.value = sorted;
 
+      // 清除过期的 nodeMap 缓存（订阅切换后节点会变化）
+      const currentTags = new Set(sorted.map(g => g.tag));
+      for (const tag of nodeMap.value.keys()) {
+        if (!currentTags.has(tag)) {
+          nodeMap.value.delete(tag);
+        }
+      }
+
       // 默认将初始活跃分组载入最近列表作为兜底展示
       const primary = sorted.find((g) => g.type === "selector");
       if (primary && Object.keys(groupUsage.value).length === 0) {
@@ -130,7 +138,14 @@ export const useProxyStore = defineStore("proxy", () => {
     }
   }
 
-async function selectNode(groupTag: string, nodeTag: string) {
+  /** 清空代理数据缓存（订阅切换后调用） */
+  function clearCache() {
+    groups.value = [];
+    nodeMap.value.clear();
+    latencyMap.value.clear();
+  }
+
+  async function selectNode(groupTag: string, nodeTag: string) {
 const group = groups.value.find((g) => g.tag === groupTag);
     if (group && group.type !== "selector") {
       return { success: false, error: "该策略组为自动或非手动选择类型，不支持手动切换节点", code: 400 };
@@ -182,10 +197,20 @@ if (res.success) {
     activeGroup,
     workingNodeName,
     recentGroups,
+    sortConfig,
+    customGroupRules,
+    latencyMap,
     fetchGroups,
     fetchGroupNodes,
+    clearCache,
     selectNode,
     changeProxyMode,
     recordGroupUsage,
+    loadCustomGroupRules,
+    addCustomGroupRule,
+    updateCustomGroupRule,
+    deleteCustomGroupRule,
+    applyCustomGroups,
+    sortNodes,
   };
 });

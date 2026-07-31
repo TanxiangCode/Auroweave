@@ -96,6 +96,7 @@ pub fn run() {
             commands::subscription::subscription_get_all,
             commands::subscription::subscription_delete,
             commands::subscription::subscription_refresh,
+            commands::subscription::subscription_activate,
             commands::settings::settings_get_all,
             commands::settings::settings_save,
             commands::settings::settings_inject_terminal_proxy,
