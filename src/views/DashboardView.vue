@@ -3,7 +3,7 @@
  * Dashboard 首页 — 环绕双翼镜像对称布局
  * 作者: TanXiang
  */
-import { onMounted, onUnmounted, computed, ref } from "vue";
+import { onMounted, onActivated, onDeactivated, computed, ref } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
@@ -262,25 +262,33 @@ console.error("轮询内核状态异常:", e);
   }
 }
 
+// 首次挂载：仅加载一次设置（KeepAlive 下 onMounted 只执行一次）
 onMounted(async () => {
   await settingsStore.fetchSettings();
+});
+
+// 每次激活（含首次）：同步代理状态、拉取分组并启动轮询定时器
+onActivated(async () => {
   proxyStore.fetchGroups();
-  
+
   try {
     await checkRunningStatus();
-    logInfo(`[DashboardView] 初始化核心运行状态: ${proxyActive.value ? '运行中' : '未运行'}`);
-} catch (e: unknown) {
-proxyActive.value = false;
-logError(`[DashboardView] 获取核心运行状态异常: ${e instanceof Error ? e.message : e}`);
+    logInfo(`[DashboardView] 激活同步核心运行状态: ${proxyActive.value ? '运行中' : '未运行'}`);
+  } catch (e: unknown) {
+    proxyActive.value = false;
+    logError(`[DashboardView] 获取核心运行状态异常: ${e instanceof Error ? e.message : e}`);
   }
 
   // 启动定时轮询，每 3 秒同步一次状态
+  if (statusTimer) clearInterval(statusTimer);
   statusTimer = setInterval(checkRunningStatus, 3000);
 });
 
-onUnmounted(() => {
+// 离开页面（deactivated）时停止轮询，避免后台空转浪费资源
+onDeactivated(() => {
   if (statusTimer) {
     clearInterval(statusTimer);
+    statusTimer = null;
   }
 });
 </script>

@@ -3,7 +3,7 @@
  * 安全审计视图（语义化安全看板 + 极客内核日志流）
  * 作者: TanXiang
  */
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onActivated, onDeactivated } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { subscribeConnections } from "@/api/clash-ws";
 import {
@@ -21,7 +21,12 @@ const auditRecords = ref<SemanticAuditRecord[]>([]);
 
 let unsub: (() => void) | null = null;
 
-onMounted(() => {
+// 仅首次挂载时执行一次的初始化
+onMounted(() => {});
+
+// 每次激活时建立 WebSocket 订阅
+onActivated(() => {
+  if (unsub) return; // 避免重复订阅
   unsub = subscribeConnections((payload) => {
     if (isPaused.value) return;
 
@@ -51,8 +56,12 @@ onMounted(() => {
   });
 });
 
-onUnmounted(() => {
-  if (unsub) unsub();
+// 离开页面时取消订阅，节省资源
+onDeactivated(() => {
+  if (unsub) {
+    unsub();
+    unsub = null;
+  }
 });
 </script>
 
