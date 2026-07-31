@@ -18,12 +18,6 @@ export const useSubscriptionStore = defineStore("subscription", () => {
   const importing = ref(false);
   const importError = ref<string | null>(null);
 
-  // ---- 计算属性 ----
-  /** 当前活跃的订阅 */
-  const activeSubscription = computed(() => {
-    return subscriptions.value.find((s) => s.is_active) || null;
-  });
-
   // ---- 动作 ----
   async function fetchAll() {
     const res = await getSubscriptions();
@@ -62,24 +56,13 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     return res;
   }
 
-  async function activateSub(id: string) {
-    const res = await activateSubscription(id);
-    if (res.success && res.data) {
-      const idx = subscriptions.value.findIndex((s) => s.id === id);
-      if (idx !== -1) subscriptions.value[idx] = res.data;
-    }
-    return res;
-  }
-
   return {
     subscriptions,
-    activeSubscription,
     importing,
     importError,
     fetchAll,
     importSub,
     removeSub,
     refreshSub,
-    activateSub,
   };
 });

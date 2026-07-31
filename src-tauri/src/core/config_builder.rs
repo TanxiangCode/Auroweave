@@ -90,8 +90,8 @@ impl ConfigBuilder {
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
         // 2b. Selector "proxy" 主出站（用户可手动切换的聚合选择器）
-        // 包含：auto(自动测速) → balance(负载均衡) → 各地区分组 → 所有节点
-        let mut proxy_group_list = vec!["auto".to_string(), "balance".to_string()];
+        // 包含：auto(自动测速) → 各地区分组 → 所有节点
+        let mut proxy_group_list = vec!["auto".to_string()];
         for (region, _) in &region_map {
             proxy_group_list.push(format!("{}-auto", region));
         }
@@ -113,18 +113,7 @@ impl ConfigBuilder {
             "idle_timeout": "30m"
         }));
 
-        // 2d. 全局 "balance" 负载均衡出站 (sing-box 1.14+ loadbalance)
-        // 注意: 必须使用 loadbalance 类型而非 urltest，否则只选最低延迟节点而非负载均衡
-        final_outbounds.push(json!({
-            "type": "loadbalance",
-            "tag": "balance",
-            "outbounds": node_tags,
-            "strategy": "round_robin",
-            "interval": "15m",
-            "idle_timeout": "30m"
-        }));
-
-        // 2e. 地区 urltest 出站（每个地区一个自动测速分组）
+        // 2d. 地区 urltest 出站（每个地区一个自动测速分组）
         for (region, tags) in region_map {
             final_outbounds.push(json!({
                 "type": "urltest",

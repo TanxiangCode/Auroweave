@@ -4,7 +4,7 @@
  */
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import type { ProxyGroup, ProxyNode } from "@/types";
+import type { ProxyGroup, ProxyNode, NodeSortConfig, CustomGroupRule } from "@/types";
 import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode, getProxyMode } from "@/api/ipc/proxy";
 import { useToast } from "@/composables/useToast";
 
@@ -17,6 +17,130 @@ export const useProxyStore = defineStore("proxy", () => {
   const proxyMode = ref<"global" | "rule" | "direct">("rule");
   const loading = ref(false);
   const error = ref<string | null>(null);
+
+  // ---- 排序配置 ----
+  const sortConfig = ref<NodeSortConfig>({ key: "default", order: "asc" });
+
+  // ---- 代理节点延迟缓存，用于按延迟排序 ----
+  const latencyMap = ref<Map<string, number>>(new Map());
+
+  // ---- 自定义分组规则（从 localStorage 持久化） ----
+  const customGroupRules = ref<CustomGroupRule[]>([]);
+
+  function loadCustomGroupRules() {
+    try {
+      const stored = localStorage.getItem("auroweave_custom_group_rules");
+      if (stored) {
+        customGroupRules.value = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error("加载自定义分组规则失败:", e);
+    }
+  }
+
+  function saveCustomGroupRules() {
+    localStorage.setItem("auroweave_custom_group_rules", JSON.stringify(customGroupRules.value));
+  }
+
+  function addCustomGroupRule(rule: Omit<CustomGroupRule, "id">) {
+    const newRule: CustomGroupRule = {
+      ...rule,
+      id: Date.now().toString(),
+    };
+    customGroupRules.value.push(newRule);
+    customGroupRules.value.sort((a, b) => a.order - b.order);
+    saveCustomGroupRules();
+  }
+
+  function updateCustomGroupRule(rule: CustomGroupRule) {
+    const idx = customGroupRules.value.findIndex((r) => r.id === rule.id);
+    if (idx !== -1) {
+      customGroupRules.value[idx] = rule;
+      customGroupRules.value.sort((a, b) => a.order - b.order);
+      saveCustomGroupRules();
+    }
+  }
+
+  function deleteCustomGroupRule(id: string) {
+    customGroupRules.value = customGroupRules.value.filter((r) => r.id !== id);
+    saveCustomGroupRules();
+  }
+
+  /** 根据自定义规则对所有节点进行分组返回 */
+  function applyCustomGroups(allNodes: ProxyNode[]): Map<string, ProxyNode[]> {
+    if (customGroupRules.value.length === 0) {
+      return new Map();
+    }
+
+    const result = new Map<string, ProxyNode[]>();
+    const matched = new Set<string>();
+
+    for (const rule of customGroupRules.value) {
+      if (!rule.enabled) continue;
+
+      const matchedNodes: ProxyNode[] = [];
+      for (const node of allNodes) {
+        if (matched.has(node.tag)) continue;
+
+        let is_match = false;
+        if (rule.match_type === "keyword") {
+          is_match = rule.keywords.some((kw) =>
+            node.tag.toLowerCase().includes(kw.toLowerCase())
+          );
+        } else if (rule.match_type === "regex") {
+          try {
+            const regex = new RegExp(rule.pattern, "i");
+            is_match = regex.test(node.tag);
+          } catch (e) {
+            console.warn("无效的正则表达式:", rule.pattern, e);
+          }
+        } else if (rule.match_type === "protocol") {
+          is_match = rule.protocols.includes(node.type.toLowerCase());
+        }
+
+        if (is_match) {
+          matchedNodes.push(node);
+          matched.add(node.tag);
+        }
+      }
+
+      if (matchedNodes.length > 0) {
+        result.set(rule.name, matchedNodes);
+      }
+    }
+
+    // 未匹配的节点放入"其他"分组
+    const unmatched = allNodes.filter((n) => !matched.has(n.tag));
+    if (unmatched.length > 0) {
+      result.set("其他", unmatched);
+    }
+
+    return result;
+  }
+
+  /** 对节点列表进行排序 */
+  function sortNodes(nodes: ProxyNode[]): ProxyNode[] {
+    if (sortConfig.value.key === "default") return nodes;
+
+    const sorted = [...nodes];
+    const { key, order } = sortConfig.value;
+    const multiplier = order === "asc" ? 1 : -1;
+
+    sorted.sort((a, b) => {
+      if (key === "name") {
+        return a.tag.localeCompare(b.tag, "zh-CN") * multiplier;
+      } else if (key === "protocol") {
+        return a.type.localeCompare(b.type) * multiplier;
+      } else if (key === "latency") {
+        const a_lat = latencyMap.value.get(a.tag) ?? Infinity;
+        const b_lat = latencyMap.value.get(b.tag) ?? Infinity;
+        return (a_lat - b_lat) * multiplier;
+      }
+      return 0;
+    });
+
+    return sorted;
+  }
 
   // 从 localStorage 获取使用计数，格式为 Record<string, number>
   const groupUsage = ref<Record<string, number>>(
@@ -97,8 +221,8 @@ export const useProxyStore = defineStore("proxy", () => {
     error.value = null;
     const res = await getProxyGroups();
     if (res.success && res.data) {
-      // 置顶排序逻辑：将 proxy、auto、balance 置顶，其他按字母表排序
-      const topTags = ["proxy", "auto", "balance"];
+      // 置顶排序逻辑：将 proxy、auto 置顶，其他按字母表排序
+      const topTags = ["proxy", "auto"];
       const sorted = [...res.data].sort((a, b) => {
         const indexA = topTags.indexOf(a.tag);
         const indexB = topTags.indexOf(b.tag);
@@ -146,12 +270,12 @@ export const useProxyStore = defineStore("proxy", () => {
   }
 
   async function selectNode(groupTag: string, nodeTag: string) {
-const group = groups.value.find((g) => g.tag === groupTag);
+    const group = groups.value.find((g) => g.tag === groupTag);
     if (group && group.type !== "selector") {
       return { success: false, error: "该策略组为自动或非手动选择类型，不支持手动切换节点", code: 400 };
     }
-const res = await selectGroupNode(groupTag, nodeTag);
-if (res.success) {
+    const res = await selectGroupNode(groupTag, nodeTag);
+    if (res.success) {
       // 乐观更新 groups 中的 now 字段（左侧分组列表的"当前节点"文字）
       const group = groups.value.find((g) => g.tag === groupTag);
       if (group) group.now = nodeTag;
