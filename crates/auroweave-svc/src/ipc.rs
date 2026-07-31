@@ -266,10 +266,10 @@ impl IpcServer {
         
         let key: &aes_gcm::Key<Aes256Gcm> = TOKEN_KEY.into();
         let cipher = Aes256Gcm::new(key);
-        let nonce = Nonce::from_slice(&content[..12]);
+        let nonce = Nonce::try_from(&content[..12]).unwrap();
         let ciphertext = &content[12..];
         
-        let plaintext = cipher.decrypt(nonce, ciphertext)
+        let plaintext = cipher.decrypt(&nonce, ciphertext)
             .map_err(|_| "Token 解密失败".to_string())?;
             
         let token_str = String::from_utf8(plaintext)

@@ -391,9 +391,9 @@ fn setup_token() -> Result<(), String> {
         
         let nonce_uuid = uuid::Uuid::new_v4();
         let nonce_bytes: [u8; 12] = nonce_uuid.as_bytes()[0..12].try_into().unwrap();
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::try_from(&nonce_bytes[..]).unwrap();
         
-        let ciphertext = cipher.encrypt(nonce, token.as_bytes())
+        let ciphertext = cipher.encrypt(&nonce, token.as_bytes())
             .map_err(|e| format!("加密 Token 失败: {:?}", e))?;
             
         let mut encrypted_data = nonce.to_vec();
@@ -443,24 +443,7 @@ let _ = std::fs::remove_file(token_path);
 Ok(())
 }
 
-/// 读取 Windows Machine GUID（HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid）
-/// 每台机器唯一标识，用于派生 IPC Token 加密密钥
-fn read_machine_guid() -> Option<String> {
-let output = std::process::Command::new("reg")
-    .args(["query", r"HKLM\SOFTWARE\Microsoft\Cryptography", "/v", "MachineGuid"])
-    .output()
-    .ok()?;
-let stdout = String::from_utf8_lossy(&output.stdout);
-for line in stdout.lines() {
-    if line.contains("MachineGuid") {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 3 {
-            return Some(parts[parts.len() - 1].to_string());
-        }
-    }
-}
-None
-}
+
 
 /// 创建静默提权计划任务
 ///

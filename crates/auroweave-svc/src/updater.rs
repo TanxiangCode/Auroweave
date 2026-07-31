@@ -19,8 +19,6 @@ use std::path::PathBuf;
 use std::fs;
 use std::process::Command;
 use tracing::{info, warn};
-use sha2::{Sha256, Digest};
-use std::io::Read;
 
 #[derive(serde::Deserialize)]
 struct Manifest {
@@ -30,24 +28,7 @@ struct Manifest {
     singbox_hash: String,
 }
 
-/// 计算文件的 SHA-256 哈希值（十六进制小写）
-///
-/// 使用 64KB 缓冲区读取文件，文件无法打开时返回空字符串。
-fn compute_sha256(path: &std::path::Path) -> String {
-    if let Ok(mut file) = fs::File::open(path) {
-        let mut hasher = Sha256::new();
-        // 扩大缓冲区至 64KB，显著提升大文件的磁盘 I/O 读取速度
-        let mut buffer = [0; 65536];
-        while let Ok(n) = file.read(&mut buffer) {
-            if n == 0 { break; }
-            hasher.update(&buffer[..n]);
-        }
-        let hash = hasher.finalize();
-        hash.iter().map(|b| format!("{:02x}", b)).collect::<String>()
-    } else {
-        String::new()
-    }
-}
+
 
 /// 检查并应用二进制更新
 ///
@@ -93,7 +74,7 @@ pub fn check_and_apply_updates() {
     // ---- 步骤3: 检查 sing-box.exe 是否需要更新 ----
     // 比对当前文件的 SHA-256 与 manifest 中的期望哈希
     let target_sb_path = bin_dir.join("sing-box.exe");
-    let current_sb_hash = compute_sha256(&target_sb_path);
+    let current_sb_hash = crate::utils::compute_sha256(&target_sb_path);
     if current_sb_hash != manifest.singbox_hash {
         info!("发现 sing-box.exe 更新 ({} != {})，正在覆盖...", current_sb_hash, manifest.singbox_hash);
         let src_sb = PathBuf::from(&manifest.singbox_path);
@@ -109,7 +90,7 @@ pub fn check_and_apply_updates() {
     // ---- 步骤4: 检查 AuroDaemon.exe 自身是否需要更新 ----
     // 若哈希不一致，执行自我更替：重命名 → 复制 → 拉起新进程 → 退出旧进程
     let target_svc_path = std::env::current_exe().unwrap_or_else(|_| bin_dir.join("AuroDaemon.exe"));
-    let current_svc_hash = compute_sha256(&target_svc_path);
+    let current_svc_hash = crate::utils::compute_sha256(&target_svc_path);
     if current_svc_hash != manifest.svc_hash {
         info!("发现 AuroDaemon.exe 更新，准备自我更替...");
         let src_svc = PathBuf::from(&manifest.svc_path);
