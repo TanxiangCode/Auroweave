@@ -11,6 +11,10 @@ use tauri::{AppHandle, State};
 use tracing::info;
 
 /// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试，使用 JoinSet 并发提速）
+///
+/// 返回 HashMap<String, u16>：
+/// - delay > 0：测速成功，值为延迟毫秒数
+/// - delay = 0：测速失败（超时或不可达），前端可区分「已测试但失败」与「未测试」
 #[tauri::command]
 pub async fn speedtest_run_latency(
     _group_tag: String,
@@ -24,18 +28,28 @@ pub async fn speedtest_run_latency(
         let client = clash_client.clone();
         join_set.spawn(async move {
             match client.get_node_delay(&tag, "https://www.gstatic.com/generate_204", 5000).await {
-                Ok(delay) => Some((tag, delay)),
-                Err(_) => None,
+                Ok(delay) => (tag, delay),
+                Err(e) => {
+                    log::warn!("[speedtest] 节点 [{}] 延迟测试失败: {}", tag, e);
+                    // 返回 0 表示已测试但失败，前端可区分「未测试」与「超时」
+                    (tag, 0u16)
+                }
             }
         });
     }
 
     let mut results = HashMap::new();
     while let Some(res) = join_set.join_next().await {
-        if let Ok(Some((tag, delay))) = res {
+        if let Ok((tag, delay)) = res {
             results.insert(tag, delay);
         }
     }
+
+    info!("延迟测试完成: 成功 {} / 失败 {} / 总计 {}",
+        results.values().filter(|&&d| d > 0).count(),
+        results.values().filter(|&&d| d == 0).count(),
+        results.len()
+    );
 
     Ok(ApiResponse::ok(results))
 }

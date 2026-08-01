@@ -11,6 +11,7 @@ import { useToast } from "@/composables/useToast";
 import { storeToRefs } from "pinia";
 import NodeCard from "@/components/proxy/NodeCard.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
+import type { ProxyNode, NodeSortConfig } from "@/types";
 
 const proxyStore = useProxyStore();
 const speedtestStore = useSpeedtestStore();
@@ -20,8 +21,23 @@ const route = useRoute();
 const { groups, loading } = storeToRefs(proxyStore);
 const selectedGroupTag = ref<string>("");
 const showConfirmModal = ref(false);
+const searchText = ref("");
+
+// 排序状态
+const sortConfig = ref<NodeSortConfig>({ key: "default", order: "asc" });
+const sortMenuOpen = ref(false);
+
+// 分组分类：内置系统分组 vs 自定义/地区分组
+const systemGroups = computed(() => {
+  return groups.value.filter(g => ["proxy", "auto"].includes(g.tag));
+});
+
+const regionGroups = computed(() => {
+  return groups.value.filter(g => !["proxy", "auto"].includes(g.tag) && g.type === "urltest");
+});
 
 onMounted(async () => {
+  proxyStore.loadCustomGroupRules();
   await proxyStore.fetchGroups();
   await speedtestStore.init();
   if (groups.value.length > 0) {
@@ -32,11 +48,50 @@ onMounted(async () => {
   }
 });
 
-const currentNodes = computed(() => {
-  const g = groups.value.find((x) => x.tag === selectedGroupTag.value);
-  return g ? g.proxies : [];
+// 当前分组的原始节点列表
+const rawNodes = computed<ProxyNode[]>(() => {
+  const nodes = proxyStore.nodeMap.get(selectedGroupTag.value);
+  return nodes ?? [];
 });
 
+// 经搜索过滤 + 排序后的节点列表
+const displayNodes = computed<ProxyNode[]>((() => {
+  let nodes = rawNodes.value;
+
+  // 搜索过滤
+  if (searchText.value.trim()) {
+    const kw = searchText.value.trim().toLowerCase();
+    nodes = nodes.filter(n => n.tag.toLowerCase().includes(kw) || n.type.toLowerCase().includes(kw));
+  }
+
+  // 排序
+  if (sortConfig.value.key === "default") return nodes;
+
+  const sorted = [...nodes];
+  const { key, order } = sortConfig.value;
+  const multiplier = order === "asc" ? 1 : -1;
+
+  sorted.sort((a, b) => {
+    if (key === "name") {
+      return a.tag.localeCompare(b.tag, "zh-CN") * multiplier;
+    } else if (key === "protocol") {
+      return a.type.localeCompare(b.type) * multiplier;
+    } else if (key === "latency") {
+      const aLat = speedtestStore.latencyMap[a.tag];
+      const bLat = speedtestStore.latencyMap[b.tag];
+      // 未测试的排最后
+      if (aLat === undefined && bLat === undefined) return 0;
+      if (aLat === undefined) return 1;
+      if (bLat === undefined) return -1;
+      return (aLat - bLat) * multiplier;
+    }
+    return 0;
+  });
+
+  return sorted;
+})());
+
+// 当前分组对象
 const currentGroup = computed(() => {
   return groups.value.find((x) => x.tag === selectedGroupTag.value);
 });
@@ -54,7 +109,6 @@ const routingGroupTags = computed(() => {
   tags.add(primary.tag);
 
   let currentTagName = primary.now;
-  // 限制循环次数防死循环，最多 10 层
   for (let i = 0; i < 10 && currentTagName; i++) {
     const nextGroup = groups.value.find((g) => g.tag === currentTagName);
     if (nextGroup) {
@@ -69,9 +123,8 @@ const routingGroupTags = computed(() => {
 
 async function handleGroupSelect(groupTag: string) {
   selectedGroupTag.value = groupTag;
+  searchText.value = "";
   await proxyStore.fetchGroupNodes(groupTag);
-
-  // 记录使用计数
   proxyStore.recordGroupUsage(groupTag);
 }
 
@@ -81,7 +134,6 @@ async function handleNodeSelect(nodeTag: string) {
     toast.warning("不支持切换", "该策略组为自动或非手动选择类型，无法手动指定节点。");
     return;
   }
-  console.log('handleNodeSelect')
   const res = await proxyStore.selectNode(selectedGroupTag.value, nodeTag);
   if (res && res.success) {
     toast.success("节点已切换", `当前出站: ${nodeTag}`);
@@ -94,7 +146,6 @@ async function handleRunLatency() {
   if (!selectedGroupTag.value) return;
   toast.info("正在并发测试延迟...");
   const nodes = proxyStore.nodeMap.get(selectedGroupTag.value) ?? [];
-  // 过滤：排除 selector、urltest 等策略组类型的子项，仅对具体的真实代理服务器进行延迟测试
   const tags = nodes
     .filter((n) => !["selector", "urltest", "fallback"].includes(n.type.toLowerCase()))
     .map((n) => n.tag);
@@ -105,7 +156,8 @@ async function handleRunLatency() {
   }
 
   await speedtestStore.testLatency(selectedGroupTag.value, tags);
-  toast.success("延迟测试完成");
+  const success = Object.values(speedtestStore.latencyMap).filter(v => v > 0).length;
+  toast.success("延迟测试完成", `成功 ${success} / 总计 ${tags.length}`);
 }
 
 async function handleSingleLatency(nodeTag: string) {
@@ -127,8 +179,26 @@ async function handleSingleSpeed(nodeTag: string) {
 async function confirmBatchSpeedTest() {
   showConfirmModal.value = false;
   if (!selectedGroupTag.value) return;
-  await speedtestStore.startBatchTest(selectedGroupTag.value, currentNodes.value);
+  await speedtestStore.startBatchTest(selectedGroupTag.value, rawNodes.value);
   toast.info("已启动批量串行测速任务");
+}
+
+const sortLabels: Record<string, string> = {
+  default: "默认排序",
+  name: "按名称",
+  latency: "按延迟",
+  protocol: "按协议",
+};
+
+function cycleSortKey() {
+  const keys: Array<NodeSortConfig["key"]> = ["default", "name", "latency", "protocol"];
+  const idx = keys.indexOf(sortConfig.value.key);
+  const nextKey = keys[(idx + 1) % keys.length];
+  sortConfig.value = { key: nextKey, order: "asc" };
+}
+
+function toggleSortOrder() {
+  sortConfig.value = { ...sortConfig.value, order: sortConfig.value.order === "asc" ? "desc" : "asc" };
 }
 </script>
 
@@ -172,13 +242,14 @@ async function confirmBatchSpeedTest() {
           </div>
         </div>
 
+        <!-- 系统分组 -->
         <span class="section-title">
           <SvgIcon name="folder" :size="12" style="margin-right: 4px;" />
-          策略组
+          主策略组
         </span>
         <div class="groups-list">
           <button
-            v-for="group in groups"
+            v-for="group in systemGroups"
             :key="group.tag"
             class="group-item"
             :class="{ 
@@ -203,29 +274,83 @@ async function confirmBatchSpeedTest() {
             </span>
           </button>
         </div>
+
+        <!-- 地区分组 -->
+        <template v-if="regionGroups.length > 0">
+          <span class="section-title">
+            <SvgIcon name="globe" :size="12" style="margin-right: 4px;" />
+            地区分组
+          </span>
+          <div class="groups-list">
+            <button
+              v-for="group in regionGroups"
+              :key="group.tag"
+              class="group-item"
+              :class="{ 
+                active: group.tag === selectedGroupTag,
+                'in-route': routingGroupTags.has(group.tag)
+              }"
+              @click="handleGroupSelect(group.tag)"
+            >
+              <div class="group-header-info">
+                <div class="group-name-wrapper">
+                  <span v-if="routingGroupTags.has(group.tag)" class="route-dot" title="当前活跃出口链路成员"></span>
+                  <span class="group-name">{{ group.tag }}</span>
+                </div>
+                <span class="group-badge">{{ group.type }}</span>
+              </div>
+              <span 
+                v-if="group.now" 
+                class="group-current-node"
+                :class="{ 'highlight-now': routingGroupTags.has(group.tag) }"
+              >
+                {{ group.now }}
+              </span>
+            </button>
+          </div>
+        </template>
       </aside>
 
       <!-- 右栏: 节点行列表 -->
       <main class="nodes-content glass-effect">
-        <div class="nodes-header">
-          <div class="header-left">
+        <!-- 工具栏：搜索 + 排序 + 操作 -->
+        <div class="nodes-toolbar">
+          <div class="toolbar-left">
             <h2>{{ selectedGroupTag }}</h2>
-            <span class="nodes-count" v-if="proxyStore.nodeMap.get(selectedGroupTag)">
-              共 {{ (proxyStore.nodeMap.get(selectedGroupTag) || []).length }} 个节点
+            <span class="nodes-count" v-if="rawNodes.length > 0">
+              共 {{ rawNodes.length }} 个节点
+              <span v-if="searchText.trim" class="filter-count">（已筛选 {{ displayNodes.length }}）</span>
             </span>
           </div>
-          <div class="action-buttons">
-            <button class="btn-action" @click="handleRunLatency">
+          <div class="toolbar-right">
+            <!-- 搜索框 -->
+            <div class="search-box">
+              <SvgIcon name="search" :size="12" class="search-icon" />
+              <input
+                v-model="searchText"
+                type="text"
+                placeholder="搜索节点..."
+                class="search-input"
+              />
+              <button v-if="searchText" class="search-clear" @click="searchText = ''">×</button>
+            </div>
+            <!-- 排序按钮 -->
+            <button class="btn-sort" @click="cycleSortKey" :title="'排序: ' + sortLabels[sortConfig.key]">
+              <SvgIcon name="sort" :size="12" style="margin-right: 4px;" />
+              {{ sortLabels[sortConfig.key] }}
+              <span class="sort-order" @click.stop="toggleSortOrder">{{ sortConfig.order === 'asc' ? '↑' : '↓' }}</span>
+            </button>
+            <!-- 操作按钮 -->
+            <button class="btn-action" @click="handleRunLatency" title="延迟测试">
               <SvgIcon name="bolt" :size="12" style="margin-right: 4px;" />
               测延迟
             </button>
-            <button class="btn-action" @click="showConfirmModal = true">
+            <button class="btn-action" @click="showConfirmModal = true" title="批量测速">
               <SvgIcon name="wifi" :size="12" style="margin-right: 4px;" />
               批量测速
             </button>
-            <button class="btn-action" @click="proxyStore.fetchGroups">
+            <button class="btn-action" @click="proxyStore.fetchGroups" title="刷新">
               <SvgIcon name="refresh" :size="12" style="margin-right: 4px;" />
-              刷新
             </button>
           </div>
         </div>
@@ -233,13 +358,16 @@ async function confirmBatchSpeedTest() {
         <div v-if="loading" class="state-tip">
           ⏳ 正在加载节点列表...
         </div>
-        <div v-else-if="!proxyStore.nodeMap.get(selectedGroupTag) || (proxyStore.nodeMap.get(selectedGroupTag) || []).length === 0" class="state-tip">
+        <div v-else-if="rawNodes.length === 0" class="state-tip">
           📭 暂无节点数据，请点击刷新
+        </div>
+        <div v-else-if="displayNodes.length === 0" class="state-tip">
+          🔍 没有匹配「{{ searchText }}」的节点
         </div>
         <div v-else class="nodes-scroll">
           <div class="nodes-list">
             <NodeCard
-              v-for="node in proxyStore.nodeMap.get(selectedGroupTag) ?? []"
+              v-for="node in displayNodes"
               :key="node.tag"
               :node-tag="node.tag"
               :node-type="node.type"
@@ -274,8 +402,8 @@ async function confirmBatchSpeedTest() {
           <h3>⚠️ 批量吞吐量测速确认</h3>
           <p>将对分组 <strong>「{{ selectedGroupTag }}」</strong> 的所有节点依次进行带宽测试。</p>
           <div class="estimate-box">
-            <div>⏱️ 预计总耗时: 约 {{ Math.ceil((proxyStore.nodeMap.get(selectedGroupTag) || []).length * speedtestStore.THROUGHPUT_TEST_DURATION_SEC / 60) }} 分钟</div>
-            <div>📉 预计流量消耗: 约 {{ Math.ceil((proxyStore.nodeMap.get(selectedGroupTag) || []).length * (speedtestStore.THROUGHPUT_TEST_CHUNK_BYTES / (1024 * 1024))) }} MB</div>
+            <div>⏱️ 预计总耗时: 约 {{ Math.ceil(rawNodes.length * speedtestStore.THROUGHPUT_TEST_DURATION_SEC / 60) }} 分钟</div>
+            <div>📉 预计流量消耗: 约 {{ Math.ceil(rawNodes.length * (speedtestStore.THROUGHPUT_TEST_CHUNK_BYTES / (1024 * 1024))) }} MB</div>
           </div>
           <p class="warning-tip">测速将以串行队列形式进行，以获得最准确的无干扰结果。</p>
           <div class="modal-actions">
@@ -389,15 +517,9 @@ async function confirmBatchSpeedTest() {
 }
 
 @keyframes pulse-green {
-  0% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7);
-  }
-  70% {
-    box-shadow: 0 0 0 6px rgba(52, 211, 153, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
-  }
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); }
+  70% { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
 }
 
 .group-name {
@@ -441,16 +563,24 @@ async function confirmBatchSpeedTest() {
   overflow: hidden;
 }
 
-.nodes-header {
+.nodes-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border-subtle);
   padding-bottom: 12px;
+  gap: 12px;
 }
 
-.header-left h2 {
+.toolbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.toolbar-left h2 {
   font-size: var(--text-md);
   font-weight: var(--weight-bold);
   color: var(--text-primary);
@@ -461,9 +591,101 @@ async function confirmBatchSpeedTest() {
   color: var(--text-tertiary);
 }
 
-.action-buttons {
+.filter-count {
+  color: var(--accent-cyan);
+}
+
+.toolbar-right {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 搜索框 */
+.search-box {
+  display: flex;
+  align-items: center;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  height: 30px;
+  gap: 4px;
+  transition: border-color var(--duration-fast);
+}
+
+.search-box:focus-within {
+  border-color: var(--accent-blue);
+}
+
+.search-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  width: 120px;
+}
+
+.search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  color: var(--text-primary);
+}
+
+/* 排序按钮 */
+.btn-sort {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  gap: 4px;
+}
+
+.btn-sort:hover {
+  background: var(--border-strong);
+  border-color: var(--border-accent);
+}
+
+.sort-order {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  background: var(--border-subtle);
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sort-order:hover {
+  background: var(--accent-blue-glow);
+  color: var(--accent-blue);
 }
 
 .btn-action {
@@ -557,10 +779,6 @@ async function confirmBatchSpeedTest() {
   justify-content: center;
   color: var(--text-secondary);
   gap: 12px;
-}
-
-.placeholder-icon {
-  font-size: var(--text-2xl);
 }
 
 .sub-tip {

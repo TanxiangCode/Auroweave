@@ -67,15 +67,15 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
       const res = await runLatencyTest(groupTag, nodeTags);
       const newResults = { ...latencyMap.value };
 
-      // 默认将本批次测速节点都标记为 -1 (超时失败)
-      nodeTags.forEach((tag) => {
-        newResults[tag] = -1;
-      });
-
       if (res.success && res.data) {
-        // 后端返回的有延迟的节点，用真实数据覆盖之
+        // 后端现在返回所有测试过的节点：delay > 0 为成功，delay = 0 为失败
         Object.entries(res.data).forEach(([tag, delay]) => {
           newResults[tag] = delay as number;
+        });
+      } else {
+        // IPC 层面失败（如 sing-box 未运行），所有节点标记为 -1
+        nodeTags.forEach((tag) => {
+          newResults[tag] = -1;
         });
       }
       
