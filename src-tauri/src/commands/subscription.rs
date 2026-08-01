@@ -163,6 +163,16 @@ pub async fn subscription_import(
 ) -> Result<ApiResponse<Subscription>, AppError> {
     log::info!("[subscription] 开始导入订阅: {} (URL: {})", name, url);
 
+    // 0. 重复检测：如果 URL 已存在则拒绝导入
+    let existing = load_subscriptions();
+    if existing.iter().any(|s| s.url == url) {
+        log::warn!("[subscription] 订阅 URL 已存在，拒绝重复导入: {}", url);
+        return Ok(ApiResponse::err(
+            AppError::Validation("该订阅链接已存在，请勿重复添加".to_string()),
+            409,
+        ));
+    }
+
     // 1+2. 拉取并解析
     let (format, outbounds) = match fetch_and_parse(&url).await {
         Ok(res) => res,
@@ -195,8 +205,8 @@ pub async fn subscription_import(
         }
     };
 
-    // 6. 持久化：将所有旧订阅设为非活跃，新订阅设为活跃
-    let mut all_subs = load_subscriptions();
+    // 6. 持久化：复用已加载的订阅列表，将所有旧订阅设为非活跃，新订阅设为活跃
+    let mut all_subs = existing;
     for s in all_subs.iter_mut() {
         s.is_active = false;
     }

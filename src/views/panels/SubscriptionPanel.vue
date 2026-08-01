@@ -41,7 +41,7 @@
                 <span v-if="sub.is_active" class="active-badge">当前使用</span>
               </div>
               <div class="sub-meta">
-                <span class="sub-format">{{ sub.format.toUpperCase() }}</span>
+                <span class="sub-format">{{ (sub.format || 'unknown').toUpperCase() }}</span>
                 <span class="sub-nodes">{{ sub.node_count || 0 }} 节点</span>
                 <span v-if="sub.last_updated" class="sub-time">
                   更新于 {{ formatTime(sub.last_updated) }}
@@ -83,11 +83,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
+import { storeToRefs } from "pinia";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useSubscriptionStore } from "@/stores/subscription.store";
 import { useProxyStore } from "@/stores/proxy.store";
-import { importSubscription } from "@/api/ipc/subscription";
 import { useToast } from "@/composables/useToast";
 
 const settingsStore = useSettingsStore();
@@ -95,12 +95,18 @@ const subStore = useSubscriptionStore();
 const proxyStore = useProxyStore();
 const toast = useToast();
 
-const subName = ref("SKYLUMO加速器");
-const subUrl = ref("https://skylumo.com/api/v1/client/subscribe?token=REDACTED");
+const subName = ref("");
+const subUrl = ref("");
 const importing = ref(false);
 const operating = ref<string | null>(null);
 
-const { subscriptions } = subStore;
+// 使用 storeToRefs 确保解构后的状态保持响应式
+const { subscriptions } = storeToRefs(subStore);
+
+// 面板挂载时加载已保存的订阅列表
+onMounted(() => {
+  subStore.fetchAll();
+});
 
 async function save() {
   await settingsStore.updateSettings(settingsStore.settings);
@@ -112,10 +118,17 @@ async function handleImport() {
     toast.warning("请输入订阅别名与链接");
     return;
   }
+
+  // 重复订阅检测：检查 URL 是否已存在
+  if (subStore.hasUrl(subUrl.value.trim())) {
+    toast.warning("订阅已存在", "该订阅链接已导入，请勿重复添加");
+    return;
+  }
+
   importing.value = true;
   toast.info("正在网络拉取并解析订阅...", subName.value);
 
-  const res = await importSubscription(
+  const res = await subStore.importSub(
     subName.value.trim(),
     subUrl.value.trim(),
     settingsStore.settings.auto_group_on_import
@@ -126,7 +139,6 @@ async function handleImport() {
     toast.success("订阅导入成功！", `解析出 ${res.data?.node_count || 0} 个节点并拉起服务`);
     subName.value = "";
     subUrl.value = "";
-    await subStore.fetchAll();
   } else {
     toast.error("订阅导入失败", res.error);
   }
@@ -151,7 +163,7 @@ async function handleRefresh(id: string) {
   const res = await subStore.refreshSub(id);
   if (res.success) {
     toast.success("订阅刷新成功", `解析出 ${res.data?.node_count || 0} 个节点`);
-  // 刷新后清空代理数据缓存并重新拉取
+    // 刷新后清空代理数据缓存并重新拉取
     proxyStore.clearCache();
     await proxyStore.fetchGroups();
   } else {
@@ -161,7 +173,7 @@ async function handleRefresh(id: string) {
 }
 
 async function handleDelete(id: string) {
-  const sub = subscriptions.find(s => s.id === id);
+  const sub = subscriptions.value.find(s => s.id === id);
   if (!sub) return;
 
   if (sub.is_active) {
