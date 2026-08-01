@@ -6,7 +6,7 @@ import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
   WS_RECONNECT_MAX_RETRIES,
-  WS_MAX_CONSECUTIVE_FAILURES = 2,
+  WS_MAX_CONSECUTIVE_FAILURES,
 } from "@/constants";
 import type { TrafficSnapshot, Connection } from "@/types";
 import { useSettingsStore } from "@/stores/settings.store";
