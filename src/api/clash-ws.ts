@@ -30,10 +30,10 @@ class WsClient<T> {
     this.options = options;
     // 启动定时器，每分钟重置失败计数器（允许恢复尝试）
     setInterval(() => {
-      if (this.consecutiveFailures > 0 && Date.now() - this.consecutiveFailuresResetTime > 60000) {
-        log::warn!("[WebSocket] 重置失败计数器: {} -> 0", this.consecutiveFailures);
-        this.consecutiveFailures = 0;
-      }
+        if (this.consecutiveFailures > 0 && Date.now() - this.consecutiveFailuresResetTime > 60000) {
+          console.warn("[WebSocket] 重置失败计数器:", this.consecutiveFailures, "-> 0");
+          this.consecutiveFailures = 0;
+        }
     }, 60000);
 
   connect(): void {
