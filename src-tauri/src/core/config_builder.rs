@@ -9,8 +9,7 @@
 /// 配置生成流程：
 /// 1. **节点处理**：遍历所有 ParsedOutbound，提取 tag 列表并按地区自动分组
 ///    - 每个地区创建一个 `urltest` 类型出站（自动测速选最优节点）
-///    - 创建全局 `balance` 出站（`loadbalance` 类型，负载均衡所有节点）
-///    - 创建 `Auto` 选择器出站（包含所有地区分组 + balance）
+///    - 创建全局 `Auto` 选择器出站（包含所有地区分组 + 所有节点）
 /// 2. **Inbounds**：创建 Mixed 入站（HTTP+SOCKS5 混合代理），监听 mixed_port
 ///    - 若启用 TUN，额外创建 TUN 虚拟网卡入站
 /// 3. **DNS 配置**：配置国内/国外 DNS 分流，使用 fake-ip 模式
@@ -30,6 +29,10 @@ pub struct ConfigBuilder {
     outbounds: Vec<ParsedOutbound>,
     mixed_port: u16,
     clash_api_port: u16,
+    /// geosite-cn.srs 本地文件路径（如果存在则使用 type:local，否则跳过 rule-set）
+    geosite_cn_path: Option<String>,
+    /// geoip-cn.srs 本地文件路径
+    geoip_cn_path: Option<String>,
 }
 
 impl ConfigBuilder {
@@ -39,6 +42,8 @@ impl ConfigBuilder {
             outbounds,
             mixed_port: 7890,
             clash_api_port: 9090,
+            geosite_cn_path: None,
+            geoip_cn_path: None,
         }
     }
 
@@ -53,13 +58,14 @@ impl ConfigBuilder {
         self
     }
 
+    /// 设置本地 rule-set 文件路径（如果文件存在则使用 type:local 引用）
+    pub fn with_local_rule_sets(mut self, geosite_cn: Option<String>, geoip_cn: Option<String>) -> Self {
+        self.geosite_cn_path = geosite_cn;
+        self.geoip_cn_path = geoip_cn;
+        self
+    }
+
     /// 生成完整的 sing-box 1.11+ / 1.13+ / 1.14+ 兼容 config.json
-    ///
-    /// 配置构建流程：
-    /// 1. 节点遍历：提取 tag 列表、原始 JSON，并按地区分组
-    /// 2. 出站构建：direct/block 基础出站 → proxy 选择器 → auto/balance → 地区分组 → 节点原始出站
-    /// 3. DNS 规则：提取节点服务器域名 → 国内域名走 local DNS → 其余走 remote DNS
-    /// 4. 组装最终 JSON：log + dns + inbounds + outbounds + route + experimental
     pub fn build(&self) -> Result<Value, AppError> {
         if self.outbounds.is_empty() {
             return Err(AppError::Config("没有可用节点，无法生成 config.json".to_string()));
@@ -68,29 +74,24 @@ impl ConfigBuilder {
         // ---- 阶段1: 遍历节点，提取 tag 和原始 JSON，按地区分组 ----
         let mut node_tags = Vec::new();
         let mut raw_outbounds = Vec::new();
-
-        // 地区分组映射: region -> [tag1, tag2, ...]
         let mut region_map: HashMap<String, Vec<String>> = HashMap::new();
 
         for out in &self.outbounds {
             node_tags.push(out.tag.clone());
             raw_outbounds.push(out.raw_json.clone());
-
             let region = detect_region(&out.tag);
             region_map.entry(region).or_default().push(out.tag.clone());
         }
 
         let mut final_outbounds = Vec::new();
 
-        // ---- 阶段2: 构建出站列表（按优先级顺序） ----
-        // 出站顺序决定了 selector 中的可选项排列，也影响 sing-box 内部出站索引
+        // ---- 阶段2: 构建出站列表 ----
 
-        // 2a. Direct 与 Block 基础出站（直连和阻断，必须存在）
+        // 2a. Direct 与 Block 基础出站
         final_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
-        // 2b. Selector "proxy" 主出站（用户可手动切换的聚合选择器）
-        // 包含：auto(自动测速) → 各地区分组 → 所有节点
+        // 2b. Selector "proxy" 主出站
         let mut proxy_group_list = vec!["auto".to_string()];
         for (region, _) in &region_map {
             proxy_group_list.push(format!("{}-auto", region));
@@ -103,7 +104,7 @@ impl ConfigBuilder {
             "outbounds": proxy_group_list
         }));
 
-        // 2c. 全局 "auto" urltest 出站（自动测速选最优节点，覆盖所有节点）
+        // 2c. 全局 "auto" urltest 出站
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "auto",
@@ -113,7 +114,7 @@ impl ConfigBuilder {
             "idle_timeout": "30m"
         }));
 
-        // 2d. 地区 urltest 出站（每个地区一个自动测速分组）
+        // 2d. 地区 urltest 出站
         for (region, tags) in region_map {
             final_outbounds.push(json!({
                 "type": "urltest",
@@ -125,14 +126,11 @@ impl ConfigBuilder {
             }));
         }
 
-        // 2f. 节点具体出站（原始解析得到的 JSON，放在最后）
+        // 2e. 节点具体出站
         final_outbounds.extend(raw_outbounds);
 
         // ---- 阶段3: 构建 DNS 规则 ----
-        // 提取所有节点的服务器域名，确保这些域名走 local DNS 解析
-        // 避免代理节点的服务器域名被 remote DNS 解析导致死循环
         let mut server_domains = Vec::new();
-        // 过滤掉 IP 地址和空字符串，只保留域名
         for out in &self.outbounds {
             if let Some(server) = out.raw_json.get("server").and_then(|s| s.as_str()) {
                 if server.parse::<std::net::IpAddr>().is_err() && !server.is_empty() {
@@ -140,57 +138,102 @@ impl ConfigBuilder {
                 }
             }
         }
-        // 排序去重
         server_domains.sort();
         server_domains.dedup();
 
-        // DNS 规则构建：
-        // 规则1（如有）: 节点服务器域名 → local DNS（防止代理域名被 remote DNS 解析导致死循环）
-        // 规则2: geosite-cn 域名 → local DNS（国内域名走国内 DNS）
-        // 未匹配的域名 → 走 final: remote DNS（国外域名走代理 DNS）
         let mut dns_rules = if server_domains.is_empty() {
             vec![]
         } else {
-            vec![json!({
-                "domain": server_domains,
-                "server": "local"
-            })]
+            vec![json!({ "domain": server_domains, "server": "local" })]
         };
 
-        dns_rules.push(json!({
-            "rule_set": "geosite-cn",
-            "server": "local"
-        }));
+        // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则
+        if self.geosite_cn_path.is_some() {
+            dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
+        }
 
-        let dns_rules = json!(dns_rules);
+        // ---- 阶段4: 组装路由 ----
+        // 检查本地 rule-set 文件是否存在
+        let has_geosite = self.geosite_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
+        let has_geoip = self.geoip_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
 
-        // ---- 阶段4: 组装最终 JSON 配置 ----
-        // 结构: log → dns → inbounds → outbounds → route → experimental
+        let mut rule_set_config = Vec::new();
+        let mut route_rules = json!([
+            { "action": "sniff" },
+            { "protocol": "dns", "action": "hijack-dns" },
+            { "ip_is_private": true, "outbound": "direct" }
+        ]);
+
+        if has_geosite {
+            rule_set_config.push(json!({
+                "tag": "geosite-cn",
+                "type": "local",
+                "format": "binary",
+                "path": self.geosite_cn_path.as_ref().unwrap()
+            }));
+            // 添加 geosite-cn 直连规则
+            if let Some(rules) = route_rules.as_array_mut() {
+                rules.push(json!({ "rule_set": ["geosite-cn"], "outbound": "direct" }));
+            }
+            if has_geoip {
+                rule_set_config.push(json!({
+                    "tag": "geoip-cn",
+                    "type": "local",
+                    "format": "binary",
+                    "path": self.geoip_cn_path.as_ref().unwrap()
+                }));
+                // 合并 geosite-cn + geoip-cn 直连规则
+                if let Some(rules) = route_rules.as_array_mut() {
+                    let last = rules.pop().unwrap();
+                    // 替换为合并规则
+                    rules.push(json!({ "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" }));
+                }
+            }
+        } else {
+            log::warn!("[config] geosite-cn.srs 本地文件不存在，跳过国内域名直连规则，所有流量走代理");
+        }
+
+        let route = if rule_set_config.is_empty() {
+            json!({
+                "default_domain_resolver": "local",
+                "rules": route_rules,
+                "final": "proxy",
+                "auto_detect_interface": true
+            })
+        } else {
+            json!({
+                "default_domain_resolver": "local",
+                "rule_set": rule_set_config,
+                "rules": route_rules,
+                "final": "proxy",
+                "auto_detect_interface": true
+            })
+        };
+
+        // ---- 阶段5: 组装最终 JSON ----
         let config = json!({
             "log": {
                 "level": "info",
                 "timestamp": true
             },
             "dns": {
-                // DNS 服务器: remote(8.8.8.8 经代理) + local(223.5.5.5 直连)
                 "servers": [
-                      {
+                    {
                         "detour": "proxy",
                         "server": "8.8.8.8",
                         "tag": "remote",
                         "type": "udp"
-                      },
-                      {
+                    },
+                    {
                         "server": "223.5.5.5",
                         "tag": "local",
                         "type": "udp"
-                      }
+                    }
                 ],
                 "rules": dns_rules,
                 "final": "remote"
             },
             "inbounds": [
-                // Mixed 入站: HTTP + SOCKS5 混合代理监听
                 {
                     "type": "mixed",
                     "tag": "mixed-in",
@@ -199,45 +242,14 @@ impl ConfigBuilder {
                 }
             ],
             "outbounds": final_outbounds,
-            "route": {
-                "default_domain_resolver": "local",
-                // RuleSet: geosite-cn 和 geoip-cn（远程二进制格式，经代理下载）
-                "rule_set": [
-                    {
-                        "tag": "geosite-cn",
-                        "type": "remote",
-                        "format": "binary",
-                        "url": "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
-                        "download_detour": "proxy"
-                    },
-                    {
-                        "tag": "geoip-cn",
-                        "type": "remote",
-                        "format": "binary",
-                        "url": "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
-                        "download_detour": "proxy"
-                    }
-                ],
-                // 路由规则按顺序匹配:
-                // 1. sniff: 嗅探协议（从 TLS ClientHello / HTTP Host 提取域名）
-                // 2. hijack-dns: DNS 请求劫持到 sing-box 内部 DNS 模块
-                // 3. ip_is_private: 私有网络地址直连（局域网不走代理）
-                // 4. geosite-cn + geoip-cn: 国内域名和 IP 直连
-                // 5. final: proxy（其余全部走代理）
-                "rules": [
-                    { "action": "sniff" },
-                    { "protocol": "dns", "action": "hijack-dns" },
-                    { "ip_is_private": true, "outbound": "direct" },
-                    { "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" }
-                ],
-                "final": "proxy",
-                "auto_detect_interface": true
-            },
+            "route": route,
             "experimental": {
-                // ClashAPI 外部控制器: 供前端实时查询延迟、切换节点、流量统计
                 "clash_api": {
                     "external_controller": format!("127.0.0.1:{}", self.clash_api_port),
                     "secret": ""
+                },
+                "cache_file": {
+                    "enabled": true
                 }
             }
         });
@@ -247,15 +259,9 @@ impl ConfigBuilder {
 }
 
 /// 识别节点 tag 属于哪个地区 (HK, JP, US, TW, SG, KR, OTHER)
-///
-/// 匹配策略（按优先级）：
-/// 1. 国旗 emoji 直接匹配
-/// 2. 中文关键词精确匹配（避免子串误匹配）
-/// 3. 英文缩写使用「单词边界」匹配，避免 "us" 误匹配 "Russia" 等
 fn detect_region(tag: &str) -> String {
     let lower = tag.to_lowercase();
 
-    // emoji 优先匹配
     if tag.contains("🇭🇰") { return "HK".to_string(); }
     if tag.contains("🇯🇵") { return "JP".to_string(); }
     if tag.contains("🇺🇸") { return "US".to_string(); }
@@ -263,7 +269,6 @@ fn detect_region(tag: &str) -> String {
     if tag.contains("🇸🇬") { return "SG".to_string(); }
     if tag.contains("🇰🇷") { return "KR".to_string(); }
 
-    // 中文关键词
     if lower.contains("香港") { return "HK".to_string(); }
     if lower.contains("日本") { return "JP".to_string(); }
     if lower.contains("美国") || lower.contains("美國") { return "US".to_string(); }
@@ -271,8 +276,6 @@ fn detect_region(tag: &str) -> String {
     if lower.contains("新加坡") { return "SG".to_string(); }
     if lower.contains("韩国") || lower.contains("韓國") { return "KR".to_string(); }
 
-    // 英文缩写使用单词边界匹配，避免 "us" 匹配 "Russia"
-    // 分隔符包括空格、标点、连字符等
     let tokens = tokenize_tag(&lower);
     if tokens.iter().any(|&t| t == "hk" || t == "hongkong" || t == "hong") { return "HK".to_string(); }
     if tokens.iter().any(|&t| t == "jp" || t == "japan") { return "JP".to_string(); }
@@ -284,8 +287,6 @@ fn detect_region(tag: &str) -> String {
     "OTHER".to_string()
 }
 
-/// 将节点 tag 拆分为小写单词列表用于精确匹配
-/// 分隔符: 空格、连字符、下划线、方括号、管道符、各种标点
 fn tokenize_tag(s: &str) -> Vec<&str> {
     s.split(|c: char| !c.is_alphanumeric())
         .filter(|s| !s.is_empty())

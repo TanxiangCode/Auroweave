@@ -75,6 +75,56 @@ async fn fetch_and_parse(url: &str) -> Result<(SubscriptionFormat, Vec<crate::co
     parse_subscription_content(&content)
 }
 
+/// 下载 rule-set .srs 文件到本地缓存目录
+///
+/// 如果文件已存在且大小 > 0，直接返回路径（跳过下载）。
+/// 否则尝试直连下载（不经代理），失败则返回 None（配置降级为无 rule-set）。
+async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str) -> Option<String> {
+    let local_path = config_dir.join(format!("{}.srs", name));
+
+    if local_path.exists() {
+        if let Ok(meta) = std::fs::metadata(&local_path) {
+            if meta.len() > 0 {
+                return Some(local_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    log::info!("[subscription] 下载 rule-set: {} from {}", name, url);
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .ok()?;
+
+    match client.get(url).send().await {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                log::warn!("[subscription] 下载 {} 失败: HTTP {}", name, resp.status());
+                return None;
+            }
+            match resp.bytes().await {
+                Ok(bytes) if !bytes.is_empty() => {
+                    if let Err(e) = std::fs::write(&local_path, &bytes) {
+                        log::warn!("[subscription] 写入 {} 文件失败: {}", name, e);
+                        return None;
+                    }
+                    log::info!("[subscription] rule-set {} 下载成功 ({} bytes)", name, bytes.len());
+                    Some(local_path.to_string_lossy().to_string())
+                }
+                _ => {
+                    log::warn!("[subscription] 下载 {} 返回空内容", name);
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("[subscription] 下载 {} 网络错误: {}（将使用无 rule-set 降级配置）", name, e);
+            None
+        }
+    }
+}
+
 /// 内部核心函数：根据 outbounds 生成 config.json 并热重载/拉起 sing-box
 async fn build_and_apply_config(
     app_handle: &AppHandle,
@@ -90,8 +140,22 @@ async fn build_and_apply_config(
     let config_dir = crate::get_config_dir();
     let _ = fs::create_dir_all(&config_dir);
 
+    // 尝试下载 rule-set .srs 文件到本地（直连，不经代理）
+    let geosite_cn_path = download_rule_set(
+        &config_dir,
+        "geosite-cn",
+        "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
+    ).await;
+    let geoip_cn_path = download_rule_set(
+        &config_dir,
+        "geoip-cn",
+        "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
+    ).await;
+
     let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(app_handle);
-    let config_builder = ConfigBuilder::new(outbounds).with_ports(mixed_port, clash_api_port);
+    let config_builder = ConfigBuilder::new(outbounds)
+        .with_ports(mixed_port, clash_api_port)
+        .with_local_rule_sets(geosite_cn_path, geoip_cn_path);
     let config_json = config_builder.build()?;
 
     let config_path = config_dir.join("config.json");
@@ -145,14 +209,6 @@ async fn build_and_apply_config(
 }
 
 /// 导入订阅并生成/热重载/拉起 sing-box，同时将其设为活跃订阅
-///
-/// 完整流程:
-/// 1. HTTP 拉取订阅内容 (15s 超时)
-/// 2. 自动识别格式 (Singbox JSON / Clash YAML / V2ray Base64)
-/// 3. ConfigBuilder 生成 config.json (备份旧配置)
-/// 4. 尝试 ClashAPI 热重载 → 失败则拉起子进程 → 再失败则回滚备份
-/// 5. 根据 proxy_mode 同步系统代理状态
-/// 6. 持久化订阅元信息到 subscriptions.json，并标记为活跃
 #[tauri::command]
 pub async fn subscription_import(
     app_handle: AppHandle,
@@ -167,7 +223,6 @@ pub async fn subscription_import(
     let existing = load_subscriptions();
     if let Some(existing_sub) = existing.iter().find(|s| s.url == url) {
         log::warn!("[subscription] 订阅 URL 已存在: {} (ID: {})", existing_sub.name, existing_sub.id);
-        // 返回已存在的订阅的克隆，前端根据 is_active 决定是否需要刷新或直接覆盖
         return Ok(ApiResponse::ok(existing_sub.clone()));
     }
 
@@ -255,7 +310,7 @@ pub async fn subscription_delete_all() -> ApiResponse<()> {
     log::info!("[subscription] 删除所有订阅");
 
     if !get_subscriptions_path().exists() {
-        return ApiResponse::ok(()); // 文件不存在，无需删除
+        return ApiResponse::ok(());
     }
 
     if let Err(e) = fs::remove_file(get_subscriptions_path()) {
@@ -281,7 +336,6 @@ pub async fn subscription_refresh(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    // 拉取并解析
     let (format, outbounds) = match fetch_and_parse(&sub.url).await {
         Ok(res) => res,
         Err(e) => return Ok(ApiResponse::err(e, 400)),
@@ -300,7 +354,6 @@ pub async fn subscription_refresh(
         Err(e) => return Ok(ApiResponse::err(e, 500)),
     };
 
-    // 更新持久化记录（保持原 ID 不变）
     for s in all_subs.iter_mut() {
         if s.id == id {
             s.last_updated = Some(chrono::Utc::now().timestamp_millis());
@@ -322,9 +375,6 @@ pub async fn subscription_refresh(
 }
 
 /// 切换（激活）订阅 — 重新拉取目标订阅 URL 并替换当前运行配置
-///
-/// 流程与 refresh 一致，但语义上用于在多个已导入订阅间切换。
-/// 切换后所有其他订阅自动标记为非活跃。
 #[tauri::command]
 pub async fn subscription_activate(
     app_handle: AppHandle,
@@ -339,7 +389,6 @@ pub async fn subscription_activate(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    // 拉取并解析
     let (format, outbounds) = match fetch_and_parse(&sub.url).await {
         Ok(res) => res,
         Err(e) => {
@@ -364,7 +413,6 @@ pub async fn subscription_activate(
         }
     };
 
-    // 更新活跃状态
     for s in all_subs.iter_mut() {
         if s.id == id {
             s.is_active = true;
