@@ -24,12 +24,7 @@
 
       <!-- 已导入订阅列表 -->
       <div class="subscriptions-card glass-effect">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <h3>📋 已导入订阅 ({{ subscriptions.length }})</h3>
-          <button class="btn-link-small" @click="handleDeleteAll" title="清空所有订阅">
-            🗑️ 清空全部
-          </button>
-        </div>
+        <h3>📋 已导入订阅 ({{ subscriptions.length }})</h3>
         <div v-if="subscriptions.length === 0" class="empty-tip">
           尚未导入任何订阅，请在上方添加
         </div>
@@ -188,11 +183,6 @@ async function handleDelete(id: string) {
   const sub = subscriptions.value.find(s => s.id === id);
   if (!sub) return;
 
-  if (sub.is_active) {
-    toast.warning("无法删除", "请先切换到其他订阅，然后再删除此订阅");
-    return;
-  }
-
   if (!confirm(`确定要删除订阅「${sub.name}」吗？此操作不可恢复。`)) {
     return;
   }
@@ -200,25 +190,12 @@ async function handleDelete(id: string) {
   const res = await subStore.removeSub(id);
   if (res.success) {
     toast.success("订阅已删除");
+    // 如果删除的是活跃订阅，清空代理数据缓存
+    if (sub.is_active) {
+      proxyStore.clearCache();
+    }
   } else {
     toast.error("删除失败", res.error);
-  }
-}
-
-async function handleDeleteAll() {
-  if (subscriptions.value.length === 0) {
-    toast.info("当前没有可删除的订阅");
-    return;
-  }
-
-  if (!confirm(`确定要删除全部 ${subscriptions.value.length} 个订阅吗？此操作不可恢复。`)) {
-    return;
-  }
-
-  const res = await subStore.removeAllSubs();
-  // 在 deleteAllSubs 中已经显示了 toast
-  if (res.success && !res.data) {
-    toast.success("订阅列表已清空");
   }
 }
 

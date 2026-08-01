@@ -253,16 +253,15 @@ pub async fn subscription_delete(id: String) -> ApiResponse<()> {
 #[tauri::command]
 pub async fn subscription_delete_all() -> ApiResponse<()> {
     log::info!("[subscription] 删除所有订阅");
-    
+
     if !get_subscriptions_path().exists() {
         return ApiResponse::ok(()); // 文件不存在，无需删除
     }
-    
-    if let Err(e) = fs::remove_file(get_subscriptions_path())
-        .map_err(|e| AppError::Io(format!("清空订阅列表失败: {}", e)))? {
+
+    if let Err(e) = fs::remove_file(get_subscriptions_path()) {
         return ApiResponse::err(format!("清空订阅列表失败: {}", e), 500);
     }
-    
+
     log::info!("[subscription] 所有订阅已清空");
     ApiResponse::ok(())
 }
