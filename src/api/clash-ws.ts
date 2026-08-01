@@ -5,7 +5,6 @@
 import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
-  WS_RECONNECT_MAX_RETRIES,
   WS_MAX_CONSECUTIVE_FAILURES,
 } from "@/constants";
 import type { TrafficSnapshot, Connection } from "@/types";
@@ -22,19 +21,24 @@ interface WsClientOptions<T> {
 class WsClient<T> {
   private ws: WebSocket | null = null;
   private retryCount = 0;
+  private consecutiveFailures = 0;
+  private consecutiveFailuresResetTime = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  private resetTimer: ReturnType<typeof setInterval> | null = null;
   private readonly options: WsClientOptions<T>;
 
   constructor(options: WsClientOptions<T>) {
     this.options = options;
-    // 启动定时器，每分钟重置失败计数器（允许恢复尝试）
-    setInterval(() => {
-        if (this.consecutiveFailures > 0 && Date.now() - this.consecutiveFailuresResetTime > 60000) {
-          console.warn("[WebSocket] 重置失败计数器:", this.consecutiveFailures, "-> 0");
-          this.consecutiveFailures = 0;
-        }
+    // 启动定时器，每分钟检查并重置失败计数器（允许恢复尝试）
+    this.resetTimer = setInterval(() => {
+      if (this.consecutiveFailures > 0 && Date.now() - this.consecutiveFailuresResetTime > 60000) {
+        console.warn("[WebSocket] 重置失败计数器:", this.consecutiveFailures, "-> 0");
+        this.consecutiveFailures = 0;
+        this.stopped = false;
+      }
     }, 60000);
+  }
 
   connect(): void {
     if (this.stopped) return;
@@ -47,6 +51,7 @@ class WsClient<T> {
 
       ws.onopen = () => {
         this.retryCount = 0;
+        this.consecutiveFailures = 0;
         this.options.onStatusChange?.("connected");
       };
 
@@ -76,23 +81,15 @@ class WsClient<T> {
   disconnect(): void {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.resetTimer) clearInterval(this.resetTimer);
     this.ws?.close();
     this.ws = null;
-    // 重置失败计数器（允许恢复尝试）
     this.consecutiveFailures = 0;
   }
 
   resume(): void {
     this.stopped = false;
-    // 重置失败计数器和状态，允许恢复尝试
     this.consecutiveFailures = 0;
-    if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
-      this.connect();
-    }
-  }
-
-  resume(): void {
-    this.stopped = false;
     if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
       this.connect();
     }
@@ -106,7 +103,6 @@ class WsClient<T> {
       this.options.onStatusChange?.("error");
       return;
     }
-    // 重置失败计数器
     const delay = Math.min(
       WS_RECONNECT_DELAY_MS * Math.pow(2, this.retryCount),
       WS_RECONNECT_MAX_DELAY_MS
@@ -186,7 +182,7 @@ export function subscribeConnections(cb: ConnectionsCallback): () => void {
           const destHost = metadata.host || metadata.destinationIP || "未知主机";
           const destPort = parseInt(metadata.destinationPort) || 0;
           const outboundNode = chains[chains.length - 1] || "direct";
-          
+
           return {
             id: conn.id,
             destination: destHost,
@@ -198,7 +194,7 @@ export function subscribeConnections(cb: ConnectionsCallback): () => void {
             start: conn.start ? new Date(conn.start).getTime() : Date.now(),
           } as Connection;
         });
-        
+
         connectionsCallbacks.forEach((fn) => fn({ connections: normalizedConns }));
       },
     });
