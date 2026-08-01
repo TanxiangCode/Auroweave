@@ -95,6 +95,7 @@ pub fn run() {
             commands::subscription::subscription_import,
             commands::subscription::subscription_get_all,
             commands::subscription::subscription_delete,
+            commands::subscription::subscription_delete_all,
             commands::subscription::subscription_refresh,
             commands::subscription::subscription_activate,
             commands::settings::settings_get_all,

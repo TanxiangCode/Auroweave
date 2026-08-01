@@ -38,6 +38,11 @@ export async function refreshSubscription(
   );
 }
 
+/** 批量删除所有订阅 */
+export async function deleteAllSubscriptions(): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("subscription_delete_all", {});
+}
+
 /** 切换/激活订阅（切换当前使用的订阅配置） */
 export async function activateSubscription(
   id: string

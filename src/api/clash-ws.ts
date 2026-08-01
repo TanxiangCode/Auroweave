@@ -6,6 +6,7 @@ import {
   WS_RECONNECT_DELAY_MS,
   WS_RECONNECT_MAX_DELAY_MS,
   WS_RECONNECT_MAX_RETRIES,
+  WS_MAX_CONSECUTIVE_FAILURES = 2,
 } from "@/constants";
 import type { TrafficSnapshot, Connection } from "@/types";
 import { useSettingsStore } from "@/stores/settings.store";
@@ -27,7 +28,13 @@ class WsClient<T> {
 
   constructor(options: WsClientOptions<T>) {
     this.options = options;
-  }
+    // 启动定时器，每分钟重置失败计数器（允许恢复尝试）
+    setInterval(() => {
+      if (this.consecutiveFailures > 0 && Date.now() - this.consecutiveFailuresResetTime > 60000) {
+        log::warn!("[WebSocket] 重置失败计数器: {} -> 0", this.consecutiveFailures);
+        this.consecutiveFailures = 0;
+      }
+    }, 60000);
 
   connect(): void {
     if (this.stopped) return;
@@ -71,6 +78,17 @@ class WsClient<T> {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.ws?.close();
     this.ws = null;
+    // 重置失败计数器（允许恢复尝试）
+    this.consecutiveFailures = 0;
+  }
+
+  resume(): void {
+    this.stopped = false;
+    // 重置失败计数器和状态，允许恢复尝试
+    this.consecutiveFailures = 0;
+    if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+      this.connect();
+    }
   }
 
   resume(): void {
@@ -82,17 +100,23 @@ class WsClient<T> {
 
   private scheduleReconnect(): void {
     if (this.stopped) return;
-    // 超过最大重试次数后停止重连，避免无限重连耗尽资源
-    if (this.retryCount >= WS_RECONNECT_MAX_RETRIES) {
+    // 超过最大连续失败次数后停止重连，避免无限重连耗尽资源
+    if (this.consecutiveFailures >= WS_MAX_CONSECUTIVE_FAILURES) {
+      this.stopped = true;
       this.options.onStatusChange?.("error");
       return;
     }
+    // 重置失败计数器
     const delay = Math.min(
       WS_RECONNECT_DELAY_MS * Math.pow(2, this.retryCount),
       WS_RECONNECT_MAX_DELAY_MS
     );
     this.retryCount++;
-    this.retryTimer = setTimeout(() => this.connect(), delay);
+    this.consecutiveFailures++;
+    this.consecutiveFailuresResetTime = Date.now();
+    this.retryTimer = setTimeout(() => {
+      this.connect();
+    }, delay);
   }
 }
 

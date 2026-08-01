@@ -163,14 +163,12 @@ pub async fn subscription_import(
 ) -> Result<ApiResponse<Subscription>, AppError> {
     log::info!("[subscription] 开始导入订阅: {} (URL: {})", name, url);
 
-    // 0. 重复检测：如果 URL 已存在则拒绝导入
+    // 0. 重复检测：如果 URL 已存在则提示覆盖
     let existing = load_subscriptions();
-    if existing.iter().any(|s| s.url == url) {
-        log::warn!("[subscription] 订阅 URL 已存在，拒绝重复导入: {}", url);
-        return Ok(ApiResponse::err(
-            AppError::Validation("该订阅链接已存在，请勿重复添加".to_string()),
-            409,
-        ));
+    if let Some(existing_sub) = existing.iter().find(|s| s.url == url) {
+        log::warn!("[subscription] 订阅 URL 已存在: {} (ID: {})", existing_sub.name, existing_sub.id);
+        // 返回已存在的订阅的克隆，前端根据 is_active 决定是否需要刷新或直接覆盖
+        return Ok(ApiResponse::ok(existing_sub.clone()));
     }
 
     // 1+2. 拉取并解析
@@ -248,6 +246,24 @@ pub async fn subscription_delete(id: String) -> ApiResponse<()> {
         }
         log::info!("[subscription] 订阅 {} 已删除", id);
     }
+    ApiResponse::ok(())
+}
+
+/// 批量删除所有订阅（清空订阅列表）
+#[tauri::command]
+pub async fn subscription_delete_all() -> ApiResponse<()> {
+    log::info!("[subscription] 删除所有订阅");
+    
+    if !get_subscriptions_path().exists() {
+        return ApiResponse::ok(()); // 文件不存在，无需删除
+    }
+    
+    if let Err(e) = fs::remove_file(get_subscriptions_path())
+        .map_err(|e| AppError::Io(format!("清空订阅列表失败: {}", e)))? {
+        return ApiResponse::err(format!("清空订阅列表失败: {}", e), 500);
+    }
+    
+    log::info!("[subscription] 所有订阅已清空");
     ApiResponse::ok(())
 }
 

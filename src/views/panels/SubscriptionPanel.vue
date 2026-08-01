@@ -24,7 +24,12 @@
 
       <!-- 已导入订阅列表 -->
       <div class="subscriptions-card glass-effect">
-        <h3>📋 已导入订阅 ({{ subscriptions.length }})</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3>📋 已导入订阅 ({{ subscriptions.length }})</h3>
+          <button class="btn-link-small" @click="handleDeleteAll" title="清空所有订阅">
+            🗑️ 清空全部
+          </button>
+        </div>
         <div v-if="subscriptions.length === 0" class="empty-tip">
           尚未导入任何订阅，请在上方添加
         </div>
@@ -119,10 +124,17 @@ async function handleImport() {
     return;
   }
 
-  // 重复订阅检测：检查 URL 是否已存在
-  if (subStore.hasUrl(subUrl.value.trim())) {
-    toast.warning("订阅已存在", "该订阅链接已导入，请勿重复添加");
-    return;
+  const urlTrimmed = subUrl.value.trim();
+
+  // 重复订阅检测：前端已有 hasUrl 检查 + 后端返回现有订阅，展示确认对话框
+  const existing = subStore.subscriptions.find(s => s.url === urlTrimmed);
+  if (existing) {
+    const confirmMsg = `订阅「${existing.name}」已存在。\n\n是否要覆盖它并重新导入最新节点？`;
+    if (!confirm(confirmMsg)) {
+      return;
+    }
+
+    // 用户确认后，继续导入（后端会检测到重复 URL 并返回现有订阅）
   }
 
   importing.value = true;
@@ -130,7 +142,7 @@ async function handleImport() {
 
   const res = await subStore.importSub(
     subName.value.trim(),
-    subUrl.value.trim(),
+    urlTrimmed,
     settingsStore.settings.auto_group_on_import
   );
 
@@ -193,6 +205,23 @@ async function handleDelete(id: string) {
   }
 }
 
+async function handleDeleteAll() {
+  if (subscriptions.value.length === 0) {
+    toast.info("当前没有可删除的订阅");
+    return;
+  }
+
+  if (!confirm(`确定要删除全部 ${subscriptions.value.length} 个订阅吗？此操作不可恢复。`)) {
+    return;
+  }
+
+  const res = await subStore.removeAllSubs();
+  // 在 deleteAllSubs 中已经显示了 toast
+  if (res.success && !res.data) {
+    toast.success("订阅列表已清空");
+  }
+}
+
 function formatTime(ts?: number): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -218,6 +247,8 @@ h2 { font-size: 18px; font-weight: 700; }
 .subscriptions-card { padding: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; display: flex; flex-direction: column; gap: 12px; }
 .subscriptions-card h3 { font-size: 15px; font-weight: 600; }
 .empty-tip { color: rgba(255,255,255,0.5); font-size: 13px; text-align: center; padding: 12px; }
+.btn-link-small { font-size: 11px; padding: 2px 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: rgba(255,255,255,0.7); font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+.btn-link-small:hover { background: rgba(255,255,255,0.15); color: rgba(255,255,255, 0.9); border-color: rgba(255,255,255,0.3); }
 
 .subscription-list { display: flex; flex-direction: column; gap: 8px; }
 .subscription-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; gap: 10px; }

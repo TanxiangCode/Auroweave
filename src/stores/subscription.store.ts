@@ -60,6 +60,15 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     return res;
   }
 
+  async function removeAllSubs() {
+    const res = await deleteAllSubscriptions();
+    if (res.success) {
+      subscriptions.value = [];
+      toast.success("订阅列表已清空");
+    }
+    return res;
+  }
+
   async function refreshSub(id: string) {
     const res = await refreshSubscription(id);
     if (res.success && res.data) {
@@ -89,6 +98,7 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     fetchAll,
     importSub,
     removeSub,
+    removeAllSubs,
     refreshSub,
     activateSub,
     hasUrl,
