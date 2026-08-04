@@ -1,22 +1,20 @@
 {
   // VS Code 启动配置 — Auroweave (Tauri v2 + Vue 3)
-  // 使用 IntelliSense 了解相关属性。
-  // 悬停查看现有属性的描述。
   "version": "0.2.0",
   "configurations": [
     // ================================================================
-    // 1. Tauri Dev (Rust + 前端) — 完整开发调试
-    //    启动 Vite 开发服务器 + 编译 Rust 调试版本 + 拉起 Tauri 窗口
-    //    依赖扩展: CodeLLB (vadimcn.vscode-lldb)
+    // 1. Tauri Dev Debug — 完整开发调试 (Rust 断点 + 前端热更新)
+    //    先用 tasks.json 的 tauri:dev 在后台启动 Vite + Tauri
+    //    然后 LLDB 直接启动编译好的 Rust 二进制进行调试
+    //    依赖扩展: CodeLLDB (vadimcn.vscode-lldb)
     // ================================================================
     {
       "type": "lldb",
       "request": "launch",
       "name": "Tauri Dev Debug",
       "cargo": {
-        "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--no-default-features"]
+        "args": ["build", "--manifest-path=src-tauri/Cargo.toml"]
       },
-      "preLaunchTask": "tauri:dev",
       "program": "${workspaceFolder}/src-tauri/target/debug/auroweave.exe",
       "cwd": "${workspaceFolder}/src-tauri",
       "env": {
@@ -25,27 +23,8 @@
     },
 
     // ================================================================
-    // 2. Tauri Build (Release) — 发布版本调试
-    //    编译 Release 版本并启动（用于排查仅 Release 出现的问题）
-    // ================================================================
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Tauri Release Debug",
-      "cargo": {
-        "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--release"]
-      },
-      "program": "${workspaceFolder}/src-tauri/target/release/auroweave.exe",
-      "cwd": "${workspaceFolder}/src-tauri",
-      "env": {
-        "RUST_LOG": "info"
-      }
-    },
-
-    // ================================================================
-    // 3. 前端调试 (Chrome) — 在浏览器中调试 Vue 组件
-    //    先手动运行 `npm run dev`，然后用 Chrome 调试 Vue 源码
-    //    依赖扩展: Debugger for Chrome (msjsdiag.debugger-for-chrome)
+    // 2. 前端调试 (Chrome) — 在浏览器中调试 Vue 组件
+    //    需先手动运行 `npm run dev` 或选择任务 frontend:dev
     // ================================================================
     {
       "type": "chrome",
@@ -62,7 +41,7 @@
     },
 
     // ================================================================
-    // 4. 前端调试 (Edge) — 在 Edge 浏览器中调试 Vue 组件
+    // 3. 前端调试 (Edge) — 在 Edge 浏览器中调试 Vue 组件
     // ================================================================
     {
       "type": "msedge",

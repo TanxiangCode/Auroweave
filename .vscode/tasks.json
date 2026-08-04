@@ -1,0 +1,75 @@
+{
+  // VS Code 任务 — Auroweave 开发工作流
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "tauri:dev",
+      "type": "shell",
+      "command": "npm run tauri dev",
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "owner": "rust",
+          "fileLocation": ["relative", "${workspaceFolder}/src-tauri"],
+          "pattern": [
+            {
+              "regexp": "^(warning|error)(.*)$",
+              "severity": 1,
+              "message": 2
+            }
+          ],
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "Compiling|Running|VITE",
+            "endsPattern": "Finished|watching|ready in"
+          }
+        }
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "frontend:dev",
+      "type": "shell",
+      "command": "npm run dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "fileLocation": "relative",
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(error|warning):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE|vite",
+          "endsPattern": "ready in|Local:"
+        }
+      },
+      "group": "build"
+    },
+    {
+      "label": "rust:build",
+      "type": "shell",
+      "command": "cargo build --manifest-path src-tauri/Cargo.toml",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$rustc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}
