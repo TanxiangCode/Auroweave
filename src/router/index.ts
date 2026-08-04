@@ -13,7 +13,7 @@ const router = createRouter({
     {
       path: "/",
       name: "dashboard",
-      component: () => import("@/views/DashboardView.vue"),
+      component: () => import("@/views/DashboardView/index.vue"),
       meta: { title: "Auroweave v0.1.0" },
     },
     {
@@ -25,7 +25,7 @@ const router = createRouter({
     {
       path: "/proxies",
       name: "proxies",
-      component: () => import("@/views/ProxiesView/index.vue"),
+      component: () => import("@/views/ProxiesView.vue"),
       meta: { title: "代理节点" },
     },
     {
