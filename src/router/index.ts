@@ -19,13 +19,13 @@ const router = createRouter({
     {
       path: "/stats",
       name: "stats",
-      component: () => import("@/views/StatsView.vue"),
+      component: () => import("@/views/StatsView/index.vue"),
       meta: { title: "流量统计" },
     },
     {
       path: "/proxies",
       name: "proxies",
-      component: () => import("@/views/ProxiesView.vue"),
+      component: () => import("@/views/ProxiesView/index.vue"),
       meta: { title: "代理节点" },
     },
     {
