@@ -1,0 +1,99 @@
+/**
+ * 设置面板布局样式
+ * 作者: TanXiang
+ *
+ * 适用范围：Settings 下各 Panel 组件的通用布局结构
+ * 用法：在 panel 根元素上使用 .panel-container，内部用 .setting-group 分组
+ */
+
+/* ============================================================
+   面板根容器
+   ============================================================ */
+.panel-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* 面板标题 */
+.panel-container h2 {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+
+/* ============================================================
+   设置项分组容器
+   ============================================================ */
+.setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ============================================================
+   单行设置项（左标签 + 右控件）
+   ============================================================ */
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-md);
+}
+
+/* 设置项左侧标签区 */
+.item-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+/* 设置项副标签（说明文字） */
+.sub-label {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-weight: var(--weight-regular);
+  max-width: 280px;
+  line-height: var(--leading-normal);
+}
+
+/* 分割线 */
+.separator {
+  border: 0;
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-3) 0;
+}
+
+/* 信息提示卡片 */
+.info-card {
+  display: flex;
+  gap: var(--space-3);
+  padding: 14px var(--space-4);
+  background: var(--accent-cyan-glow);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+}
+
+.info-icon {
+  font-size: var(--text-lg);
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
+.info-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.info-body p {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: var(--leading-relaxed);
+}

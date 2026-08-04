@@ -9,6 +9,10 @@ import App from "./App.vue";
 
 // Design Tokens（必须最先加载）
 import "@/styles/tokens.css";
+// 全局公共样式（依赖 tokens.css 变量，须在 tokens 之后加载）
+import "@/styles/common.css";
+import "@/styles/panel.css";
+import "@/styles/layout.css";
 
 import { attachConsole } from "@tauri-apps/plugin-log";
 

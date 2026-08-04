@@ -1,0 +1,177 @@
+/**
+ * Auroweave 公共组件样式
+ * 作者: TanXiang
+ *
+ * 规则：
+ * - 所有页面共用的组件级样式类，配合 tokens.css 使用
+ * - 禁止硬编码颜色/圆角/间距，统一使用 design tokens
+ * - 页面可通过 scoped 样式覆盖扩展，但基础视觉应保持一致
+ */
+
+/* ============================================================
+   玻璃面板效果 (.glass-effect)
+   基础毛玻璃面板视觉，页面可通过 scoped 样式补充 padding 等
+   ============================================================ */
+.glass-effect {
+  background: var(--layer-1);
+  backdrop-filter: var(--blur-panel);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-lg);
+}
+
+/* ============================================================
+   模态弹窗系统 (.modal-backdrop / .modal-card)
+   用法：
+   <Teleport to="body">
+     <div class="modal-backdrop" @click.self="close">
+       <div class="modal-card glass-effect">
+         <div class="modal-header">...</div>
+         <div class="modal-body">...</div>
+         <div class="modal-actions">
+           <button class="btn text">取消</button>
+           <button class="btn primary">确认</button>
+         </div>
+       </div>
+     </div>
+   </Teleport>
+   ============================================================ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: var(--blur-panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-card {
+  width: 400px;
+  max-width: 90vw;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 弹窗内部结构 */
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-md);
+  position: relative;
+}
+
+.modal-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* ============================================================
+   按钮系统 (.btn)
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-normal);
+  background: transparent;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  outline: none;
+}
+
+.btn:hover {
+  background: var(--border-subtle);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 主操作按钮 */
+.btn.primary {
+  background: var(--accent-blue);
+  color: var(--text-on-accent);
+  border-color: var(--accent-blue);
+  font-weight: var(--weight-semibold);
+}
+
+.btn.primary:hover {
+  opacity: 0.9;
+}
+
+/* 文本/幽灵按钮 */
+.btn.text {
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.btn.text:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+/* 危险操作按钮 */
+.btn.danger {
+  background: transparent;
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+.btn.danger:hover {
+  background: var(--accent-red-glow);
+}
+
+/* ============================================================
+   表单系统 (.form-row / .form-input / .form-hint)
+   ============================================================ */
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* form-row 内的 label 自动应用统一样式 */
+.form-row label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+}
+
+.form-input {
+  padding: 6px 10px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--duration-fast);
+}
+
+.form-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.form-hint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
