@@ -3,28 +3,36 @@
   "version": "0.2.0",
   "configurations": [
     // ================================================================
-    // 1. Tauri Dev Debug — 完整开发调试 (Rust 断点 + 前端热更新)
-    //    先用 tasks.json 的 tauri:dev 在后台启动 Vite + Tauri
-    //    然后 LLDB 直接启动编译好的 Rust 二进制进行调试
-    //    依赖扩展: CodeLLDB (vadimcn.vscode-lldb)
+    // 1. Tauri Dev — 完整开发模式 (Vite 热更新 + Rust 编译 + Tauri 窗口)
+    //    无需额外扩展，直接在终端中启动
     // ================================================================
     {
-      "type": "lldb",
+      "type": "node-terminal",
+      "name": "Tauri Dev",
       "request": "launch",
-      "name": "Tauri Dev Debug",
-      "cargo": {
-        "args": ["build", "--manifest-path=src-tauri/Cargo.toml"]
-      },
-      "program": "${workspaceFolder}/src-tauri/target/debug/auroweave.exe",
-      "cwd": "${workspaceFolder}/src-tauri",
-      "env": {
-        "RUST_LOG": "debug"
-      }
+      "command": "npm run tauri dev",
+      "cwd": "${workspaceFolder}"
     },
 
     // ================================================================
-    // 2. 前端调试 (Chrome) — 在浏览器中调试 Vue 组件
-    //    需先手动运行 `npm run dev` 或选择任务 frontend:dev
+    // 2. 前端调试 (Edge) — 在 Edge 浏览器中调试 Vue 组件源码
+    //    需先运行任务 frontend:dev 或手动 npm run dev
+    //    Edge 调试器内置于 VS Code，无需安装额外扩展
+    // ================================================================
+    {
+      "type": "msedge",
+      "request": "launch",
+      "name": "Vue Frontend (Edge)",
+      "url": "http://localhost:1420",
+      "webRoot": "${workspaceFolder}/src",
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+
+    // ================================================================
+    // 3. 前端调试 (Chrome) — 在 Chrome 浏览器中调试 Vue 组件源码
+    //    需先运行任务 frontend:dev 或手动 npm run dev
+    //    需安装扩展: msjsdiag.debugger-for-chrome
     // ================================================================
     {
       "type": "chrome",
@@ -37,19 +45,6 @@
         "webpack:///./src/*": "${webRoot}/*",
         "webpack:///src/*": "${webRoot}/*"
       },
-      "skipFiles": ["<node_internals>/**"]
-    },
-
-    // ================================================================
-    // 3. 前端调试 (Edge) — 在 Edge 浏览器中调试 Vue 组件
-    // ================================================================
-    {
-      "type": "msedge",
-      "request": "launch",
-      "name": "Vue Frontend (Edge)",
-      "url": "http://localhost:1420",
-      "webRoot": "${workspaceFolder}/src",
-      "sourceMaps": true,
       "skipFiles": ["<node_internals>/**"]
     }
   ]
