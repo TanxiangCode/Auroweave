@@ -221,8 +221,8 @@ export const useProxyStore = defineStore("proxy", () => {
     error.value = null;
     const res = await getProxyGroups();
     if (res.success && res.data) {
-      // 置顶排序逻辑：将 proxy、auto 置顶，其他按字母表排序
-      const topTags = ["proxy", "auto"];
+      // 置顶排序逻辑：将 proxy、auto、balance 置顶，其他按字母表排序
+      const topTags = ["proxy", "auto", "balance"];
       const sorted = [...res.data].sort((a, b) => {
         const indexA = topTags.indexOf(a.tag);
         const indexB = topTags.indexOf(b.tag);

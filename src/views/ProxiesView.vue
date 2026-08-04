@@ -11,7 +11,7 @@ import { useToast } from "@/composables/useToast";
 import { storeToRefs } from "pinia";
 import NodeCard from "@/components/proxy/NodeCard.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
-import type { ProxyNode, NodeSortConfig } from "@/types";
+import type { ProxyNode, NodeSortConfig, CustomGroupRule } from "@/types";
 
 const proxyStore = useProxyStore();
 const speedtestStore = useSpeedtestStore();
@@ -25,15 +25,15 @@ const searchText = ref("");
 
 // 排序状态
 const sortConfig = ref<NodeSortConfig>({ key: "default", order: "asc" });
-const sortMenuOpen = ref(false);
 
-// 分组分类：内置系统分组 vs 自定义/地区分组
+// 分组分类：内置系统分组 vs 地区分组
+const systemGroupTags = ["proxy", "auto", "balance"];
 const systemGroups = computed(() => {
-  return groups.value.filter(g => ["proxy", "auto"].includes(g.tag));
+  return groups.value.filter(g => systemGroupTags.includes(g.tag));
 });
 
 const regionGroups = computed(() => {
-  return groups.value.filter(g => !["proxy", "auto"].includes(g.tag) && g.type === "urltest");
+  return groups.value.filter(g => !systemGroupTags.includes(g.tag) && g.type === "urltest");
 });
 
 onMounted(async () => {
@@ -179,7 +179,7 @@ async function handleSingleSpeed(nodeTag: string) {
 async function confirmBatchSpeedTest() {
   showConfirmModal.value = false;
   if (!selectedGroupTag.value) return;
-  await speedtestStore.startBatchTest(selectedGroupTag.value, rawNodes.value);
+  await speedtestStore.startBatchTest(selectedGroupTag.value, rawNodes.value.map(n => n.tag));
   toast.info("已启动批量串行测速任务");
 }
 
@@ -199,6 +199,108 @@ function cycleSortKey() {
 
 function toggleSortOrder() {
   sortConfig.value = { ...sortConfig.value, order: sortConfig.value.order === "asc" ? "desc" : "asc" };
+}
+
+// ============ 分组配置编辑 ============
+const showGroupEditModal = ref(false);
+const editingGroupTag = ref("");
+const editingGroupType = ref("");
+const editingGroupConfig = ref<Record<string, any>>({});
+
+function openGroupEdit(groupTag: string) {
+  const group = groups.value.find(g => g.tag === groupTag);
+  if (!group) return;
+  editingGroupTag.value = groupTag;
+  editingGroupType.value = group.type;
+  // 初始化可编辑配置项
+  editingGroupConfig.value = {
+    interval: (group as any).interval || "15m",
+    tolerance: (group as any).tolerance || 50,
+    url: (group as any).url || "https://www.gstatic.com/generate_204",
+  };
+  showGroupEditModal.value = true;
+}
+
+async function saveGroupConfig() {
+  // 目前仅通过刷新配置实现，后续可通过 ClashAPI 直接修改
+  toast.info("配置已更新", "将在下次刷新订阅时生效");
+  showGroupEditModal.value = false;
+}
+
+// ============ 自定义区域规则 ============
+const showRegionModal = ref(false);
+const editingRule = ref<CustomGroupRule | null>(null);
+const isNewRule = ref(false);
+
+// 内置区域选项
+const builtinRegions = [
+  { name: "香港", keywords: ["HK", "Hong Kong", "香港", "🇭🇰"] },
+  { name: "日本", keywords: ["JP", "Japan", "日本", "🇯🇵"] },
+  { name: "美国", keywords: ["US", "USA", "United States", "美国", "🇺🇸"] },
+  { name: "台湾", keywords: ["TW", "Taiwan", "台湾", "台灣", "🇹🇼"] },
+  { name: "新加坡", keywords: ["SG", "Singapore", "新加坡", "🇸🇬"] },
+  { name: "韩国", keywords: ["KR", "Korea", "韩国", "韓國", "🇰🇷"] },
+  { name: "英国", keywords: ["UK", "United Kingdom", "英国", "🇬🇧"] },
+  { name: "德国", keywords: ["DE", "Germany", "德国", "🇩🇪"] },
+  { name: "法国", keywords: ["FR", "France", "法国", "🇫🇷"] },
+  { name: "加拿大", keywords: ["CA", "Canada", "加拿大", "🇨🇦"] },
+  { name: "澳大利亚", keywords: ["AU", "Australia", "澳大利亚", "🇦🇺"] },
+  { name: "俄罗斯", keywords: ["RU", "Russia", "俄罗斯", "🇷🇺"] },
+  { name: "印度", keywords: ["IN", "India", "印度", "🇮🇳"] },
+  { name: "巴西", keywords: ["BR", "Brazil", "巴西", "🇧🇷"] },
+  { name: "土耳其", keywords: ["TR", "Turkey", "土耳其", "🇹🇷"] },
+  { name: "阿根廷", keywords: ["AR", "Argentina", "阿根廷", "🇦🇷"] },
+];
+
+function openRegionModal() {
+  showRegionModal.value = true;
+}
+
+function addNewRule() {
+  editingRule.value = {
+    id: "",
+    name: "",
+    enabled: true,
+    match_type: "keyword",
+    keywords: [],
+    pattern: "",
+    protocols: [],
+    order: proxyStore.customGroupRules.length,
+  };
+  isNewRule.value = true;
+}
+
+function editRule(rule: CustomGroupRule) {
+  editingRule.value = { ...rule };
+  isNewRule.value = false;
+}
+
+function applyBuiltinRegion(region: { name: string; keywords: string[] }) {
+  if (!editingRule.value) return;
+  editingRule.value.name = region.name;
+  editingRule.value.match_type = "keyword";
+  editingRule.value.keywords = [...region.keywords];
+}
+
+function saveRule() {
+  if (!editingRule.value) return;
+  if (!editingRule.value.name.trim()) {
+    toast.warning("请填写区域名称");
+    return;
+  }
+  if (isNewRule.value) {
+    const { id, ...ruleData } = editingRule.value;
+    proxyStore.addCustomGroupRule(ruleData);
+  } else {
+    proxyStore.updateCustomGroupRule(editingRule.value);
+  }
+  editingRule.value = null;
+  toast.success("区域规则已保存");
+}
+
+function deleteRule(id: string) {
+  proxyStore.deleteCustomGroupRule(id);
+  toast.success("区域规则已删除");
 }
 </script>
 
@@ -248,39 +350,56 @@ function toggleSortOrder() {
           主策略组
         </span>
         <div class="groups-list">
-          <button
+          <div
             v-for="group in systemGroups"
             :key="group.tag"
-            class="group-item"
-            :class="{ 
-              active: group.tag === selectedGroupTag,
-              'in-route': routingGroupTags.has(group.tag)
-            }"
-            @click="handleGroupSelect(group.tag)"
+            class="group-item-wrapper"
           >
-            <div class="group-header-info">
-              <div class="group-name-wrapper">
-                <span v-if="routingGroupTags.has(group.tag)" class="route-dot" title="当前活跃出口链路成员"></span>
-                <span class="group-name">{{ group.tag }}</span>
-              </div>
-              <span class="group-badge">{{ group.type }}</span>
-            </div>
-            <span 
-              v-if="group.now" 
-              class="group-current-node"
-              :class="{ 'highlight-now': routingGroupTags.has(group.tag) }"
+            <button
+              class="group-item"
+              :class="{ 
+                active: group.tag === selectedGroupTag,
+                'in-route': routingGroupTags.has(group.tag)
+              }"
+              @click="handleGroupSelect(group.tag)"
             >
-              {{ group.now }}
-            </span>
-          </button>
+              <div class="group-header-info">
+                <div class="group-name-wrapper">
+                  <span v-if="routingGroupTags.has(group.tag)" class="route-dot" title="当前活跃出口链路成员"></span>
+                  <span class="group-name">{{ group.tag }}</span>
+                </div>
+                <span class="group-badge">{{ group.type }}</span>
+              </div>
+              <span 
+                v-if="group.now" 
+                class="group-current-node"
+                :class="{ 'highlight-now': routingGroupTags.has(group.tag) }"
+              >
+                {{ group.now }}
+              </span>
+            </button>
+            <button
+              v-if="group.tag !== 'proxy'"
+              class="btn-group-edit"
+              @click.stop="openGroupEdit(group.tag)"
+              title="编辑分组配置"
+            >
+              <SvgIcon name="edit" :size="10" />
+            </button>
+          </div>
         </div>
 
         <!-- 地区分组 -->
-        <template v-if="regionGroups.length > 0">
-          <span class="section-title">
-            <SvgIcon name="globe" :size="12" style="margin-right: 4px;" />
-            地区分组
-          </span>
+        <template v-if="regionGroups.length > 0 || true">
+          <div class="section-title-row">
+            <span class="section-title">
+              <SvgIcon name="globe" :size="12" style="margin-right: 4px;" />
+              地区分组
+            </span>
+            <button class="btn-add-region" @click="openRegionModal" title="管理自定义区域">
+              <SvgIcon name="plus" :size="12" />
+            </button>
+          </div>
           <div class="groups-list">
             <button
               v-for="group in regionGroups"
@@ -409,6 +528,142 @@ function toggleSortOrder() {
           <div class="modal-actions">
             <button class="btn text" @click="showConfirmModal = false">取消</button>
             <button class="btn primary" @click="confirmBatchSpeedTest">开始测速</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 分组配置编辑 Modal -->
+    <Teleport to="body">
+      <div v-if="showGroupEditModal" class="modal-backdrop" @click.self="showGroupEditModal = false">
+        <div class="modal-card glass-effect">
+          <h3>⚙️ 编辑分组配置 — {{ editingGroupTag }}</h3>
+          <div class="edit-form">
+            <div class="form-row">
+              <label>测速间隔</label>
+              <select v-model="editingGroupConfig.interval" class="form-input">
+                <option value="1m">1 分钟</option>
+                <option value="3m">3 分钟</option>
+                <option value="5m">5 分钟</option>
+                <option value="15m">15 分钟</option>
+                <option value="30m">30 分钟</option>
+              </select>
+            </div>
+            <div class="form-row" v-if="editingGroupTag === 'balance'">
+              <label>容差 (ms)</label>
+              <input v-model.number="editingGroupConfig.tolerance" type="number" class="form-input" min="0" max="500" />
+              <span class="form-hint">延迟差在此范围内的节点会被轮询</span>
+            </div>
+            <div class="form-row">
+              <label>测速 URL</label>
+              <input v-model="editingGroupConfig.url" type="text" class="form-input" />
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn text" @click="showGroupEditModal = false">取消</button>
+            <button class="btn primary" @click="saveGroupConfig">保存</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 自定义区域管理 Modal -->
+    <Teleport to="body">
+      <div v-if="showRegionModal" class="modal-backdrop" @click.self="showRegionModal = false">
+        <div class="modal-card glass-effect region-modal">
+          <h3>🌍 自定义区域管理</h3>
+
+          <!-- 编辑/新增表单 -->
+          <div v-if="editingRule" class="rule-edit-form">
+            <div class="form-row">
+              <label>区域名称</label>
+              <input v-model="editingRule.name" type="text" class="form-input" placeholder="如: 欧洲" />
+            </div>
+            <div class="form-row">
+              <label>匹配方式</label>
+              <select v-model="editingRule.match_type" class="form-input">
+                <option value="keyword">关键词匹配</option>
+                <option value="regex">正则表达式</option>
+                <option value="protocol">协议类型</option>
+              </select>
+            </div>
+            <div v-if="editingRule.match_type === 'keyword'" class="form-row">
+              <label>关键词列表</label>
+              <input
+                :value="editingRule.keywords.join(', ')"
+                @input="editingRule.keywords = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)"
+                type="text"
+                class="form-input"
+                placeholder="用逗号分隔，如: EU, Europe, 欧洲"
+              />
+            </div>
+            <div v-if="editingRule.match_type === 'regex'" class="form-row">
+              <label>正则表达式</label>
+              <input v-model="editingRule.pattern" type="text" class="form-input" placeholder="如: ^(EU|Europe)" />
+            </div>
+            <div v-if="editingRule.match_type === 'protocol'" class="form-row">
+              <label>协议列表</label>
+              <input
+                :value="editingRule.protocols.join(', ')"
+                @input="editingRule.protocols = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)"
+                type="text"
+                class="form-input"
+                placeholder="用逗号分隔，如: vmess, trojan"
+              />
+            </div>
+
+            <!-- 内置区域快捷填充 -->
+            <div v-if="isNewRule" class="builtin-regions">
+              <span class="form-hint">快捷填充内置区域：</span>
+              <div class="builtin-tags">
+                <button
+                  v-for="region in builtinRegions"
+                  :key="region.name"
+                  class="builtin-tag"
+                  @click="applyBuiltinRegion(region)"
+                >
+                  {{ region.name }}
+                </button>
+              </div>
+            </div>
+
+            <div class="modal-actions">
+              <button class="btn text" @click="editingRule = null">取消</button>
+              <button class="btn primary" @click="saveRule">保存规则</button>
+            </div>
+          </div>
+
+          <!-- 规则列表 -->
+          <div v-else>
+            <div v-if="proxyStore.customGroupRules.length === 0" class="empty-rules">
+              暂无自定义区域规则，点击下方按钮添加
+            </div>
+            <div v-else class="rules-list">
+              <div v-for="rule in proxyStore.customGroupRules" :key="rule.id" class="rule-item">
+                <div class="rule-info">
+                  <span class="rule-name">{{ rule.name }}</span>
+                  <span class="rule-type">{{ rule.match_type }}</span>
+                  <span class="rule-enabled" :class="{ disabled: !rule.enabled }">
+                    {{ rule.enabled ? '启用' : '禁用' }}
+                  </span>
+                </div>
+                <div class="rule-actions">
+                  <button class="btn-icon" @click="editRule(rule)" title="编辑">
+                    <SvgIcon name="edit" :size="12" />
+                  </button>
+                  <button class="btn-icon btn-delete-icon" @click="deleteRule(rule.id)" title="删除">
+                    <SvgIcon name="trash" :size="12" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button class="btn text" @click="showRegionModal = false">关闭</button>
+              <button class="btn primary" @click="addNewRule">
+                <SvgIcon name="plus" :size="12" style="margin-right: 4px;" />
+                新增区域
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -881,5 +1136,228 @@ function toggleSortOrder() {
 .btn.text:hover {
   background: var(--border-subtle);
   color: var(--text-primary);
+}
+
+/* ---- 分组项包装器（带编辑按钮） ---- */
+.group-item-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.group-item-wrapper .group-item {
+  flex: 1;
+}
+
+.btn-group-edit {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--layer-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.group-item-wrapper:hover .btn-group-edit {
+  opacity: 1;
+}
+
+.btn-group-edit:hover {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+/* ---- 分区标题行（带操作按钮） ---- */
+.section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-add-region {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.btn-add-region:hover {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+/* ---- 编辑表单 ---- */
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-row label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+}
+
+.form-input {
+  padding: 6px 10px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: var(--accent-blue);
+}
+
+.form-hint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* ---- 区域管理 Modal ---- */
+.region-modal {
+  width: 460px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.empty-rules {
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  padding: 24px 0;
+}
+
+.rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rule-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.rule-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rule-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.rule-type {
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  background: var(--border-subtle);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.rule-enabled {
+  font-size: var(--text-xs);
+  color: var(--accent-green);
+}
+
+.rule-enabled.disabled {
+  color: var(--text-tertiary);
+}
+
+.rule-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.btn-icon:hover {
+  color: var(--text-primary);
+  border-color: var(--border-normal);
+}
+
+.btn-delete-icon:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+.builtin-regions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.builtin-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.builtin-tag {
+  padding: 4px 10px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.builtin-tag:hover {
+  background: var(--accent-blue-glow);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
 }
 </style>

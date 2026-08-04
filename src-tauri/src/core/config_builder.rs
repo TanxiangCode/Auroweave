@@ -92,7 +92,7 @@ impl ConfigBuilder {
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
         // 2b. Selector "proxy" 主出站
-        let mut proxy_group_list = vec!["auto".to_string()];
+        let mut proxy_group_list = vec!["auto".to_string(), "balance".to_string()];
         for (region, _) in &region_map {
             proxy_group_list.push(format!("{}-auto", region));
         }
@@ -104,14 +104,25 @@ impl ConfigBuilder {
             "outbounds": proxy_group_list
         }));
 
-        // 2c. 全局 "auto" urltest 出站
+        // 2c. 全局 "auto" urltest 出站（自动测速选最优节点）
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "auto",
-            "outbounds": node_tags,
+            "outbounds": node_tags.clone(),
             "url": "https://www.gstatic.com/generate_204",
             "interval": "15m",
             "idle_timeout": "30m"
+        }));
+
+        // 2c-2. "balance" 负载均衡出站（urltest + 短间隔 + tolerance，近似负载均衡效果）
+        final_outbounds.push(json!({
+            "type": "urltest",
+            "tag": "balance",
+            "outbounds": node_tags,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": "3m",
+            "idle_timeout": "10m",
+            "tolerance": 50
         }));
 
         // 2d. 地区 urltest 出站
