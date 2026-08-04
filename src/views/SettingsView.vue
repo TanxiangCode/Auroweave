@@ -9,10 +9,10 @@ import GeneralPanel from "./panels/GeneralPanel.vue";
 import SubscriptionPanel from "./panels/SubscriptionPanel.vue";
 import RouteModePanel from "./panels/RouteModePanel.vue";
 import DnsPanel from "./panels/DnsPanel.vue";
-import TunPanel from "./panels/TunPanel.vue";
+import TunPanel from "./panels/TunPanel/index.vue";
 import AutomationPanel from "./panels/AutomationPanel.vue";
 import HotkeyPanel from "./panels/HotkeyPanel.vue";
-import PrivacyPanel from "./panels/PrivacyPanel.vue";
+import PrivacyPanel from "./panels/PrivacyPanel/index.vue";
 import AdvancedPanel from "./panels/AdvancedPanel.vue";
 
 const route = useRoute();
@@ -58,7 +58,6 @@ onMounted(() => {
 
 <template>
   <div class="settings-view">
-    <!-- 侧边栏导航 -->
     <aside class="settings-sidebar glass-effect">
       <nav class="nav-list">
         <button
@@ -74,7 +73,6 @@ onMounted(() => {
       </nav>
     </aside>
 
-    <!-- 主面板渲染区域 -->
     <main class="settings-main glass-effect">
       <GeneralPanel v-if="activePanel === 'general'" />
       <SubscriptionPanel v-else-if="activePanel === 'subscription'" />
@@ -96,8 +94,8 @@ onMounted(() => {
 .settings-view {
   display: flex;
   height: 100%;
-  gap: 16px;
-  padding: 20px;
+  gap: var(--space-4);
+  padding: var(--space-5);
   overflow: hidden;
 }
 
@@ -105,57 +103,51 @@ onMounted(() => {
   width: 220px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 16px;
+  gap: var(--space-4);
+  padding: var(--space-4);
 }
 
 .nav-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
   overflow-y: auto;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--duration-fast) var(--ease-out);
   text-align: left;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .nav-item.active {
-  background: rgba(0, 242, 254, 0.12);
-  border-color: rgba(0, 242, 254, 0.3);
-  color: #00f2fe;
-  font-weight: 600;
+  background: var(--accent-cyan-glow);
+  border-color: var(--border-accent);
+  color: var(--accent-cyan-vivid);
+  font-weight: var(--weight-semibold);
 }
 
 .nav-icon {
-  font-size: 16px;
+  font-size: var(--text-base);
 }
 
 .settings-main {
   flex: 1;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 24px;
+  padding: var(--space-6);
   overflow-y: auto;
 }
 </style>

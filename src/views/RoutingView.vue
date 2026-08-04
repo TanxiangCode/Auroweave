@@ -22,13 +22,12 @@ function handleTopologyClick() {
 
 <template>
   <div class="routing-view">
-    <header class="routing-header">
+    <header class="page-header">
       <div class="title-area">
         <h1>🛠️ 分流矩阵 · App-Matrix</h1>
         <p class="subtitle">为独立应用进程绑定专属出站节点，实现精准流量导流</p>
       </div>
-
-      <div class="tab-controls">
+      <div class="tab-group">
         <button
           class="tab-btn"
           :class="{ active: activeTab === 'matrix' }"
@@ -54,60 +53,12 @@ function handleTopologyClick() {
 
 <style scoped>
 .routing-view {
-  padding: 24px;
+  padding: var(--space-5);
   height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-
-.routing-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.title-area h1 {
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.subtitle {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-top: 4px;
-}
-
-.tab-controls {
-  display: flex;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 4px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.tab-btn {
-  padding: 6px 14px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tab-btn.active {
-  background: rgba(0, 242, 254, 0.15);
-  color: #fff;
-  font-weight: 600;
-}
-
-.tab-btn.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  gap: var(--space-5);
 }
 
 .routing-body {

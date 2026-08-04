@@ -3,7 +3,7 @@
  * 安全审计视图（语义化安全看板 + 极客内核日志流）
  * 作者: TanXiang
  */
-import { ref, onMounted, onActivated, onDeactivated } from "vue";
+import { ref, onActivated, onDeactivated } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { subscribeConnections } from "@/api/clash-ws";
 import {
@@ -21,12 +21,8 @@ const auditRecords = ref<SemanticAuditRecord[]>([]);
 
 let unsub: (() => void) | null = null;
 
-// 仅首次挂载时执行一次的初始化
-onMounted(() => {});
-
-// 每次激活时建立 WebSocket 订阅
 onActivated(() => {
-  if (unsub) return; // 避免重复订阅
+  if (unsub) return;
   unsub = subscribeConnections((payload) => {
     if (isPaused.value) return;
 
@@ -56,7 +52,6 @@ onActivated(() => {
   });
 });
 
-// 离开页面时取消订阅，节省资源
 onDeactivated(() => {
   if (unsub) {
     unsub();
@@ -67,22 +62,21 @@ onDeactivated(() => {
 
 <template>
   <div class="audit-view">
-    <header class="audit-header">
+    <header class="page-header">
       <div class="title-area">
         <h1>🔍 安全审计看板</h1>
         <p class="subtitle">将冰冷数据归一翻译为自然语言，全景掌控网络与 DNS 解析规则</p>
       </div>
-
-      <div class="header-actions">
+      <div class="tab-group">
         <button
-          class="btn-toggle"
+          class="tab-btn"
           :class="{ active: viewMode === 'semantic' }"
           @click="viewMode = 'semantic'"
         >
           🛡️ 语义化看板
         </button>
         <button
-          class="btn-toggle"
+          class="tab-btn"
           :class="{ active: viewMode === 'raw' }"
           @click="viewMode = 'raw'"
         >
@@ -91,7 +85,7 @@ onDeactivated(() => {
       </div>
     </header>
 
-    <!-- 顶部连接数真实统计框 -->
+    <!-- 顶部连接数统计 -->
     <div class="stats-banner">
       <div class="banner-card proxied">
         <span class="val">{{ connectionStore.stats.today_proxied }}</span>
@@ -109,7 +103,6 @@ onDeactivated(() => {
 
     <!-- 主面板区 -->
     <main class="audit-main">
-      <!-- 语义化看板模式 -->
       <div
         v-if="viewMode === 'semantic'"
         class="semantic-feed-container"
@@ -134,7 +127,6 @@ onDeactivated(() => {
         </div>
       </div>
 
-      <!-- 极客原始日志流模式 -->
       <RawLogStream v-else />
     </main>
   </div>
@@ -142,88 +134,47 @@ onDeactivated(() => {
 
 <style scoped>
 .audit-view {
-  padding: 24px;
+  padding: var(--space-5);
   height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
-.audit-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.title-area h1 {
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.subtitle {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-top: 4px;
-}
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 4px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.btn-toggle {
-  padding: 6px 14px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-toggle.active {
-  background: rgba(0, 242, 254, 0.15);
-  color: #fff;
-  font-weight: 600;
-}
-
+/* 统计横幅 */
 .stats-banner {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .banner-card {
-  padding: 16px 20px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  backdrop-filter: var(--blur-panel);
+  border: 1px solid var(--border-normal);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .banner-card .val {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
 }
 
-.banner-card.proxied .val { color: #00f2fe; }
-.banner-card.direct .val { color: #4ade80; }
-.banner-card.blocked .val { color: #f87171; }
+.banner-card.proxied .val { color: var(--accent-cyan-vivid); }
+.banner-card.direct .val { color: var(--status-success); }
+.banner-card.blocked .val { color: var(--status-danger); }
 
 .banner-card .label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
 }
 
+/* 主面板 */
 .audit-main {
   flex: 1;
   overflow: hidden;
@@ -232,7 +183,7 @@ onDeactivated(() => {
 .semantic-feed-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   height: 100%;
 }
 
@@ -240,30 +191,30 @@ onDeactivated(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
 
 .feed-title {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .pause-hint {
-  font-size: 11px;
-  color: #fbbf24;
+  font-size: var(--text-xs);
+  color: var(--status-warning);
 }
 
 .empty-feed {
-  padding: 40px;
+  padding: var(--space-10);
   text-align: center;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 13px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
 }
 
 .feed-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
   overflow-y: auto;
   flex: 1;
 }
