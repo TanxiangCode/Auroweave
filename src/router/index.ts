@@ -25,7 +25,7 @@ const router = createRouter({
     {
       path: "/proxies",
       name: "proxies",
-      component: () => import("@/views/ProxiesView.vue"),
+      component: () => import("@/views/ProxiesView/index.vue"),
       meta: { title: "代理节点" },
     },
     {
