@@ -55,7 +55,7 @@ const rawNodes = computed<ProxyNode[]>(() => {
 });
 
 // 经搜索过滤 + 排序后的节点列表
-const displayNodes = computed<ProxyNode[]>((() => {
+const displayNodes = computed<ProxyNode[]>(() => {
   let nodes = rawNodes.value;
 
   // 搜索过滤
@@ -89,7 +89,7 @@ const displayNodes = computed<ProxyNode[]>((() => {
   });
 
   return sorted;
-})());
+});
 
 // 当前分组对象
 const currentGroup = computed(() => {
@@ -319,7 +319,7 @@ function toggleSortOrder() {
             <h2>{{ selectedGroupTag }}</h2>
             <span class="nodes-count" v-if="rawNodes.length > 0">
               共 {{ rawNodes.length }} 个节点
-              <span v-if="searchText.trim" class="filter-count">（已筛选 {{ displayNodes.length }}）</span>
+              <span v-if="searchText.trim()" class="filter-count">（已筛选 {{ displayNodes.length }}）</span>
             </span>
           </div>
           <div class="toolbar-right">
