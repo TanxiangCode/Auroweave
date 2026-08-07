@@ -17,11 +17,13 @@
 </script>
 
 <style scoped>
-.panel-container { display: flex; flex-direction: column; gap: 16px; }
-h2 { font-size: 18px; font-weight: 700; }
-.setting-group { display: flex; flex-direction: column; gap: 12px; }
-.setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
-.item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
-.sub-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: normal; }
-.hotkey-kbd { padding: 4px 10px; background: rgba(255,255,255,0.1); border-radius: 6px; font-family: monospace; font-size: 13px; color: #00f2fe; }
+.hotkey-kbd {
+  padding: var(--space-1) var(--space-3);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--accent-cyan-vivid);
+}
 </style>

@@ -37,8 +37,14 @@ const router = createRouter({
     {
       path: "/audit",
       name: "audit",
-      component: () => import("@/views/AuditView.vue"),
+      component: () => import("@/views/AuditView/index.vue"),
       meta: { title: "安全审计" },
+    },
+    {
+      path: "/speedtest",
+      name: "speedtest",
+      component: () => import("@/views/SpeedtestView/index.vue"),
+      meta: { title: "智能测速" },
     },
     {
       path: "/settings",

@@ -100,10 +100,8 @@ const subUrl = ref("");
 const importing = ref(false);
 const operating = ref<string | null>(null);
 
-// 使用 storeToRefs 确保解构后的状态保持响应式
 const { subscriptions } = storeToRefs(subStore);
 
-// 面板挂载时加载已保存的订阅列表
 onMounted(() => {
   subStore.fetchAll();
 });
@@ -121,15 +119,12 @@ async function handleImport() {
 
   const urlTrimmed = subUrl.value.trim();
 
-  // 重复订阅检测：前端已有 hasUrl 检查 + 后端返回现有订阅，展示确认对话框
   const existing = subStore.subscriptions.find(s => s.url === urlTrimmed);
   if (existing) {
     const confirmMsg = `订阅「${existing.name}」已存在。\n\n是否要覆盖它并重新导入最新节点？`;
     if (!confirm(confirmMsg)) {
       return;
     }
-
-    // 用户确认后，继续导入（后端会检测到重复 URL 并返回现有订阅）
   }
 
   importing.value = true;
@@ -156,7 +151,6 @@ async function handleActivate(id: string) {
   const res = await subStore.activateSub(id);
   if (res.success) {
     toast.success("订阅已切换", `当前使用: ${res.data?.name}`);
-    // 切换订阅后清空代理数据缓存并重新拉取
     proxyStore.clearCache();
     await proxyStore.fetchGroups();
   } else {
@@ -170,7 +164,6 @@ async function handleRefresh(id: string) {
   const res = await subStore.refreshSub(id);
   if (res.success) {
     toast.success("订阅刷新成功", `解析出 ${res.data?.node_count || 0} 个节点`);
-    // 刷新后清空代理数据缓存并重新拉取
     proxyStore.clearCache();
     await proxyStore.fetchGroups();
   } else {
@@ -190,7 +183,6 @@ async function handleDelete(id: string) {
   const res = await subStore.removeSub(id);
   if (res.success) {
     toast.success("订阅已删除");
-    // 如果删除的是活跃订阅，清空代理数据缓存
     if (sub.is_active) {
       proxyStore.clearCache();
     }
@@ -207,45 +199,166 @@ function formatTime(ts?: number): string {
 </script>
 
 <style scoped>
-.panel-container { display: flex; flex-direction: column; gap: 16px; }
-h2 { font-size: 18px; font-weight: 700; }
-.setting-group { display: flex; flex-direction: column; gap: 14px; }
-.setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
-.item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
-.sub-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: normal; }
 .switch { width: 18px; height: 18px; cursor: pointer; }
-.import-card { padding: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; display: flex; flex-direction: column; gap: 12px; }
-.import-card h3 { font-size: 15px; font-weight: 600; }
-.input-form { display: flex; flex-direction: column; gap: 10px; }
-.text-input { padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; font-size: 13px; outline: none; }
-.btn-import { padding: 10px; background: linear-gradient(135deg, #00f2fe, #4facfe); border: none; border-radius: 8px; color: #000; font-weight: 700; cursor: pointer; }
+
+.import-card {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.import-card h3 {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.input-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.text-input {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.btn-import {
+  padding: var(--space-3);
+  background: linear-gradient(135deg, var(--accent-cyan-vivid), var(--accent-blue));
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--layer-0);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
 .btn-import:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-import:hover:not(:disabled) { filter: brightness(1.1); }
 
-.subscriptions-card { padding: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; display: flex; flex-direction: column; gap: 12px; }
-.subscriptions-card h3 { font-size: 15px; font-weight: 600; }
-.empty-tip { color: rgba(255,255,255,0.5); font-size: 13px; text-align: center; padding: 12px; }
-.btn-link-small { font-size: 11px; padding: 2px 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: rgba(255,255,255,0.7); font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
-.btn-link-small:hover { background: rgba(255,255,255,0.15); color: rgba(255,255,255, 0.9); border-color: rgba(255,255,255,0.3); }
+.subscriptions-card {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
 
-.subscription-list { display: flex; flex-direction: column; gap: 8px; }
-.subscription-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; gap: 10px; }
-.subscription-item.active { background: rgba(0, 242, 254, 0.08); border-color: rgba(0, 242, 254, 0.3); }
+.subscriptions-card h3 {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
 
-.sub-info { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.sub-header { display: flex; align-items: center; gap: 8px; }
-.sub-name { font-size: 14px; font-weight: 600; color: #fff; }
-.active-badge { font-size: 10px; padding: 2px 6px; background: #00f2fe; color: #000; border-radius: 10px; font-weight: 700; }
-.sub-meta { display: flex; gap: 12px; font-size: 11px; color: rgba(255,255,255,0.6); }
-.sub-format { font-family: var(--font-mono, monospace); }
-.sub-nodes { font-weight: 500; }
+.empty-tip {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+  padding: var(--space-3);
+}
 
-.sub-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.btn-action { padding: 5px 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: rgba(255,255,255,0.85); font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
-.btn-action:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.subscription-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.subscription-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-md);
+  gap: var(--space-3);
+}
+
+.subscription-item.active {
+  background: var(--accent-cyan-glow);
+  border-color: var(--border-accent);
+}
+
+.sub-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sub-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sub-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.active-badge {
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2);
+  background: var(--accent-cyan-vivid);
+  color: var(--layer-0);
+  border-radius: var(--radius-full);
+  font-weight: var(--weight-bold);
+}
+
+.sub-meta {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.sub-format { font-family: var(--font-mono); }
+.sub-nodes { font-weight: var(--weight-medium); }
+
+.sub-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.btn-action {
+  padding: var(--space-1) var(--space-3);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.btn-action:hover { background: var(--border-strong); }
 .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.btn-switch { background: rgba(0, 242, 254, 0.12); border-color: rgba(0, 242, 254, 0.3); color: #00f2fe; }
-.btn-switch:hover { background: rgba(0, 242, 254, 0.2); }
-.btn-refresh:hover { color: #00f2fe; border-color: rgba(0, 242, 254, 0.4); }
-.btn-delete:hover { color: #ff4757; border-color: rgba(255, 71, 87, 0.4); }
+.btn-switch {
+  background: var(--accent-cyan-glow);
+  border-color: var(--border-accent);
+  color: var(--accent-cyan-vivid);
+}
+
+.btn-switch:hover { background: var(--accent-cyan-vivid); color: var(--layer-0); }
+
+.btn-refresh:hover {
+  color: var(--accent-cyan-vivid);
+  border-color: var(--border-accent);
+}
+
+.btn-delete:hover {
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
 </style>

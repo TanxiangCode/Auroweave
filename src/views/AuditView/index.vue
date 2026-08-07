@@ -1,63 +1,20 @@
 <script setup lang="ts">
 /**
- * 安全审计视图（语义化安全看板 + 极客内核日志流）
+ * 安全审计视图 — 主入口
  * 作者: TanXiang
+ *
+ * 职责：布局拼装、状态绑定
  */
-import { ref, onActivated, onDeactivated } from "vue";
+import { ref } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
-import { subscribeConnections } from "@/api/clash-ws";
-import {
-  translateConnection,
-  type SemanticAuditRecord,
-} from "@/utils/semantic-translator";
 import SemanticRuleCard from "@/components/audit/SemanticRuleCard.vue";
 import RawLogStream from "@/components/audit/RawLogStream.vue";
+import { useConnectionAudit } from "./hooks/useConnectionAudit";
 
 const connectionStore = useConnectionStore();
 const viewMode = ref<"semantic" | "raw">("semantic");
-const isPaused = ref(false);
 
-const auditRecords = ref<SemanticAuditRecord[]>([]);
-
-let unsub: (() => void) | null = null;
-
-onActivated(() => {
-  if (unsub) return;
-  unsub = subscribeConnections((payload) => {
-    if (isPaused.value) return;
-
-    if (payload.connections && payload.connections.length > 0) {
-      for (const conn of payload.connections.slice(0, 5)) {
-        const domain = conn.destination || "未知主机";
-        const outbound = conn.outbound || "direct";
-        const ruleMatched = conn.rule || "default";
-
-        const item = translateConnection(domain, outbound, ruleMatched);
-        const record: SemanticAuditRecord = {
-          ...item,
-          id: Math.random().toString(36).substring(2, 9),
-          timestamp: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
-        };
-
-        auditRecords.value.unshift(record);
-        if (record.type === "proxied") connectionStore.stats.today_proxied++;
-        else if (record.type === "direct") connectionStore.stats.today_direct++;
-        else if (record.type === "blocked") connectionStore.stats.today_blocked++;
-      }
-
-      if (auditRecords.value.length > 200) {
-        auditRecords.value = auditRecords.value.slice(0, 200);
-      }
-    }
-  });
-});
-
-onDeactivated(() => {
-  if (unsub) {
-    unsub();
-    unsub = null;
-  }
-});
+const { isPaused, auditRecords } = useConnectionAudit();
 </script>
 
 <template>
@@ -142,7 +99,6 @@ onDeactivated(() => {
   gap: var(--space-5);
 }
 
-/* 统计横幅 */
 .stats-banner {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -174,7 +130,6 @@ onDeactivated(() => {
   color: var(--text-tertiary);
 }
 
-/* 主面板 */
 .audit-main {
   flex: 1;
   overflow: hidden;

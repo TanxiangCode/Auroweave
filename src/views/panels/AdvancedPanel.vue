@@ -95,7 +95,7 @@
           <span class="sub-label">若当前配置文件出现异常，一键恢复 config.backup.json</span>
         </div>
         <button class="btn-restore" @click="handleRestore">
-          <SvgIcon name="refresh" :size="12" style="margin-right: 4px;" />
+          <SvgIcon name="refresh" :size="12" class="icon-gap" />
           恢复备份
         </button>
       </div>
@@ -175,4 +175,5 @@ h2 { font-size: var(--text-md); font-weight: var(--weight-bold); }
 .version-tag { font-size: var(--text-xs); padding: 4px 8px; background: var(--accent-cyan-glow); border-radius: var(--radius-sm); color: var(--accent-cyan); font-weight: var(--weight-bold); }
 .btn-restore { padding: 6px 12px; background: var(--layer-2); border: 1px solid var(--border-normal); border-radius: var(--radius-sm); color: var(--text-primary); font-size: var(--text-xs); cursor: pointer; transition: all var(--duration-fast); }
 .btn-restore:hover { background: var(--border-strong); border-color: var(--border-accent); }
+.icon-gap { margin-right: 4px; }
 </style>

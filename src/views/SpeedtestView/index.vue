@@ -1,74 +1,34 @@
 <script setup lang="ts">
 /**
- * 智能测速大厅
+ * 智能测速大厅 — 主入口
  * 作者: TanXiang
+ *
+ * 职责：布局拼装、状态绑定
  */
-import { ref, computed, onMounted } from "vue";
-import { useProxyStore } from "@/stores/proxy.store";
+import { onMounted } from "vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
-import { useToast } from "@/composables/useToast";
 import NodeCard from "@/components/proxy/NodeCard.vue";
+import { useSpeedtest } from "./hooks/useSpeedtest";
 
-const proxyStore = useProxyStore();
 const speedtestStore = useSpeedtestStore();
-const toast = useToast();
 
-const activeGroupTag = ref<string>("");
-const showConfirmModal = ref(false);
+const {
+  activeGroupTag,
+  showConfirmModal,
+  currentNodes,
+  activeGroupNow,
+  init,
+  handleSelectNode,
+  handleRunLatency,
+  handleSingleLatency,
+  handleSingleSpeed,
+  confirmBatchSpeedTest,
+  proxyStore,
+} = useSpeedtest();
 
-onMounted(async () => {
-  await proxyStore.fetchGroups();
-  await speedtestStore.init();
-  if (proxyStore.groups.length > 0) {
-    activeGroupTag.value = proxyStore.groups[0].tag;
-  }
+onMounted(() => {
+  init();
 });
-
-const currentNodes = computed(() => {
-  const g = proxyStore.groups.find((x) => x.tag === activeGroupTag.value);
-  return g ? g.proxies : [];
-});
-
-const activeGroupNow = computed(() => {
-  const g = proxyStore.groups.find((x) => x.tag === activeGroupTag.value);
-  return g?.now || "";
-});
-
-async function handleSelectNode(nodeTag: string) {
-  if (!activeGroupTag.value) return;
-  await proxyStore.selectNode(activeGroupTag.value, nodeTag);
-  toast.success("节点已切换", `切至: ${nodeTag}`);
-}
-
-async function handleRunLatency() {
-  if (!activeGroupTag.value) return;
-  toast.info("正在并发测试延迟...");
-  await speedtestStore.testLatency(activeGroupTag.value, currentNodes.value);
-  toast.success("延迟测试完成");
-}
-
-async function handleSingleLatency(nodeTag: string) {
-  if (!activeGroupTag.value) return;
-  await speedtestStore.testLatency(activeGroupTag.value, [nodeTag]);
-}
-
-async function handleSingleSpeed(nodeTag: string) {
-  toast.info("开始节点吞吐量测试", `正在测试: ${nodeTag}`);
-  const res = await speedtestStore.testSingleThroughput(nodeTag);
-  if (res.success && res.data) {
-    const mbps = (res.data.download_bps / (1024 * 1024)).toFixed(1);
-    toast.success("单节点测速完成", `${nodeTag}: ${mbps} MB/s`);
-  } else {
-    toast.error("测速失败", res.error);
-  }
-}
-
-async function confirmBatchSpeedTest() {
-  showConfirmModal.value = false;
-  if (!activeGroupTag.value) return;
-  await speedtestStore.startBatchTest(activeGroupTag.value, currentNodes.value);
-  toast.info("已启动批量串行测速任务");
-}
 </script>
 
 <template>
@@ -163,7 +123,6 @@ async function confirmBatchSpeedTest() {
   gap: var(--space-5);
 }
 
-/* 批量进度卡片 */
 .batch-progress-card {
   padding: var(--space-4) var(--space-5);
   background: var(--accent-cyan-glow);
@@ -183,7 +142,6 @@ async function confirmBatchSpeedTest() {
   cursor: pointer;
 }
 
-/* 节点网格 */
 .nodes-section {
   display: flex;
   flex-direction: column;
@@ -196,14 +154,12 @@ async function confirmBatchSpeedTest() {
   gap: var(--space-4);
 }
 
-/* 二次按钮变体 */
 .btn.secondary {
   background: var(--surface-hover);
   border: 1px solid var(--border-strong);
   color: var(--text-primary);
 }
 
-/* 弹窗内元素 */
 .estimate-box {
   background: var(--surface-raised);
   padding: var(--space-3);
