@@ -50,7 +50,8 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
                 }
             ],
             "rules": [],
-            "final": "remote"
+            "final": "remote",
+            "strategy": "prefer_ipv4"
         },
         "inbounds": [
             {
@@ -80,7 +81,8 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
                 "secret": ""
             },
             "cache_file": {
-                "enabled": true
+                "enabled": true,
+                "path": crate::get_data_root().join("cache.db").to_string_lossy().to_string()
             }
         }
     })
@@ -303,7 +305,8 @@ impl ConfigBuilder {
                     }
                 ],
                 "rules": dns_rules,
-                "final": "remote"
+                "final": "remote",
+                "strategy": "prefer_ipv4"
             },
             "inbounds": [
                 {
@@ -321,7 +324,8 @@ impl ConfigBuilder {
                     "secret": ""
                 },
                 "cache_file": {
-                    "enabled": true
+                    "enabled": true,
+                    "path": crate::get_data_root().join("cache.db").to_string_lossy().to_string()
                 }
             }
         });
