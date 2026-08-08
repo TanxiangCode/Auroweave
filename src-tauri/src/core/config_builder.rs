@@ -25,6 +25,67 @@ use crate::error::AppError;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+/// 生成最小默认配置（无代理节点时使用）
+///
+/// 当用户尚未导入订阅时，生成一个仅包含 direct/block 出站的基础配置，
+/// 使 sing-box 能够正常启动并监听端口，ClashAPI 也可正常访问。
+/// 后续导入订阅后会通过 ConfigBuilder 重新生成完整配置。
+pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
+    json!({
+        "log": {
+            "level": "info",
+            "timestamp": true
+        },
+        "dns": {
+            "servers": [
+                {
+                    "server": "8.8.8.8",
+                    "tag": "remote",
+                    "type": "udp"
+                },
+                {
+                    "server": "223.5.5.5",
+                    "tag": "local",
+                    "type": "udp"
+                }
+            ],
+            "rules": [],
+            "final": "remote"
+        },
+        "inbounds": [
+            {
+                "type": "mixed",
+                "tag": "mixed-in",
+                "listen": "127.0.0.1",
+                "listen_port": mixed_port
+            }
+        ],
+        "outbounds": [
+            { "type": "direct", "tag": "direct" },
+            { "type": "block", "tag": "block" }
+        ],
+        "route": {
+            "default_domain_resolver": "local",
+            "rules": [
+                { "action": "sniff" },
+                { "protocol": "dns", "action": "hijack-dns" },
+                { "ip_is_private": true, "outbound": "direct" }
+            ],
+            "final": "direct",
+            "auto_detect_interface": true
+        },
+        "experimental": {
+            "clash_api": {
+                "external_controller": format!("127.0.0.1:{}", clash_api_port),
+                "secret": ""
+            },
+            "cache_file": {
+                "enabled": true
+            }
+        }
+    })
+}
+
 pub struct ConfigBuilder {
     outbounds: Vec<ParsedOutbound>,
     mixed_port: u16,

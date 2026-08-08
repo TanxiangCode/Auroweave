@@ -55,7 +55,7 @@ onMounted(async () => {
         </button>
         <span class="topbar-title">{{ routeTitle }}</span>
       </div>
-      <div class="topbar-right">
+      <div class="topbar-right" @mousedown.stop>
         <!-- 全局控制胶囊 (设置 + 窗口按钮) -->
         <ControlCapsule />
       </div>

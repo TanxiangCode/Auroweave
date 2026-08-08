@@ -68,7 +68,7 @@ pub fn migrate_legacy_data(app_handle: &tauri::AppHandle) {
 ///
 /// 这是应用启动和模式切换时的核心编排函数，完整流程如下：
 ///
-/// 1. **前置检查**：确认 config.json 存在，否则跳过拉起
+/// 1. **前置检查**：确认 config.json 存在，若不存在则自动创建默认配置（仅含 direct/block 出站）
 /// 2. **重建配置**：根据最新 settings 重建 config.json
 /// 3. **统一清理**：无论之前处于什么状态，先停止系统代理、TUN 计划任务、sing-box 进程
 /// 4. **分支决策**：根据 run_mode 分为 service / local 两条路径
@@ -95,8 +95,22 @@ pub async fn apply_core_mode_with_fallback(
     let config_dir = crate::get_config_dir();
     let config_path = config_dir.join("config.json");
     if !config_path.exists() {
-        info!("[app] 尚未检测到 config.json，跳过拉起");
-        return Ok(());
+        info!("[app] 尚未检测到 config.json，自动创建默认配置...");
+        let settings = crate::commands::settings::settings_get_internal(app_handle);
+        let default_config = crate::core::config_builder::generate_minimal_config(
+            settings.mixed_port,
+            settings.clash_api_port,
+        );
+        if let Ok(content) = serde_json::to_string_pretty(&default_config) {
+            if let Err(e) = std::fs::write(&config_path, content) {
+                error!("[app] 创建默认 config.json 失败: {}", e);
+                return Ok(());
+            }
+            info!("[app] 默认 config.json 已创建");
+        } else {
+            error!("[app] 序列化默认配置失败");
+            return Ok(());
+        }
     }
 
     // ---- 步骤2: 根据最新 settings 重建 config.json ----
