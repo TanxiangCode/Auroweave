@@ -17,11 +17,14 @@ pub fn migrate_legacy_data(app_handle: &tauri::AppHandle) {
     let new_config_dir = crate::get_config_dir();
     let _ = std::fs::create_dir_all(&new_config_dir);
 
-    // 步骤2: 清理旧版冗余的 %ProgramData%\Auroweave\config.json
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let redundant_config = std::path::PathBuf::from(program_data).join("Auroweave").join("config.json");
-    if redundant_config.exists() {
-        let _ = std::fs::remove_file(redundant_config);
+    // 步骤2: 清理旧版冗余的 config.json（仅 Windows 的 ProgramData 路径）
+    #[cfg(target_os = "windows")]
+    {
+        let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        let redundant_config = std::path::PathBuf::from(program_data).join("Auroweave").join("config.json");
+        if redundant_config.exists() {
+            let _ = std::fs::remove_file(redundant_config);
+        }
     }
 
     // 步骤3: 获取旧版 Tauri 默认配置目录
@@ -107,9 +110,10 @@ pub async fn apply_core_mode_with_fallback(
     info!("[app] 检测到 config.json，当前运行模式: {}", settings.core.run_mode);
 
     // ---- 步骤3: 统一清理旧状态 ----
-    // 无论之前处于什么模式，先释放系统代理、停止 TUN 计划任务、停止 sing-box 进程
-    // 确保后续拉起在一个干净的环境中进行
+    // 无论之前处于什么模式，先释放系统代理、停止 sing-box 进程
+    // Windows 额外停止计划任务 TUN
     let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+    #[cfg(target_os = "windows")]
     let _ = crate::system::service_control::stop_direct_tun_task();
     let _ = sm.stop().await;
 
@@ -179,21 +183,29 @@ pub async fn apply_core_mode_with_fallback(
             let port = fb_settings.mixed_port;
 
             if fb_settings.tun_enabled {
-                // local 模式 + TUN：通过计划任务静默提权
-                if let Err(e) = crate::system::service_control::run_direct_tun_task(app_handle) {
-                    error!("[app] 回退直接模式时静默拉起 TUN 失败: {}", e);
-                    // TUN 拉起失败，回退为普通系统代理模式
-                    persist_settings_patch(app_handle, |s| {
-                        s.tun_enabled = false;
-                    });
-                    spawn_local_start(sm.clone(), path_str.clone(), port);
-                } else {
-                    info!("[app] 回退直接模式 TUN 计划任务触发成功，等待进程启动...");
-                    if !wait_for_singbox_running().await {
-                        error!("[app] 本地运行模式下静默提权启动 TUN 失败: 进程未运行");
-                        persist_settings_patch(app_handle, |s| {
-                            s.tun_enabled = false;
-                        });
+                // local 模式 + TUN
+                #[cfg(target_os = "windows")]
+                {
+                    // Windows: 通过计划任务静默提权拉起 sing-box TUN
+                    if let Err(e) = crate::system::service_control::run_direct_tun_task(app_handle) {
+                        error!("[app] 回退直接模式时静默拉起 TUN 失败: {}", e);
+                        persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                    } else {
+                        info!("[app] 回退直接模式 TUN 计划任务触发成功，等待进程启动...");
+                        if !wait_for_singbox_running().await {
+                            error!("[app] 本地运行模式下静默提权启动 TUN 失败: 进程未运行");
+                            persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                            spawn_local_start(sm.clone(), path_str.clone(), port);
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    // macOS/Linux: 直接启动 sing-box（TUN 需要应用以特权运行或使用 sudo）
+                    if let Err(e) = sm.start(&path_str).await {
+                        error!("[app] 回退模式启动 sing-box TUN 失败: {}", e);
+                        persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
                         spawn_local_start(sm.clone(), path_str.clone(), port);
                     }
                 }
@@ -228,26 +240,36 @@ pub async fn apply_core_mode_with_fallback(
         let port = settings.mixed_port;
 
         if settings.tun_enabled {
-            // local 模式 + TUN：通过计划任务静默提权拉起 sing-box
-            if let Err(e) = crate::system::service_control::run_direct_tun_task(app_handle) {
-                error!("[app] 启动时直接模式下静默拉起 TUN 失败: {}", e);
-                // TUN 拉起失败，回退为普通系统代理模式
-                persist_settings_patch(app_handle, |s| {
-                    s.tun_enabled = false;
-                });
-                spawn_local_start(sm.clone(), path_str.clone(), port);
-                return Err(format!("静默提权任务启动失败，已回退为普通系统代理模式: {}", e));
-            } else {
-                info!("[app] 计划任务 TUN 触发成功，等待进程启动...");
-                if wait_for_singbox_running().await {
-                    info!("[app] 本地运行模式下通过计划任务静默提权启动 TUN 成功");
-                } else {
-                    error!("[app] 本地运行模式下静默提权启动 TUN 失败: 进程未运行");
-                    persist_settings_patch(app_handle, |s| {
-                        s.tun_enabled = false;
-                    });
+            // local 模式 + TUN
+            #[cfg(target_os = "windows")]
+            {
+                // Windows: 通过计划任务静默提权拉起 sing-box TUN
+                if let Err(e) = crate::system::service_control::run_direct_tun_task(app_handle) {
+                    error!("[app] 启动时直接模式下静默拉起 TUN 失败: {}", e);
+                    persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
                     spawn_local_start(sm.clone(), path_str.clone(), port);
-                    return Err("计划任务启动成功，但内核进程未见运行（可能配置错误或防病毒扫描延迟），已回退为系统代理".to_string());
+                    return Err(format!("静默提权任务启动失败，已回退为普通系统代理模式: {}", e));
+                } else {
+                    info!("[app] 计划任务 TUN 触发成功，等待进程启动...");
+                    if wait_for_singbox_running().await {
+                        info!("[app] 本地运行模式下通过计划任务静默提权启动 TUN 成功");
+                    } else {
+                        error!("[app] 本地运行模式下静默提权启动 TUN 失败: 进程未运行");
+                        persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                        return Err("计划任务启动成功，但内核进程未见运行（可能配置错误或防病毒扫描延迟），已回退为系统代理".to_string());
+                    }
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                // macOS/Linux: 直接启动 sing-box（TUN 需要应用以特权运行）
+                info!("[app] macOS/Linux 直接启动 sing-box TUN 模式");
+                if let Err(e) = sm.start(&path_str).await {
+                    error!("[app] 启动 sing-box TUN 失败: {}", e);
+                    persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                    spawn_local_start(sm.clone(), path_str.clone(), port);
+                    return Err(format!("TUN 启动失败（可能需要管理员权限），已回退为系统代理: {}", e));
                 }
             }
         } else {
@@ -296,6 +318,7 @@ fn spawn_local_start(sm: Arc<crate::core::sidecar::SidecarManager>, path: String
 ///
 /// 在通过计划任务静默提权启动 TUN 后，需要等待进程实际运行起来。
 /// 每 200ms 检测一次，最多检测 25 次（共 5 秒）。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 async fn wait_for_singbox_running() -> bool {
     for _ in 0..25 {
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;

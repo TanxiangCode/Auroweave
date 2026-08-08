@@ -501,7 +501,11 @@ pub async fn core_query_running(app_handle: tauri::AppHandle) -> ApiResponse<boo
             || status == crate::core::sidecar::SidecarStatus::Starting;
         
         let is_tun_process_running = if settings.tun_enabled {
-            crate::system::service_control::query_singbox_process_running()
+            // Windows: 通过计划任务检测；macOS/Linux: 检查 sidecar 状态即可
+            #[cfg(target_os = "windows")]
+            { crate::system::service_control::query_singbox_process_running() }
+            #[cfg(not(target_os = "windows"))]
+            { false }
         } else {
             false
         };

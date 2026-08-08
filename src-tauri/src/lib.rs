@@ -152,13 +152,13 @@ pub fn run() {
             // 启动后台流量监控
             core::traffic_monitor::start_monitor(app.handle().clone());
 
-            // 使用条件编译：只在开发模式下生效
-            #[cfg(debug_assertions)]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.open_devtools();
-                }
-            }
+            // DevTools 暂时关闭，需要调试时取消注释
+            // #[cfg(debug_assertions)]
+            // {
+            //     if let Some(window) = app.get_webview_window("main") {
+            //         window.open_devtools();
+            //     }
+            // }
 
             Ok(())
         })
@@ -174,7 +174,9 @@ pub fn run() {
                     let _ = system::service_control::stop_service();
                     std::thread::sleep(std::time::Duration::from_millis(1500));
                 } else {
-                    log::info!("[app] 直接运行模式退出：停止计划任务 TUN 和 sing-box");
+                    log::info!("[app] 直接运行模式退出：停止 sing-box");
+                    // Windows: 停止计划任务 TUN；macOS/Linux: 仅停止 sidecar
+                    #[cfg(target_os = "windows")]
                     let _ = system::service_control::stop_direct_tun_task();
                     let sidecar_manager = app_handle.state::<std::sync::Arc<SidecarManager>>().inner().clone();
                     tauri::async_runtime::block_on(async move {

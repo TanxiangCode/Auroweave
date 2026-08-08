@@ -77,7 +77,7 @@ async function handleToggleMaximize() {
 <style scoped>
 .traffic-lights {
   position: absolute;
-  top: 13px;
+  top: 18px;
   left: 13px;
   display: flex;
   align-items: center;

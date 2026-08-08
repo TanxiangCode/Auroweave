@@ -263,9 +263,18 @@ impl SidecarManager {
             }
         }
 
-        // 候选目录3: %ProgramData%\Auroweave\bin（服务安装后复制二进制的位置）
-        let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-        candidate_dirs.push(PathBuf::from(program_data).join("Auroweave").join("bin"));
+        // 候选目录3: 服务安装后的位置
+        #[cfg(target_os = "windows")]
+        {
+            let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+            candidate_dirs.push(PathBuf::from(program_data).join("Auroweave").join("bin"));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(home) = std::env::var("HOME") {
+                candidate_dirs.push(PathBuf::from(home).join("Library").join("Application Support").join("Auroweave").join("bin"));
+            }
+        }
 
         // 遍历所有候选目录，按修改时间选择最新的 sing-box 可执行文件
         let mut latest_path = None;
