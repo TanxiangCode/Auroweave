@@ -11,7 +11,7 @@ use speedtest::scheduler::SpeedTestScheduler;
 use std::sync::Arc;
 use tauri::Manager;
 
-/// 获取统一数据根目录：Windows 为 C:\ProgramData\Auroweave，macOS 为 /Library/Application Support/Auroweave
+/// 获取统一数据根目录：Windows 为 C:\ProgramData\Auroweave，macOS 为 ~/Library/Application Support/Auroweave
 /// 服务、GUI 主程序共用此目录，SYSTEM 用户和普通用户均可访问。
 pub fn get_data_root() -> std::path::PathBuf {
     #[cfg(target_os = "windows")]
@@ -21,7 +21,8 @@ pub fn get_data_root() -> std::path::PathBuf {
     }
     #[cfg(target_os = "macos")]
     {
-        std::path::PathBuf::from("/Library/Application Support/Auroweave")
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        std::path::PathBuf::from(home).join("Library").join("Application Support").join("Auroweave")
     }
     #[cfg(target_os = "linux")]
     {
