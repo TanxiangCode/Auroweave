@@ -252,8 +252,10 @@ impl SidecarManager {
 
         #[cfg(target_os = "macos")]
         {
-            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/macos-universal"));
-            candidate_dirs.push(PathBuf::from("sidecar-bin/macos-universal"));
+            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/macos-arm64"));
+            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/macos-amd64"));
+            candidate_dirs.push(PathBuf::from("sidecar-bin/macos-arm64"));
+            candidate_dirs.push(PathBuf::from("sidecar-bin/macos-amd64"));
         }
 
         // 候选目录2: 可执行文件同目录（安装后的标准位置）

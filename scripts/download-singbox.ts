@@ -20,7 +20,7 @@ import { execSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-const VERSION = "1.14.0-beta.3";
+const VERSION = "1.14.0-beta.9";
 
 interface TargetConfig {
   platformName: string;
@@ -51,13 +51,14 @@ function getTargetConfig(): TargetConfig {
     };
   }
 
-  // 2. macOS 环境 (Universal 架构)
+  // 2. macOS 环境 (根据 CPU 架构选择 amd64 或 arm64)
   if (platform === 'darwin') {
+    const macArch = arch === 'arm64' ? 'arm64' : 'amd64';
     return {
-      platformName: 'darwin-universal',
-      archiveName: `sing-box-${VERSION}-darwin-universal.tar.gz`,
+      platformName: `darwin-${macArch}`,
+      archiveName: `sing-box-${VERSION}-darwin-${macArch}.tar.gz`,
       archiveType: 'tar.gz',
-      targetDir: path.resolve(process.cwd(), 'src-tauri/sidecar-bin/macos-universal'),
+      targetDir: path.resolve(process.cwd(), `src-tauri/sidecar-bin/macos-${macArch}`),
       exeName: 'sing-box',
       destFileName: `sing-box-${VERSION}`,
     };
