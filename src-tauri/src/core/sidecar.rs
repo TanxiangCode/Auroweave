@@ -295,7 +295,11 @@ impl SidecarManager {
                     let is_match = file_name.starts_with("sing-box") && file_name.ends_with(".exe");
                     
                     #[cfg(not(target_os = "windows"))]
-                    let is_match = file_name.starts_with("sing-box") && !file_name.contains("."); // 避免匹配 .tar.gz 或其他压缩包
+                    let is_match = file_name.starts_with("sing-box")
+                        && !file_name.ends_with(".tar.gz")
+                        && !file_name.ends_with(".zip")
+                        && !file_name.ends_with(".txt")
+                        && !file_name.ends_with(".gitkeep");
 
                     if is_match {
                         if let Ok(metadata) = std::fs::metadata(&path) {
