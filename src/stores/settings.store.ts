@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_group_on_import: true,
   enable_app_traffic_tracking: true,
 
-  mixed_port: 7890,
+  mixed_port: 8890,
   clash_api_port: 9090,
   speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000",
   speed_test_timeout_secs: 5,

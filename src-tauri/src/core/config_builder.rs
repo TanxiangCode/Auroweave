@@ -97,11 +97,11 @@ pub struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
-    /// 创建配置生成器，默认端口 mixed=7890, clash_api=9090
+    /// 创建配置生成器，默认端口 mixed=8890, clash_api=9090
     pub fn new(outbounds: Vec<ParsedOutbound>) -> Self {
         Self {
             outbounds,
-            mixed_port: 7890,
+            mixed_port: 8890,
             clash_api_port: 9090,
             geosite_cn_path: None,
             geoip_cn_path: None,

@@ -17,13 +17,13 @@
       <div class="setting-item">
         <div class="item-label">
           <span>本地混合代理端口 (Mixed Inbound Port)</span>
-          <span class="sub-label">HTTP / SOCKS5 混合协议监听端口 (默认: 7890)</span>
+          <span class="sub-label">HTTP / SOCKS5 混合协议监听端口 (默认: 8890)</span>
         </div>
         <input
           type="number"
           v-model.number="settingsStore.settings.mixed_port"
           class="num-input"
-          placeholder="7890"
+          placeholder="8890"
           @change="save"
         />
       </div>

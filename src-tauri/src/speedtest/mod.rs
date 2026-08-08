@@ -23,23 +23,23 @@ pub struct BatchProgress {
     pub result: Option<ThroughputResult>,
 }
 
-/// 从 settings.json 中安全地读取本地代理端口与 ClashAPI 端口，不存在则返回默认 (7890, 9090)
+/// 从 settings.json 中安全地读取本地代理端口与 ClashAPI 端口，不存在则返回默认 (8890, 9090)
 pub fn get_configured_ports(app_handle: &AppHandle) -> (u16, u16) {
     let config_dir = app_handle.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("config"));
     let path = config_dir.join("settings.json");
     if path.exists() {
         if let Ok(content) = fs::read_to_string(path) {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                let m = val.get("mixed_port").and_then(|p| p.as_u64()).unwrap_or(7890) as u16;
+                let m = val.get("mixed_port").and_then(|p| p.as_u64()).unwrap_or(8890) as u16;
                 let c = val.get("clash_api_port").and_then(|p| p.as_u64()).unwrap_or(9090) as u16;
                 return (m, c);
             }
         }
     }
-    (7890, 9090)
+    (8890, 9090)
 }
 
-/// 从 settings.json 中安全地读取本地代理端口，不存在则返回默认端口 7890
+/// 从 settings.json 中安全地读取本地代理端口，不存在则返回默认端口 8890
 pub fn get_mixed_port(app_handle: &AppHandle) -> u16 {
     get_configured_ports(app_handle).0
 }
