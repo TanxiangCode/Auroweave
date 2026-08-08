@@ -3,12 +3,14 @@
  * 作者: TanXiang
  *
  * 职责：定时轮询 sing-box 内核运行状态，管理 KeepAlive 下的生命周期
+ * 当检测到内核从停止变为运行时，主动触发 WebSocket 重连以恢复实时数据流
  */
 import { type Ref, onActivated, onDeactivated, onMounted } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
 import { invoke } from "@tauri-apps/api/core";
 import { info as logInfo, error as logError } from "@tauri-apps/plugin-log";
+import { reconnectAll } from "@/api/clash-ws";
 import type { ApiResponse } from "@/types";
 
 interface UseCoreStatusOptions {
@@ -27,6 +29,8 @@ export function useCoreStatus(options: UseCoreStatusOptions) {
   const settingsStore = useSettingsStore();
 
   let statusTimer: ReturnType<typeof setInterval> | null = null;
+  /** 记录上一次的内核运行状态，用于检测 0→1 变化并触发 WebSocket 重连 */
+  let wasRunning = false;
 
   /** 轮询内核运行状态 */
   async function checkRunningStatus() {
@@ -34,7 +38,15 @@ export function useCoreStatus(options: UseCoreStatusOptions) {
     try {
       const runningRes: ApiResponse<boolean> = await invoke("core_query_running");
       if (runningRes.success) {
-        proxyActive.value = runningRes.data;
+        const isRunning = runningRes.data ?? false;
+        proxyActive.value = isRunning;
+
+        // 检测内核从未运行→运行的转变，主动重连 WebSocket
+        if (isRunning && !wasRunning) {
+          logInfo("[DashboardView] 检测到内核已启动，触发 WebSocket 重连");
+          reconnectAll();
+        }
+        wasRunning = isRunning;
       }
     } catch (e: unknown) {
       console.error("轮询内核状态异常:", e);

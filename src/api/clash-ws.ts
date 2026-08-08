@@ -31,17 +31,31 @@ class WsClient<T> {
   constructor(options: WsClientOptions<T>) {
     this.options = options;
     // 启动定时器，每分钟检查并重置失败计数器（允许恢复尝试）
+    // 重置后主动发起重连，确保 sing-box 启动后 WebSocket 能恢复连接
     this.resetTimer = setInterval(() => {
       if (this.consecutiveFailures > 0 && Date.now() - this.consecutiveFailuresResetTime > 60000) {
         console.warn("[WebSocket] 重置失败计数器:", this.consecutiveFailures, "-> 0");
         this.consecutiveFailures = 0;
+        this.retryCount = 0;
         this.stopped = false;
+        this.connect();
       }
     }, 60000);
   }
 
   connect(): void {
     if (this.stopped) return;
+
+    // 清理旧连接：移除事件处理器并关闭，防止旧 onclose 触发多余的重连
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.close();
+      this.ws = null;
+    }
+
     this.options.onStatusChange?.("connecting");
 
     try {
@@ -50,12 +64,14 @@ class WsClient<T> {
       this.ws = ws;
 
       ws.onopen = () => {
+        if (this.ws !== ws) return; // 忽略旧连接事件
         this.retryCount = 0;
         this.consecutiveFailures = 0;
         this.options.onStatusChange?.("connected");
       };
 
       ws.onmessage = (event: MessageEvent) => {
+        if (this.ws !== ws) return; // 忽略旧连接事件
         try {
           const raw = JSON.parse(event.data as string);
           this.options.onMessage(raw as T);
@@ -65,12 +81,14 @@ class WsClient<T> {
       };
 
       ws.onclose = () => {
+        if (this.ws !== ws) return; // 忽略旧连接事件
         if (this.stopped) return;
         this.options.onStatusChange?.("disconnected");
         this.scheduleReconnect();
       };
 
       ws.onerror = () => {
+        if (this.ws !== ws) return; // 忽略旧连接事件
         this.options.onStatusChange?.("error");
       };
     } catch {
@@ -82,14 +100,34 @@ class WsClient<T> {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     if (this.resetTimer) clearInterval(this.resetTimer);
-    this.ws?.close();
-    this.ws = null;
+    // 移除事件处理器后关闭，防止异步 onclose 在 stopped 被重置后触发多余重连
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.close();
+      this.ws = null;
+    }
     this.consecutiveFailures = 0;
   }
 
   resume(): void {
     this.stopped = false;
     this.consecutiveFailures = 0;
+    this.retryCount = 0;
+    // 重建 disconnect() 中被清除的 resetTimer，确保后续失败后仍能自动恢复
+    if (!this.resetTimer) {
+      this.resetTimer = setInterval(() => {
+        if (this.consecutiveFailures > 0 && Date.now() - this.consecutiveFailuresResetTime > 60000) {
+          console.warn("[WebSocket] 重置失败计数器:", this.consecutiveFailures, "-> 0");
+          this.consecutiveFailures = 0;
+          this.retryCount = 0;
+          this.stopped = false;
+          this.connect();
+        }
+      }, 60000);
+    }
     if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
       this.connect();
     }
