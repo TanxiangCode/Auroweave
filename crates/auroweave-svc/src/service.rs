@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 /// Windows 服务主体接入实现
 /// 作者: TanXiang
 use std::ffi::OsString;

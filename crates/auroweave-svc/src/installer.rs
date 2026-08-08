@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 /// Windows 系统服务与计划任务提权安装器
 /// 作者: TanXiang
 ///

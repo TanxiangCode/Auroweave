@@ -1,9 +1,12 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 /// Windows 系统服务宿主入口
 /// 作者: TanXiang
+#[cfg(target_os = "windows")]
 mod installer;
+#[cfg(target_os = "windows")]
 mod service;
 mod core_manager;
+#[cfg(target_os = "windows")]
 mod ipc;
 mod updater;
 mod utils;
@@ -24,39 +27,73 @@ fn main() {
 
     match subcommand {
         "install" | "install-service" => {
-            tracing_subscriber::fmt()
-                .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
-                .init();
-            if let Err(e) = crate::installer::install_service(singbox_path) {
-                eprintln!("系统服务模式安装失败: {}", e);
+            #[cfg(target_os = "windows")]
+            {
+                tracing_subscriber::fmt()
+                    .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+                    .init();
+                if let Err(e) = crate::installer::install_service(singbox_path) {
+                    eprintln!("系统服务模式安装失败: {}", e);
+                    std::process::exit(1);
+                }
+                println!("系统服务模式安装成功！");
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = singbox_path;
+                eprintln!("install-service 命令仅支持 Windows 平台");
                 std::process::exit(1);
             }
-            println!("系统服务模式安装成功！");
         }
         "install-task" => {
-            tracing_subscriber::fmt()
-                .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
-                .init();
-            if let Err(e) = crate::installer::install_task(singbox_path) {
-                eprintln!("计划任务模式安装失败: {}", e);
+            #[cfg(target_os = "windows")]
+            {
+                tracing_subscriber::fmt()
+                    .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+                    .init();
+                if let Err(e) = crate::installer::install_task(singbox_path) {
+                    eprintln!("计划任务模式安装失败: {}", e);
+                    std::process::exit(1);
+                }
+                println!("计划任务模式安装成功！");
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = singbox_path;
+                eprintln!("install-task 命令仅支持 Windows 平台");
                 std::process::exit(1);
             }
-            println!("计划任务模式安装成功！");
         }
         "uninstall" => {
-            tracing_subscriber::fmt()
-                .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
-                .init();
-            if let Err(e) = crate::installer::uninstall() {
-                eprintln!("组件卸载失败: {}", e);
+            #[cfg(target_os = "windows")]
+            {
+                tracing_subscriber::fmt()
+                    .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+                    .init();
+                if let Err(e) = crate::installer::uninstall() {
+                    eprintln!("组件卸载失败: {}", e);
+                    std::process::exit(1);
+                }
+                println!("组件卸载成功！");
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                eprintln!("uninstall 命令仅支持 Windows 平台");
                 std::process::exit(1);
             }
-            println!("组件卸载成功！");
         }
         "run" => {
-            init_file_logging();
-            if let Err(e) = crate::service::run() {
-                error!("运行服务主体失败: {}", e);
+            #[cfg(target_os = "windows")]
+            {
+                init_file_logging();
+                if let Err(e) = crate::service::run() {
+                    error!("运行服务主体失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                eprintln!("run 命令仅支持 Windows 平台");
                 std::process::exit(1);
             }
         }
@@ -141,23 +178,38 @@ fn run_direct_task() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             if parent_pid != 0 {
-                // 在 Windows 下通过尝试打开进程句柄来判断存活
-                unsafe {
-                    use windows_sys::Win32::Foundation::CloseHandle;
-                    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, GetExitCodeProcess};
-                    
-                    let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, parent_pid);
-                    if handle == 0 {
+                #[cfg(target_os = "windows")]
+                {
+                    // 在 Windows 下通过尝试打开进程句柄来判断存活
+                    unsafe {
+                        use windows_sys::Win32::Foundation::CloseHandle;
+                        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, GetExitCodeProcess};
+                        
+                        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, parent_pid);
+                        if handle == 0 {
+                            tracing::info!("父进程 {} 已不存在，看门狗触发退出。", parent_pid);
+                            break;
+                        } else {
+                            let mut exit_code: u32 = 0;
+                            if GetExitCodeProcess(handle, &mut exit_code) != 0 && exit_code != 259 { // 259 = STILL_ACTIVE
+                                tracing::info!("父进程 {} 已退出 (状态码 {})，看门狗触发退出。", parent_pid, exit_code);
+                                CloseHandle(handle);
+                                break;
+                            }
+                            CloseHandle(handle);
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    // 在 Unix 下通过 kill -0 检测进程是否存在
+                    let result = std::process::Command::new("kill")
+                        .arg("-0")
+                        .arg(parent_pid.to_string())
+                        .status();
+                    if !result.map(|s| s.success()).unwrap_or(false) {
                         tracing::info!("父进程 {} 已不存在，看门狗触发退出。", parent_pid);
                         break;
-                    } else {
-                        let mut exit_code: u32 = 0;
-                        if GetExitCodeProcess(handle, &mut exit_code) != 0 && exit_code != 259 { // 259 = STILL_ACTIVE
-                            tracing::info!("父进程 {} 已退出 (状态码 {})，看门狗触发退出。", parent_pid, exit_code);
-                            CloseHandle(handle);
-                            break;
-                        }
-                        CloseHandle(handle);
                     }
                 }
             }

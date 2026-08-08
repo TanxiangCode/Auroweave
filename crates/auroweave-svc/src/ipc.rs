@@ -1,3 +1,4 @@
+#![cfg(target_os = "windows")]
 /// Windows 具名管道 IPC 服务端
 /// 作者: TanXiang
 ///

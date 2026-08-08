@@ -50,6 +50,7 @@ impl CoreManager {
     }
 
     /// 查询内核当前状态和 PID
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub async fn get_status(&self) -> (CoreStatus, Option<u32>) {
         let status = self.status.lock().await.clone();
         let pid = *self.pid.lock().await;
