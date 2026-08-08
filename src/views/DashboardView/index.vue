@@ -9,6 +9,7 @@ import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
+import { useSubscriptionStore } from "@/stores/subscription.store";
 import { useFluidWave } from "@/composables/useFluidWave";
 
 import EnergyCore from "./components/EnergyCore.vue";
@@ -23,6 +24,7 @@ import { useCoreStatus } from "./hooks/useCoreStatus";
 const router = useRouter();
 const connectionStore = useConnectionStore();
 const proxyStore = useProxyStore();
+const subStore = useSubscriptionStore();
 
 const { smoothDownloadSpeed, activeConnectionCount, totalDownload, totalUpload } =
   storeToRefs(connectionStore);
@@ -44,6 +46,9 @@ const { rotationDeg } = useFluidWave({ speedBps: smoothDownloadSpeed });
 function navigate(path: string) {
   router.push(path);
 }
+
+// 拉取订阅列表，供 IdleTipsPanel 判断是否显示订阅入口按钮
+subStore.fetchAll();
 </script>
 
 <template>

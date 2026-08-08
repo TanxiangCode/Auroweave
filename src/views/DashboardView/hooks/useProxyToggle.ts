@@ -7,8 +7,6 @@
 import { ref } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
-import { useSubscriptionStore } from "@/stores/subscription.store";
-import { useRouter } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import { info as logInfo, error as logError } from "@tauri-apps/plugin-log";
 import type { ApiResponse } from "@/types";
@@ -21,8 +19,6 @@ import type { ApiResponse } from "@/types";
 export function useProxyToggle() {
   const proxyStore = useProxyStore();
   const settingsStore = useSettingsStore();
-  const subStore = useSubscriptionStore();
-  const router = useRouter();
 
   /** 代理流量接管总开关 */
   const proxyActive = ref(true);
@@ -35,30 +31,6 @@ export function useProxyToggle() {
     operating.value = true;
 
     const nextActive = !proxyActive.value;
-
-    // 启动代理前检查是否有可用订阅
-    if (nextActive) {
-      subStore.fetchAll().finally(() => {
-        if (subStore.subscriptions.length === 0) {
-          const confirmed = confirm(
-            "尚未导入任何订阅，无法启动代理。\n\n是否前往设置页面导入订阅？"
-          );
-          if (confirmed) {
-            router.push("/settings?panel=subscription");
-          }
-          operating.value = false;
-          return;
-        }
-        proceedWithToggle(nextActive);
-      });
-      return;
-    }
-
-    proceedWithToggle(nextActive);
-  }
-
-  /** 实际执行代理开关逻辑 */
-  function proceedWithToggle(nextActive: boolean) {
     // 乐观更新
     proxyActive.value = nextActive;
 
