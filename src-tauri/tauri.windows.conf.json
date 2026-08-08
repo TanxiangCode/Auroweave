@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/AuroDaemon.exe": "AuroDaemon.exe"
+    }
+  }
+}

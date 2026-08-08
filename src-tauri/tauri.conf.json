@@ -43,8 +43,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "sidecar-bin/": "sidecar-bin/",
-      "resources/AuroDaemon.exe": "AuroDaemon.exe"
+      "sidecar-bin/": "sidecar-bin/"
     }
   }
 }
