@@ -1,4 +1,7 @@
-/// 系统代理设置 (仅在 Windows 生效，使用原生 Win32 注册表 API)
+/// 系统代理设置 (跨平台)
+/// - Windows: 使用原生 Win32 注册表 API
+/// - macOS: 使用 networksetup 命令 (通过 osascript 提权)
+/// - Linux: 暂未实现
 /// 作者: TanXiang
 
 #[cfg(target_os = "windows")]
@@ -137,6 +140,166 @@ mod win_registry {
     }
 }
 
+// ===========================================================================
+// macOS 系统代理实现 (使用 networksetup 命令)
+// ===========================================================================
+#[cfg(target_os = "macos")]
+mod mac_sysproxy {
+    use std::process::Command;
+
+    /// 获取所有已启用的网络服务列表 (Wi-Fi, Ethernet, USB 10/100/1000 LAN 等)
+    ///
+    /// 通过 `networksetup -listallnetworkservices` 获取，
+    /// 第一行是说明文字需跳过，以 `*` 开头的是已禁用的服务也跳过。
+    fn get_network_services() -> Vec<String> {
+        match Command::new("networksetup")
+            .arg("-listallnetworkservices")
+            .output()
+        {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                stdout
+                    .lines()
+                    .skip(1) // 第一行: "An asterisk (*) denotes that a network service is disabled."
+                    .filter(|line| !line.is_empty() && !line.starts_with('*'))
+                    .map(|s| s.trim().to_string())
+                    .collect()
+            }
+            Err(_) => {
+                // 回退到常见服务名
+                vec!["Wi-Fi".to_string(), "Ethernet".to_string()]
+            }
+        }
+    }
+
+    /// 批量执行 networksetup 命令
+    ///
+    /// 策略:
+    /// 1. 先尝试直接执行 (无 root 权限)，某些 macOS 版本或配置下可能成功
+    /// 2. 若直接执行失败且 allow_prompt=true，通过 osascript 提权执行 (会弹出密码框)
+    /// 3. 若 allow_prompt=false，直接返回错误
+    fn run_networksetup_batch(commands: &[String], allow_prompt: bool) -> Result<(), String> {
+        if commands.is_empty() {
+            return Ok(());
+        }
+
+        // 合并为一条 shell 命令，用 ; 连接
+        let combined = commands.join(" ; ");
+
+        // 1. 先尝试直接执行（无 root 权限）
+        let direct_result = Command::new("sh")
+            .arg("-c")
+            .arg(&combined)
+            .output();
+
+        if let Ok(out) = &direct_result {
+            if out.status.success() {
+                return Ok(());
+            }
+            // 直接执行失败，记录 stderr 供调试
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            log::debug!("[sysproxy] networksetup 直接执行失败: {}", stderr.trim());
+        }
+
+        if !allow_prompt {
+            return Err("networksetup 需要 root 权限，当前为静默模式不提权".to_string());
+        }
+
+        // 2. 通过 osascript 提权执行
+        // AppleScript do shell script 中需要转义反斜杠和双引号
+        let escaped = combined.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            r#"do shell script "{}" with administrator privileges"#,
+            escaped
+        );
+
+        log::info!("[sysproxy] 通过 osascript 提权执行 networksetup...");
+        match Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+        {
+            Ok(out) => {
+                if out.status.success() {
+                    log::info!("[sysproxy] osascript 提权执行成功");
+                    Ok(())
+                } else {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    Err(format!("networksetup 提权执行失败: {}", stderr.trim()))
+                }
+            }
+            Err(e) => Err(format!("无法执行 osascript: {}", e)),
+        }
+    }
+
+    /// 设置系统代理 (macOS)
+    ///
+    /// 在所有已启用的网络服务上设置/取消 HTTP、HTTPS、SOCKS 代理。
+    ///
+    /// 参数:
+    /// - enabled: true=开启代理, false=关闭代理
+    /// - port: 代理端口 (mixed inbound 端口)
+    /// - allow_prompt: 是否允许弹出 macOS 密码框提权 (退出时应设为 false)
+    pub fn set_proxy(enabled: bool, port: u16, allow_prompt: bool) -> Result<(), String> {
+        let services = get_network_services();
+        if services.is_empty() {
+            return Err("未找到任何网络服务".to_string());
+        }
+
+        let mut commands = Vec::new();
+        let port_str = port.to_string();
+
+        for service in &services {
+            // 转义服务名中的单引号 (shell 单引号字符串中用 '\'' 转义)
+            let s = service.replace('\'', "'\\''");
+
+            if enabled {
+                // 设置 HTTP 代理
+                commands.push(format!(
+                    "networksetup -setwebproxy '{}' 127.0.0.1 {}",
+                    s, port_str
+                ));
+                // 设置 HTTPS 代理
+                commands.push(format!(
+                    "networksetup -setsecurewebproxy '{}' 127.0.0.1 {}",
+                    s, port_str
+                ));
+                // 设置 SOCKS 代理
+                commands.push(format!(
+                    "networksetup -setsocksfirewallproxy '{}' 127.0.0.1 {}",
+                    s, port_str
+                ));
+                // 设置代理绕过域名 (localhost 等不走代理)
+                commands.push(format!(
+                    "networksetup -setproxybypassdomains '{}' 127.0.0.1 localhost '*.local' 169.254/16",
+                    s
+                ));
+            } else {
+                // 关闭 HTTP 代理
+                commands.push(format!("networksetup -setwebproxystate '{}' off", s));
+                // 关闭 HTTPS 代理
+                commands.push(format!("networksetup -setsecurewebproxystate '{}' off", s));
+                // 关闭 SOCKS 代理
+                commands.push(format!("networksetup -setsocksfirewallproxystate '{}' off", s));
+            }
+        }
+
+        log::info!(
+            "[sysproxy] macOS {} 系统代理, 端口: {}, 网络服务数: {}, 允许提权: {}",
+            if enabled { "开启" } else { "关闭" },
+            port,
+            services.len(),
+            allow_prompt
+        );
+
+        run_networksetup_batch(&commands, allow_prompt)
+    }
+}
+
+// ===========================================================================
+// 公共 API — 各平台统一接口
+// ===========================================================================
+
 #[cfg(target_os = "windows")]
 pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
     let server_val = format!("127.0.0.1:{}", port);
@@ -145,7 +308,33 @@ pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
+    mac_sysproxy::set_proxy(enabled, port, true)
+}
+
+/// 静默设置系统代理 (不弹出提权密码框)
+///
+/// 用于应用退出、启动清理等场景，避免阻塞或打扰用户。
+/// 在 macOS 上仅尝试直接执行 networksetup (无 root 时可能失败)；
+/// 在 Windows 上与 set_system_proxy 行为一致 (不需要提权)。
+pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        set_system_proxy(enabled, port)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        mac_sysproxy::set_proxy(enabled, port, false)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = (enabled, port);
+        Ok(())
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn set_system_proxy(_enabled: bool, _port: u16) -> Result<(), String> {
     Ok(())
 }
