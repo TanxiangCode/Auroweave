@@ -47,12 +47,16 @@ const breathingGlowColor = computed(() => {
       @click="emit('toggle')"
       :title="proxyActive ? '网络已接管，点击安全释放并休眠' : '核心已待命，点击唤醒并接管流量'"
     >
+      <!-- 旋转背景环（conic-gradient 光效层） -->
+      <div
+        v-if="proxyActive"
+        class="energy-rotor"
+        :style="{ transform: 'rotate(' + rotationDeg + 'deg)' }"
+      ></div>
+      <!-- 静止内容层（图标 + 文字不随环旋转） -->
       <div
         class="energy-ring"
-        :style="[
-          { transform: proxyActive ? 'rotate(' + rotationDeg + 'deg)' : 'none' },
-          coreGlowStyle.ring
-        ]"
+        :style="coreGlowStyle.ring"
       >
         <div class="energy-inner">
           <template v-if="proxyActive">
@@ -86,6 +90,7 @@ const breathingGlowColor = computed(() => {
 }
 
 .energy-core {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -101,6 +106,16 @@ const breathingGlowColor = computed(() => {
   transform: scale(1.02);
 }
 
+/* 旋转层：仅承载 conic-gradient 光效，不带 transition 避免 360° 回弹 */
+.energy-rotor {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  z-index: 0;
+  pointer-events: none;
+}
+
 .energy-ring {
   position: relative;
   width: 240px;
@@ -109,7 +124,7 @@ const breathingGlowColor = computed(() => {
   padding: 4px;
   background: var(--energy-active);
   box-shadow: var(--shadow-glow-cyan);
-  transition: background 0.6s ease-in-out, box-shadow 0.6s ease-in-out, transform var(--duration-normal) var(--ease-out);
+  transition: background 0.6s ease-in-out, box-shadow 0.6s ease-in-out;
   z-index: 1;
 }
 
