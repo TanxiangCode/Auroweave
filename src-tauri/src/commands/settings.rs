@@ -141,7 +141,19 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         
         // TUN 模式入口 (如果启用)
         if settings.tun_enabled {
-            // 使用用户配置的网卡名称，默认 Auroweave
+            // macOS 上 TUN 接口名必须以 utun 开头 (如 utun9)，否则 sing-box 报 bad tun name
+            // Linux 上可使用任意名称 (如 tun0)
+            // Windows 上 interface_name 不生效 (使用 Wintun 驱动)
+            #[cfg(target_os = "macos")]
+            let iface_name = {
+                let user_name = settings.tun_interface_name.trim();
+                if user_name.starts_with("utun") {
+                    user_name.to_string()
+                } else {
+                    "utun9".to_string()
+                }
+            };
+            #[cfg(not(target_os = "macos"))]
             let iface_name = if settings.tun_interface_name.trim().is_empty() {
                 "Auroweave".to_string()
             } else {
@@ -160,7 +172,7 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         modified = true;
     }
 
-    // 2. 同步 ClashAPI 端口
+    // 2. 同步 ClashAPI 端口 + cache_file 路径
     if let Some(experimental) = config_val.get_mut("experimental").and_then(|e| e.as_object_mut()) {
         if let Some(clash_api) = experimental.get_mut("clash_api").and_then(|c| c.as_object_mut()) {
             clash_api.insert(
@@ -169,11 +181,43 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
             );
             modified = true;
         }
+        // 确保 cache_file.path 指向数据目录，避免 sing-box 将 cache.db 写入工作目录
+        // （开发模式下会触发 Tauri 文件监听导致应用反复重启）
+        if let Some(cache_file) = experimental.get_mut("cache_file").and_then(|c| c.as_object_mut()) {
+            cache_file.insert(
+                "path".to_string(),
+                serde_json::json!(crate::get_data_root().join("cache.db").to_string_lossy().to_string())
+            );
+            modified = true;
+        }
     }
 
-    // 3. 移除 log.output 以便统一使用系统日志收集 stdout
+    // 3. 同步代理模式到 route.final
+    // sing-box 通过 route.final 决定最终出站：
+    //   direct 模式 → route.final = "direct" (所有流量直连)
+    //   rule/global 模式 → route.final = "proxy" (流量走代理出站)
+    // 若不同步，切换到直连后 config.json 仍保持 final="proxy"，流量仍走代理
+    if let Some(route) = config_val.get_mut("route").and_then(|r| r.as_object_mut()) {
+        let final_outbound = match settings.proxy_mode.as_str() {
+            "direct" => "direct",
+            _ => "proxy",
+        };
+        route.insert("final".to_string(), serde_json::json!(final_outbound));
+        modified = true;
+    }
+
+    // 4. 移除 log.output 以便统一使用系统日志收集 stdout
     if let Some(log) = config_val.get_mut("log").and_then(|l| l.as_object_mut()) {
         if log.remove("output").is_some() {
+            modified = true;
+        }
+    }
+
+    // 5. 确保 dns.strategy 存在（兼容旧版配置文件，缺少时补写 prefer_ipv4）
+    // prefer_ipv4 策略可避免 TUN 模式下因 IPv6 解析失败导致的连接超时
+    if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
+        if !dns.contains_key("strategy") {
+            dns.insert("strategy".to_string(), serde_json::json!("prefer_ipv4"));
             modified = true;
         }
     }
@@ -331,14 +375,33 @@ pub async fn settings_export_diagnostic_log(app_handle: tauri::AppHandle) -> Api
 }
 
 /// 专用 TUN 模式切换命令 (同步等待进程启动结果并将失败透传前端)
+///
+/// 可选 proxy_mode 参数：若提供，会同时更新代理模式，避免前端需要
+/// 额外调用 proxy_set_mode 触发第二次进程重启（macOS 上即第二次密码框）。
 #[tauri::command]
-pub async fn tun_set_enabled(app_handle: tauri::AppHandle, enabled: bool) -> ApiResponse<()> {
-    log::info!("[settings] 切换 TUN 模式状态: enabled={}", enabled);
+pub async fn tun_set_enabled(
+    app_handle: tauri::AppHandle,
+    enabled: bool,
+    proxy_mode: Option<String>,
+) -> ApiResponse<()> {
+    log::info!(
+        "[settings] 切换 TUN 模式状态: enabled={}, proxy_mode={:?}",
+        enabled, proxy_mode
+    );
 
     let mut current_settings = settings_get_internal(&app_handle);
     current_settings.tun_enabled = enabled;
-    
-    if let Err(e) = update_settings_internal(&app_handle, serde_json::to_value(current_settings).unwrap()) {
+
+    // 若提供了 proxy_mode 且合法，一并更新，避免前端二次调用 proxy_set_mode
+    if let Some(ref mode) = proxy_mode {
+        if ["global", "rule", "direct"].contains(&mode.as_str()) {
+            current_settings.proxy_mode = mode.clone();
+        }
+    }
+
+    if let Err(e) =
+        update_settings_internal(&app_handle, serde_json::to_value(current_settings).unwrap())
+    {
         return ApiResponse::err(format!("保存设置失败: {}", e), 500);
     }
 
@@ -346,7 +409,7 @@ pub async fn tun_set_enabled(app_handle: tauri::AppHandle, enabled: bool) -> Api
     if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
         return ApiResponse::err(e, 500);
     }
-    
+
     ApiResponse::ok(())
 }
 

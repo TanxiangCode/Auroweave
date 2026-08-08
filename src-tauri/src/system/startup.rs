@@ -126,10 +126,26 @@ pub async fn apply_core_mode_with_fallback(
     // ---- 步骤3: 统一清理旧状态 ----
     // 无论之前处于什么模式，先释放系统代理、停止 sing-box 进程
     // Windows 额外停止计划任务 TUN
-    let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+    // 使用静默模式清理，避免启动时弹出 macOS 密码框（后续设置新代理时会覆盖旧设置）
+    let _ = crate::system::sysproxy::set_system_proxy_silent(false, 0);
     #[cfg(target_os = "windows")]
     let _ = crate::system::service_control::stop_direct_tun_task();
-    let _ = sm.stop().await;
+
+    // macOS 优化：如果旧进程是通过 osascript 提权启动的（root TUN 进程），
+    // 且新模式仍然需要 TUN，则跳过 stop()（避免 osascript kill 密码框），
+    // 后续用 restart_privileged() 在单次 osascript 中合并 kill+start。
+    #[cfg(target_os = "macos")]
+    let was_external = sm.is_external().await;
+    #[cfg(not(target_os = "macos"))]
+    let was_external = false;
+
+    let skip_stop = was_external && settings.tun_enabled;
+    if skip_stop {
+        info!("[app] macOS TUN→TUN 场景：跳过 stop()，将由 restart_privileged() 合并 kill+start");
+        sm.mark_stopped().await;
+    } else {
+        let _ = sm.stop().await;
+    }
 
     if settings.core.run_mode == "service" {
         // ============ 服务模式路径 ============
@@ -214,9 +230,25 @@ pub async fn apply_core_mode_with_fallback(
                         }
                     }
                 }
-                #[cfg(not(target_os = "windows"))]
+                #[cfg(target_os = "macos")]
                 {
-                    // macOS/Linux: 直接启动 sing-box（TUN 需要应用以特权运行或使用 sudo）
+                    // macOS: TUN→TUN 用 restart_privileged 合并 kill+start 为单次密码框
+                    if skip_stop && was_external {
+                        info!("[app] 回退模式 macOS TUN→TUN，通过 restart_privileged 合并 kill+start");
+                        if let Err(e) = sm.restart_privileged(&path_str).await {
+                            error!("[app] 回退模式 restart_privileged 失败: {}", e);
+                            persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                            spawn_local_start(sm.clone(), path_str.clone(), port);
+                        }
+                    } else if let Err(e) = sm.start_privileged(&path_str).await {
+                        error!("[app] 回退模式提权启动 sing-box TUN 失败: {}", e);
+                        persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    // Linux: 直接启动 sing-box（TUN 需要应用以特权运行或使用 sudo）
                     if let Err(e) = sm.start(&path_str).await {
                         error!("[app] 回退模式启动 sing-box TUN 失败: {}", e);
                         persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
@@ -275,10 +307,46 @@ pub async fn apply_core_mode_with_fallback(
                     }
                 }
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
             {
-                // macOS/Linux: 直接启动 sing-box（TUN 需要应用以特权运行）
-                info!("[app] macOS/Linux 直接启动 sing-box TUN 模式");
+                // macOS: TUN 需要 root 权限，通过 osascript 提权启动 sing-box
+                if skip_stop && was_external {
+                    // TUN→TUN：旧 root 进程仍在运行，用 restart_privileged 合并 kill+start
+                    info!("[app] macOS TUN→TUN，通过 restart_privileged 合并 kill+start 为单次密码框");
+                    if let Err(e) = sm.restart_privileged(&path_str).await {
+                        error!("[app] restart_privileged 失败: {}", e);
+                        persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                        return Err(format!("TUN 重启失败，已回退为系统代理: {}", e));
+                    }
+                } else {
+                    // 非 TUN→TUN：旧进程已停止或首次启动
+                    // 但如果检测到残留 PID 文件（上次崩溃/强退后 root 进程仍在运行），
+                    // 需用 restart_privileged 先 kill 旧进程再 start，避免端口冲突
+                    let pid_file = std::env::temp_dir().join("auroweave-singbox.pid");
+                    if pid_file.exists() {
+                        info!("[app] macOS TUN 模式：检测到残留 PID 文件，使用 restart_privileged 清理旧进程并启动");
+                        if let Err(e) = sm.restart_privileged(&path_str).await {
+                            error!("[app] restart_privileged（残留清理）失败: {}", e);
+                            persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                            spawn_local_start(sm.clone(), path_str.clone(), port);
+                            return Err(format!("TUN 重启失败（残留进程清理），已回退为系统代理: {}", e));
+                        }
+                    } else {
+                        info!("[app] macOS TUN 模式，通过 osascript 提权启动 sing-box");
+                        if let Err(e) = sm.start_privileged(&path_str).await {
+                            error!("[app] 提权启动 sing-box TUN 失败: {}", e);
+                            persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
+                            spawn_local_start(sm.clone(), path_str.clone(), port);
+                            return Err(format!("TUN 启动失败，已回退为系统代理: {}", e));
+                        }
+                    }
+                }
+            }
+            #[cfg(target_os = "linux")]
+            {
+                // Linux: 直接启动 sing-box（TUN 需要应用以特权运行或使用 sudo）
+                info!("[app] Linux 直接启动 sing-box TUN 模式");
                 if let Err(e) = sm.start(&path_str).await {
                     error!("[app] 启动 sing-box TUN 失败: {}", e);
                     persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });

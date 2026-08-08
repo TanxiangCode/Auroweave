@@ -167,7 +167,8 @@ pub fn run() {
         .run(move |app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 log::info!("[app] 程序正在退出，清理网络代理...");
-                let _ = system::sysproxy::set_system_proxy(false, 0);
+                // 使用静默模式清理代理，避免退出时弹出 macOS 密码框阻塞退出流程
+                let _ = system::sysproxy::set_system_proxy_silent(false, 0);
                 let settings = commands::settings::settings_get_internal(app_handle);
                 if settings.core.run_mode == "service" {
                     log::info!("[app] 服务模式退出：停止系统服务");
@@ -179,8 +180,10 @@ pub fn run() {
                     #[cfg(target_os = "windows")]
                     let _ = system::service_control::stop_direct_tun_task();
                     let sidecar_manager = app_handle.state::<std::sync::Arc<SidecarManager>>().inner().clone();
+                    // 使用静默停止：macOS TUN 模式下不弹出密码框，
+                    // root 进程可能继续运行但会在下次启动时自动清理
                     tauri::async_runtime::block_on(async move {
-                        let _ = sidecar_manager.stop().await;
+                        let _ = sidecar_manager.stop_silent().await;
                     });
                 }
             }

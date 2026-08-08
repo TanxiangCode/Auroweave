@@ -8,7 +8,7 @@ import { ref } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
 import { invoke } from "@tauri-apps/api/core";
-import { info as logInfo, error as logError } from "@tauri-apps/plugin-log";
+import { info as logInfo, error as logError, warn as logWarn } from "@tauri-apps/plugin-log";
 import type { ApiResponse } from "@/types";
 
 /**
@@ -38,33 +38,54 @@ export function useProxyToggle() {
       try {
         if (nextActive) {
           if (settingsStore.settings.tun_enabled) {
-            const res: ApiResponse = await invoke("tun_set_enabled", { enabled: true });
+            // TUN 模式：通过 proxyMode 参数一次性设置 tun_enabled + proxy_mode，
+            // 避免先 tun_set_enabled 再 changeProxyMode 导致的第二次进程重启（macOS 第二次密码框）
+            const proxyMode = settingsStore.settings.proxy_mode === "direct" ? "rule" : null;
+            const res: ApiResponse = await invoke("tun_set_enabled", { enabled: true, proxyMode });
             if (res.success) {
               settingsStore.settings.tun_enabled = true;
-              await proxyStore.changeProxyMode("direct");
+              if (proxyMode) {
+                settingsStore.settings.proxy_mode = proxyMode;
+                proxyStore.$patch({ proxyMode });
+              }
+              // 不再调用 changeProxyMode — tun_set_enabled 已用正确的 proxy_mode 启动 sing-box
             } else {
-              const confirmInstall = confirm(
-                "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
-              );
-              if (confirmInstall) {
-                const installRes: ApiResponse = await invoke("service_install");
-                if (installRes.success) {
-                  const retryRes: ApiResponse = await invoke("tun_set_enabled", { enabled: true });
-                  if (retryRes.success) {
-                    settingsStore.settings.tun_enabled = true;
-                    await proxyStore.changeProxyMode("direct");
-                    return;
+              const isMac = navigator.userAgent.toLowerCase().includes("mac");
+              if (isMac) {
+                // macOS: TUN 提权通过 osascript 密码框完成，失败时无需安装服务
+                logWarn(`[DashboardView] macOS TUN 启动失败: ${res.error}`);
+                alert(`TUN 模式启动失败。\n\n${res.error}\n\n已自动回退为系统代理模式。`);
+                proxyActive.value = false;
+                settingsStore.settings.tun_enabled = false;
+              } else {
+                const confirmInstall = confirm(
+                  "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
+                );
+                if (confirmInstall) {
+                  const installRes: ApiResponse = await invoke("service_install");
+                  if (installRes.success) {
+                    // 通过 proxyMode 参数避免安装后的二次 changeProxyMode 重启
+                    const retryRes: ApiResponse = await invoke("tun_set_enabled", { enabled: true, proxyMode: "rule" });
+                    if (retryRes.success) {
+                      settingsStore.settings.tun_enabled = true;
+                      settingsStore.settings.proxy_mode = "rule";
+                      proxyStore.$patch({ proxyMode: "rule" });
+                      return;
+                    }
                   }
                 }
+                proxyActive.value = false;
+                settingsStore.settings.tun_enabled = false;
               }
-              proxyActive.value = false;
-              settingsStore.settings.tun_enabled = false;
             }
           } else {
-            await invoke("tun_set_enabled", { enabled: false });
+            // 非 TUN 模式：通过 proxyMode 参数避免二次 changeProxyMode 调用
+            const proxyMode = settingsStore.settings.proxy_mode === "direct" ? "rule" : null;
+            await invoke("tun_set_enabled", { enabled: false, proxyMode });
             settingsStore.settings.tun_enabled = false;
-            if (proxyStore.proxyMode === "direct") {
-              await proxyStore.changeProxyMode("rule");
+            if (proxyMode) {
+              settingsStore.settings.proxy_mode = proxyMode;
+              proxyStore.$patch({ proxyMode });
             }
           }
         } else {
