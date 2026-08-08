@@ -18,6 +18,7 @@
 /// - `SHUTDOWN_CORE`：停止内核进程
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const PIPE_NAME: &str = r"\\.\pipe\Auroweave.Core.Control";
 
 /// IPC 请求结构体
@@ -25,6 +26,7 @@ const PIPE_NAME: &str = r"\\.\pipe\Auroweave.Core.Control";
 /// - `token`: 安全令牌（AES-256-GCM 解密后的明文）
 /// - `config`: 可选的配置内容或配置文件路径（仅 RELOAD_CONFIG 使用）
 #[derive(Debug, Serialize)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 struct IpcRequest {
     action: String,
     token: String,

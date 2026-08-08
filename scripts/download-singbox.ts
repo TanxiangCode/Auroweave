@@ -95,7 +95,7 @@ function getTargetConfig(): TargetConfig {
 async function downloadFile(url: string, destPath: string): Promise<void> {
   console.log(`Downloading sing-box from ${url} ...`);
   const response = await fetch(url, {
-    signal: AbortSignal.timeout(30000) // 设置超时时间
+    signal: AbortSignal.timeout(120000) // 设置超时时间
   });
 
   if (!response.ok) {

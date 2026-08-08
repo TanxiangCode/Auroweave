@@ -197,9 +197,10 @@ pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
 
 /// 以管理员身份提权重启当前 Auroweave 程序
 #[tauri::command]
-pub async fn app_restart_as_admin(app_handle: tauri::AppHandle) -> ApiResponse<()> {
+pub async fn app_restart_as_admin(#[allow(unused_variables)] app_handle: tauri::AppHandle) -> ApiResponse<()> {
 log::info!("[proxy] 准备以管理员身份提权重启程序");
 if let Ok(current_exe) = std::env::current_exe() {
+#[allow(unused_variables)]
 let exe_path = current_exe.to_string_lossy().to_string();
 
 #[cfg(target_os = "windows")]

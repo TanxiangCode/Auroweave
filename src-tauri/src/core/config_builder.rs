@@ -256,7 +256,7 @@ impl ConfigBuilder {
                 }));
                 // 合并 geosite-cn + geoip-cn 直连规则
                 if let Some(rules) = route_rules.as_array_mut() {
-                    let last = rules.pop().unwrap();
+                    let _ = rules.pop().unwrap();
                     // 替换为合并规则
                     rules.push(json!({ "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" }));
                 }
