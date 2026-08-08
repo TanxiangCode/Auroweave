@@ -4,6 +4,12 @@
  * 作者: TanXiang
  *
  * 视觉绝对重心：旋转圆环 + 呼吸动效 + 连接/待命状态图标
+ *
+ * 分层结构（z-index 从低到高）：
+ *   .energy-ring            — 容器 + boxShadow 光晕
+ *     .energy-rotor         — conic-gradient 旋转层（仅 active 时存在）
+ *     .energy-rotor::before — 模糊光晕（跟随旋转层）
+ *     .energy-inner         — 静止内容层（图标 + 文字）
  */
 import { computed } from "vue";
 import { CORE_GLOW_THEMES } from "../utils/core-glow-themes";
@@ -19,23 +25,39 @@ const emit = defineEmits<{
   toggle: [];
 }>();
 
-/** 能量核光圈和文字阴影样式 */
-const coreGlowStyle = computed(() => {
-  if (!props.proxyActive) {
-    return {
-      ring: { background: "var(--energy-idle)", boxShadow: "none" },
-      text: { color: "var(--text-secondary)", textShadow: "none" },
-    };
-  }
+/** 当前主题（活跃 / 空闲） */
+const currentTheme = computed(() => {
+  if (!props.proxyActive) return null;
   const mode = props.proxyMode as keyof typeof CORE_GLOW_THEMES;
   return CORE_GLOW_THEMES[mode] || CORE_GLOW_THEMES.rule;
+});
+
+/** 静止容器样式：仅 boxShadow，不含 background（背景交给 rotor） */
+const ringStyle = computed(() => {
+  if (!props.proxyActive) {
+    return { background: "var(--energy-idle)", boxShadow: "none" };
+  }
+  return { background: "transparent", boxShadow: currentTheme.value?.ring.boxShadow };
+});
+
+/** 旋转层样式：conic-gradient 背景 */
+const rotorStyle = computed(() => {
+  if (!props.proxyActive) return {};
+  return { background: currentTheme.value?.ring.background };
+});
+
+/** 文字样式 */
+const textStyle = computed(() => {
+  if (!props.proxyActive) {
+    return { color: "var(--text-secondary)", textShadow: "none" };
+  }
+  return currentTheme.value?.text || {};
 });
 
 /** 呼吸灯光晕颜色（配合 v-bind 实现动态关键帧） */
 const breathingGlowColor = computed(() => {
   if (!props.proxyActive) return "rgba(255, 255, 255, 0.05)";
-  const mode = props.proxyMode as keyof typeof CORE_GLOW_THEMES;
-  return CORE_GLOW_THEMES[mode]?.breathing || "rgba(0, 242, 254, 0.4)";
+  return currentTheme.value?.breathing || "rgba(0, 242, 254, 0.4)";
 });
 </script>
 
@@ -47,23 +69,20 @@ const breathingGlowColor = computed(() => {
       @click="emit('toggle')"
       :title="proxyActive ? '网络已接管，点击安全释放并休眠' : '核心已待命，点击唤醒并接管流量'"
     >
-      <!-- 旋转背景环（conic-gradient 光效层） -->
-      <div
-        v-if="proxyActive"
-        class="energy-rotor"
-        :style="{ transform: 'rotate(' + rotationDeg + 'deg)' }"
-      ></div>
-      <!-- 静止内容层（图标 + 文字不随环旋转） -->
-      <div
-        class="energy-ring"
-        :style="coreGlowStyle.ring"
-      >
+      <div class="energy-ring" :style="ringStyle">
+        <!-- 旋转背景环（conic-gradient 光效层） -->
+        <div
+          v-if="proxyActive"
+          class="energy-rotor"
+          :style="[rotorStyle, { transform: 'rotate(' + rotationDeg + 'deg)' }]"
+        ></div>
+        <!-- 静止内容层（图标 + 文字不随环旋转） -->
         <div class="energy-inner">
           <template v-if="proxyActive">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="core-active-icon" :style="{ color: coreGlowStyle.text.color }">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="core-active-icon" :style="{ color: textStyle.color }">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
             </svg>
-            <span class="energy-status-text active-badge">CONNECTED</span>
+            <span class="energy-status-text active-badge" :style="textStyle">CONNECTED</span>
           </template>
           <template v-else>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="core-idle-icon">
@@ -106,16 +125,6 @@ const breathingGlowColor = computed(() => {
   transform: scale(1.02);
 }
 
-/* 旋转层：仅承载 conic-gradient 光效，不带 transition 避免 360° 回弹 */
-.energy-rotor {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: inherit;
-  z-index: 0;
-  pointer-events: none;
-}
-
 .energy-ring {
   position: relative;
   width: 240px;
@@ -125,22 +134,27 @@ const breathingGlowColor = computed(() => {
   background: var(--energy-active);
   box-shadow: var(--shadow-glow-cyan);
   transition: background 0.6s ease-in-out, box-shadow 0.6s ease-in-out;
-  z-index: 1;
+  overflow: hidden;
 }
 
-.energy-ring::before {
+/* 旋转层：承载 conic-gradient，不带 transition 避免 360° 回弹 */
+.energy-rotor {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* 旋转层的模糊光晕 */
+.energy-rotor::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   border-radius: 50%;
   background: inherit;
   filter: blur(28px);
   opacity: 0.8;
-  z-index: -1;
-  transition: opacity 0.6s ease-in-out;
 }
 
 .energy-core:not(.connected) .energy-ring::before {
@@ -162,6 +176,7 @@ const breathingGlowColor = computed(() => {
 }
 
 .energy-inner {
+  position: relative;
   width: 100%;
   height: 100%;
   border-radius: 50%;
@@ -172,14 +187,13 @@ const breathingGlowColor = computed(() => {
   justify-content: center;
   gap: 12px;
   padding: 18px;
+  z-index: 1;
 }
 
 .energy-status-text {
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
-  color: var(--accent-cyan);
   letter-spacing: 2px;
-  text-shadow: var(--shadow-glow-cyan);
   transition: color 0.6s ease-in-out, text-shadow 0.6s ease-in-out;
 }
 
