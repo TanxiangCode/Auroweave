@@ -5,10 +5,13 @@
  *
  * 视觉绝对重心：旋转圆环 + 呼吸动效 + 连接/待命状态图标
  *
+ * 动画效果参考小米充电动画：
+ *   圆环大部分暗淡，一段亮色“彗星”光带沿环旋转。
+ *
  * 分层结构（z-index 从低到高）：
- *   .energy-ring            — 容器 + boxShadow 光晕
- *     .energy-rotor         — conic-gradient 旋转层（仅 active 时存在）
- *     .energy-rotor::before — 模糊光晕（跟随旋转层）
+ *   .energy-ring            — 容器 + 暗色环底 + boxShadow 光晕
+ *     .energy-rotor         — conic-gradient 彗星旋转层（仅 active 时存在）
+ *     .energy-rotor::before — 模糊光晕（跟随彗星，营造泛光效果）
  *     .energy-inner         — 静止内容层（图标 + 文字）
  */
 import { computed } from "vue";
@@ -32,12 +35,15 @@ const currentTheme = computed(() => {
   return CORE_GLOW_THEMES[mode] || CORE_GLOW_THEMES.rule;
 });
 
-/** 静止容器样式：仅 boxShadow，不含 background（背景交给 rotor） */
+/** 静止容器样式：暗色环底 + boxShadow 光晕 */
 const ringStyle = computed(() => {
   if (!props.proxyActive) {
     return { background: "var(--energy-idle)", boxShadow: "none" };
   }
-  return { background: "transparent", boxShadow: currentTheme.value?.ring.boxShadow };
+  return {
+    background: currentTheme.value?.ring.ringBase ?? "transparent",
+    boxShadow: currentTheme.value?.ring.boxShadow,
+  };
 });
 
 /** 旋转层样式：conic-gradient 背景 */
@@ -146,15 +152,15 @@ const breathingGlowColor = computed(() => {
   pointer-events: none;
 }
 
-/* 旋转层的模糊光晕 */
+/* 旋转层彗星光晕：聚焦在亮色区域，营造头亮尾暗的泛光效果 */
 .energy-rotor::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: 50%;
   background: inherit;
-  filter: blur(28px);
-  opacity: 0.8;
+  filter: blur(20px);
+  opacity: 0.7;
 }
 
 .energy-core:not(.connected) .energy-ring::before {
