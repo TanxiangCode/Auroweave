@@ -14,6 +14,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: "zh-CN",
   proxy_mode: "rule",
   auto_start: false,
+  minimize_to_tray: true,
+
+  start_minimized: false,
+  hide_dock_on_close: false,
+  show_tray_speed: true,
+  allow_lan: false,
+
   tun_enabled: false,
   tun_interface_name: "Auroweave",
   topology_enabled: false,
@@ -23,12 +30,17 @@ const DEFAULT_SETTINGS: AppSettings = {
   auto_group_on_import: true,
   enable_app_traffic_tracking: true,
 
+
   mixed_port: 8890,
   clash_api_port: 9090,
   speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000",
   speed_test_timeout_secs: 5,
   connection_timeout_secs: 15,
+  latency_test_concurrency: 20,
+  latency_test_timeout_ms: 3000,
+  latency_test_url: "http://www.gstatic.com/generate_204",
   core: {
+
     runMode: "local",
     service: {
       installedVersion: null,

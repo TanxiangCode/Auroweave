@@ -40,3 +40,14 @@ export async function setProxyMode(
 ): Promise<ApiResponse<void>> {
   return invokeWithTimeout<ApiResponse<void>>("proxy_set_mode", { mode });
 }
+
+/** 关闭指定 ID 的活跃连接 */
+export async function closeConnection(id: string): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("proxy_close_connection", { id });
+}
+
+/** 关闭全部活跃连接 */
+export async function closeAllConnections(): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("proxy_close_all_connections");
+}
+

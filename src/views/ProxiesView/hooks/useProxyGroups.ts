@@ -78,12 +78,21 @@ export function useProxyGroups() {
     return nodes ?? [];
   });
 
-  /** 初始化：从 URL query 或首个分组确定选中分组 */
+  /** 初始化：从 URL query 或首个分组确定选中分组，保留已有选择 */
   async function initSelectedGroup() {
     if (groups.value.length > 0) {
       const qGroup = route.query.group as string;
-      const exists = groups.value.some((g) => g.tag === qGroup);
-      selectedGroupTag.value = exists ? qGroup : groups.value[0].tag;
+      const qExists = qGroup && groups.value.some((g) => g.tag === qGroup);
+      const currentExists = selectedGroupTag.value &&
+        groups.value.some((g) => g.tag === selectedGroupTag.value);
+
+      if (qExists) {
+        selectedGroupTag.value = qGroup;
+      } else if (currentExists) {
+        // 保留当前选中分组（订阅刷新后分组结构不变时避免跳回第一个）
+      } else {
+        selectedGroupTag.value = groups.value[0].tag;
+      }
       await proxyStore.fetchGroupNodes(selectedGroupTag.value);
     }
   }

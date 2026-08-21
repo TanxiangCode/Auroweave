@@ -4,7 +4,7 @@
  *
  * 职责：按维度（日/月/年）获取分时流量历史数据
  */
-import { ref, watch, type Ref } from "vue";
+import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 /** 柱状图数据点 */

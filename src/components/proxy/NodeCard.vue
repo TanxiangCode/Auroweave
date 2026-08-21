@@ -1,57 +1,75 @@
 <template>
   <div
-    class="node-row"
-    :class="{ active: isActive, testing: isTesting, 'non-selectable': !isSelectable }"
+    class="node-card"
+    :class="[
+      layoutMode,
+      {
+        active: isActive,
+        testing: isTesting || isLatencyTesting,
+        'non-selectable': !isSelectable
+      }
+    ]"
     @click="onCardClick"
   >
-    <!-- 左侧: 协议徽章与节点名称 -->
-    <div class="node-left">
-      <span class="protocol-badge" :title="nodeType">{{ getProtocolBadge(nodeType) }}</span>
-      <div class="node-info">
-        <span class="node-name" :title="nodeTag">{{ nodeTag }}</span>
-        <span class="node-type">{{ nodeType }}</span>
+    <!-- 头部/左侧: 协议标签、节点名称、选中标识 -->
+    <div class="node-main-info">
+      <div class="node-badge-title">
+        <span class="protocol-badge" :title="nodeType">{{ getProtocolBadge(nodeType) }}</span>
+        <span class="node-title" :title="nodeTag">{{ nodeTag }}</span>
+      </div>
+
+      <!-- 选择指示器 -->
+      <div class="select-badge-wrapper">
+        <template v-if="isActive">
+          <div v-if="isSelectable" class="active-check-circle" title="当前选中出站节点">
+            <SvgIcon name="check" :size="11" />
+          </div>
+          <span v-else class="auto-active-badge" title="当前自动测速优选出口">自动优选</span>
+        </template>
       </div>
     </div>
 
-    <!-- 中间: 延迟与吞吐量数值 -->
-    <div class="node-middle">
-      <span class="latency-indicator" :style="{ color: latencyColor }">
-        <span class="status-dot" :style="{ backgroundColor: latencyColor }"></span>
-        {{ latency === undefined ? '未测试' : (latency === -1 || latency === 0 ? '超时' : `${latency} ms`) }}
-      </span>
-      <span v-if="speedBps !== undefined && speedBps > 0" class="speed-val">
-        <SvgIcon name="wifi" :size="10" style="margin-right: 2px;" />
-        {{ formatSpeed(speedBps) }}
-      </span>
-    </div>
+    <!-- 底部/右侧: 延迟、带宽与测速操作 -->
+    <div class="node-metrics-bar">
+      <div class="metrics-left">
+        <!-- 延迟指示器 -->
+        <div class="latency-box" :style="{ color: latencyColor }">
+          <span class="latency-dot" :style="{ backgroundColor: latencyColor }"></span>
+          <span class="latency-text">
+            {{ latency === undefined ? '未测' : (latency === -1 || latency === 0 ? '超时' : `${latency}ms`) }}
+          </span>
+        </div>
 
-    <!-- 右侧: 操作按钮与激活状态 -->
-    <div class="node-right">
-      <button
-        class="action-btn btn-ping"
-        :class="{ testing: isLatencyTesting }"
-        :disabled="isLatencyTesting"
-        title="测试延迟"
-        @click.stop="$emit('test-latency', nodeTag)"
-      >
-        <span v-if="isLatencyTesting" class="spinner">🌀</span>
-        <SvgIcon v-else name="bolt" :size="12" />
-      </button>
-      <button
-        class="action-btn btn-speed"
-        :class="{ testing: isTesting }"
-        :disabled="isTesting"
-        title="吞吐量测速"
-        @click.stop="$emit('test-speed', nodeTag)"
-      >
-        <span v-if="isTesting" class="spinner">🌀</span>
-        <SvgIcon v-else name="wifi" :size="12" />
-      </button>
-      <div class="select-indicator">
-        <template v-if="isActive">
-          <SvgIcon v-if="isSelectable" name="check" :size="12" class="check-mark" />
-          <span v-else class="auto-badge" title="当前自动测速选择的出口">自动</span>
-        </template>
+        <!-- 吞吐量带宽 -->
+        <div v-if="speedBps !== undefined && speedBps > 0" class="speed-box" title="历史下行测速结果">
+          <SvgIcon name="wifi" :size="10" />
+          <span>{{ formatSpeed(speedBps) }}</span>
+        </div>
+      </div>
+
+      <!-- 快捷操作按钮组 -->
+      <div class="card-actions">
+        <button
+          class="card-action-btn ping-btn"
+          :class="{ active: isLatencyTesting }"
+          :disabled="isLatencyTesting"
+          title="单个节点延迟测试"
+          @click.stop="$emit('test-latency', nodeTag)"
+        >
+          <span v-if="isLatencyTesting" class="spin-icon">🌀</span>
+          <SvgIcon v-else name="bolt" :size="11" />
+        </button>
+
+        <button
+          class="card-action-btn speed-btn"
+          :class="{ active: isTesting }"
+          :disabled="isTesting"
+          title="单个节点下行测速"
+          @click.stop="$emit('test-speed', nodeTag)"
+        >
+          <span v-if="isTesting" class="spin-icon">🌀</span>
+          <SvgIcon v-else name="wifi" :size="11" />
+        </button>
       </div>
     </div>
   </div>
@@ -59,7 +77,7 @@
 
 <script setup lang="ts">
 /**
- * 策略组节点行组件 (替换 Emoji 为精美 UI 徽章与 SvgIcon)
+ * 策略组节点卡片组件 (支持 Grid / List 视图)
  * 作者: TanXiang
  */
 import { computed } from "vue";
@@ -74,10 +92,12 @@ const props = withDefaults(
     latency?: number;
     speedBps?: number;
     isSelectable?: boolean;
+    layoutMode?: "grid" | "list";
   }>(),
   {
     isActive: false,
     isSelectable: true,
+    layoutMode: "grid",
   }
 );
 
@@ -111,12 +131,15 @@ function getProtocolBadge(type: string): string {
 }
 
 function getLatencyColor(ms?: number): string {
-  if (ms === undefined) return "var(--text-tertiary)"; // 未测试
-  if (ms === -1 || ms === 0) return "var(--accent-red)"; // 超时/失败
-  if (ms < 100) return "var(--accent-green)";
-  if (ms < 300) return "var(--accent-orange)";
-  return "var(--accent-red)";
+  if (ms === undefined) return "var(--text-tertiary)"; // 未测试: 灰色
+  if (ms === -1 || ms === 0) return "var(--accent-red)"; // 超时/错误: 红色
+  if (ms < 100) return "var(--accent-green)"; // < 100ms: 极速 (翠绿)
+  if (ms < 200) return "var(--accent-cyan)"; // 100 ~ 200ms: 良好 (青蓝)
+  if (ms < 350) return "var(--accent-orange)"; // 200 ~ 350ms: 中等 (琥珀橙)
+  if (ms < 600) return "#f97316"; // 350 ~ 600ms: 偏慢 (深橙)
+  return "var(--accent-red)"; // >= 600ms: 高延迟 (红色)
 }
+
 
 const isTesting = computed(() => speedtestStore.testingNodes.has(props.nodeTag));
 const isLatencyTesting = computed(() => speedtestStore.testingLatencyNodes.has(props.nodeTag));
@@ -129,47 +152,100 @@ function formatSpeed(bps: number): string {
 </script>
 
 <style scoped>
-.node-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
+.node-card {
+  position: relative;
   background: var(--layer-1);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-  gap: 16px;
+  transition: all var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
 }
 
-.node-row:hover {
+.node-card:hover {
   background: var(--layer-2);
   border-color: var(--border-normal);
-  transform: translateX(2px);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.node-row.non-selectable {
+.node-card.non-selectable {
   cursor: default;
 }
 
-.node-row.non-selectable:hover {
+.node-card.non-selectable:hover {
   transform: none;
-  background: var(--layer-1);
-  border-color: var(--border-subtle);
 }
 
-.node-row.active {
+.node-card.active {
   border-color: var(--accent-blue);
   background: var(--accent-blue-glow);
+  box-shadow: 0 0 12px rgba(79, 140, 255, 0.2);
 }
 
-/* 自动测速类型的组中，当前工作节点的特别高亮样式（不与手动蓝色混淆） */
-.node-row.non-selectable.active {
+.node-card.non-selectable.active {
   border-color: var(--accent-cyan);
   background: var(--accent-cyan-glow);
+  box-shadow: 0 0 12px var(--accent-cyan-glow);
 }
 
-.node-left {
+/* ==================== Grid 网格布局形态 ==================== */
+.node-card.grid {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px 12px;
+  min-height: 76px;
+  gap: 8px;
+}
+
+.node-card.grid .node-main-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+
+.node-card.grid .node-badge-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.node-card.grid .node-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-card.grid .node-metrics-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  padding-top: 6px;
+}
+
+/* ==================== List 紧凑行布局形态 ==================== */
+.node-card.list {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  gap: 16px;
+}
+
+.node-card.list:hover {
+  transform: translateX(2px);
+}
+
+.node-card.list .node-main-info {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -177,11 +253,36 @@ function formatSpeed(bps: number): string {
   flex: 1;
 }
 
+.node-card.list .node-badge-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.node-card.list .node-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-card.list .node-metrics-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+/* ==================== 通用元素样式 ==================== */
 .protocol-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
+  width: 28px;
   height: 18px;
   font-size: 10px;
   font-weight: var(--weight-bold);
@@ -193,140 +294,130 @@ function formatSpeed(bps: number): string {
   flex-shrink: 0;
 }
 
-.node-row.active .protocol-badge {
+.node-card.active .protocol-badge {
   background: var(--accent-blue);
   color: var(--text-on-accent);
   border-color: transparent;
 }
 
-.node-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+.node-card.non-selectable.active .protocol-badge {
+  background: var(--accent-cyan);
+  color: #0d1117;
+  border-color: transparent;
 }
 
-.node-name {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.node-type {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  font-family: var(--font-mono);
-  display: none; /* 已用协议徽章，这里可省去空间 */
-}
-
-.node-middle {
+.select-badge-wrapper {
   display: flex;
   align-items: center;
-  gap: 16px;
   flex-shrink: 0;
 }
 
-.latency-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
+.active-check-circle {
+  width: 18px;
+  height: 18px;
+  background: var(--accent-blue);
+  color: #fff;
   border-radius: 50%;
-}
-
-.speed-val {
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--text-xs);
-  color: var(--accent-cyan);
-  font-weight: var(--weight-semibold);
-  font-family: var(--font-mono);
-}
-
-.node-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  box-shadow: 0 0 6px var(--accent-blue);
 }
 
-.action-btn:hover {
-  background: var(--border-subtle);
-  color: var(--text-primary);
-  border-color: var(--border-normal);
-}
-
-.action-btn.btn-ping:hover {
-  color: var(--accent-orange);
-}
-
-.action-btn.btn-ping.testing {
-  color: var(--accent-orange);
-  border-color: var(--accent-orange-glow);
-}
-
-.action-btn.btn-speed.testing {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan-glow);
-}
-
-.action-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.spinner {
-  display: inline-block;
-  animation: spin 1s linear infinite;
-  font-size: 11px;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.select-indicator {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.check-mark {
-  color: var(--accent-blue);
-}
-
-.auto-badge {
-  font-size: 10px;
-  padding: 1px 4px;
+.auto-active-badge {
+  font-size: 9px;
+  padding: 1px 5px;
   background: var(--accent-cyan-glow);
   color: var(--accent-cyan);
   border: 1px solid var(--accent-cyan);
   border-radius: var(--radius-xs);
   font-weight: var(--weight-bold);
-  white-space: nowrap;
+}
+
+.metrics-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.latency-box {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  font-family: var(--font-mono);
+}
+
+.latency-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.speed-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  background: rgba(0, 242, 254, 0.08);
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+}
+
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.card-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-subtle);
+  background: var(--layer-2);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.card-action-btn:hover:not(:disabled) {
+  background: var(--layer-3);
+  color: var(--text-primary);
+  border-color: var(--border-normal);
+}
+
+.card-action-btn.ping-btn:hover:not(:disabled) {
+  color: var(--accent-orange);
+  border-color: var(--accent-orange);
+}
+
+.card-action-btn.speed-btn:hover:not(:disabled) {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.card-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.spin-icon {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+  font-size: 10px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>
+

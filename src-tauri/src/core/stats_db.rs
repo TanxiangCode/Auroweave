@@ -75,3 +75,13 @@ pub fn add_app_traffic_delta(timestamp_hour: i64, process_name: &str, download_d
     )?;
     Ok(())
 }
+
+/// 清空所有历史流量统计记录
+pub fn clear_all_stats() -> Result<()> {
+    let conn = DB_CONN.lock().unwrap();
+    conn.execute("DELETE FROM traffic_hourly", [])?;
+    conn.execute("DELETE FROM app_traffic_hourly", [])?;
+    let _ = conn.execute("VACUUM", []);
+    Ok(())
+}
+

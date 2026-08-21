@@ -5,3 +5,5 @@ pub mod sysproxy;
 pub mod job;
 pub mod service_control;
 pub mod startup;
+pub mod tray;
+

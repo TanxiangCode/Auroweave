@@ -6,7 +6,7 @@
  * 职责：布局拼装、状态绑定、Hook 协调
  * 业务逻辑全部委托至各子组件与 Hook
  */
-import { onMounted, ref } from "vue";
+import { onMounted, onActivated, onDeactivated, ref } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import { useToast } from "@/composables/useToast";
@@ -54,7 +54,6 @@ const {
   selectedGroupTag,
   rawNodes,
   isSelectorGroup,
-  clearSearch,
 });
 
 const {
@@ -62,6 +61,16 @@ const {
   openRegionModal,
   closeRegionModal,
 } = useRegionRules();
+
+// ==================== 视图模式 (Grid 网格 / List 列表) ====================
+const viewMode = ref<"grid" | "list">(
+  (localStorage.getItem("auroweave_proxies_view_mode") as "grid" | "list") || "grid"
+);
+
+function handleToggleViewMode(mode: "grid" | "list") {
+  viewMode.value = mode;
+  localStorage.setItem("auroweave_proxies_view_mode", mode);
+}
 
 // ==================== 分组配置编辑（逻辑简单，内联管理） ====================
 
@@ -77,12 +86,13 @@ function openGroupEdit(groupTag: string) {
   editingGroupTag.value = groupTag;
   editingGroupType.value = group.type;
   editingGroupConfig.value = {
-    interval: (group as any).interval || "15m",
+    interval: (group as any).interval || "3m",
     tolerance: (group as any).tolerance || 50,
-    url: (group as any).url || "https://www.gstatic.com/generate_204",
+    url: (group as any).url || "http://www.gstatic.com/generate_204",
   };
   showGroupEditModal.value = true;
 }
+
 
 /** 保存分组配置 */
 async function saveGroupConfig() {
@@ -100,11 +110,33 @@ async function onGroupSelect(groupTag: string) {
 
 // ==================== 生命周期 ====================
 
-onMounted(async () => {
+/** 定期刷新分组状态（更新 URLTest 组的 now 字段）的定时器 */
+let groupRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+onMounted(() => {
   proxyStore.loadCustomGroupRules();
+});
+
+// KeepAlive 激活时：重新拉取分组与节点数据
+// 解决订阅刷新后 nodeMap 被清空但 ProxiesView 未重新挂载导致节点不显示的问题
+onActivated(async () => {
   await proxyStore.fetchGroups();
   await speedtestStore.init();
   await initSelectedGroup();
+
+  // 定期刷新分组列表以更新 URLTest 组的 now 字段（当前选中节点）
+  if (groupRefreshTimer) clearInterval(groupRefreshTimer);
+  groupRefreshTimer = setInterval(async () => {
+    // 静默刷新：不触发 loading 状态，避免 UI 闪烁
+    await proxyStore.refreshGroups();
+  }, 15000);
+});
+
+onDeactivated(() => {
+  if (groupRefreshTimer) {
+    clearInterval(groupRefreshTimer);
+    groupRefreshTimer = null;
+  }
 });
 </script>
 
@@ -153,9 +185,12 @@ onMounted(async () => {
           :search-text="searchText"
           :sort-config="sortConfig"
           :sort-labels="sortLabels"
+          :view-mode="viewMode"
+          :is-testing-latency="speedtestStore.isTestingLatency"
           @update:search-text="searchText = $event"
           @cycle-sort="cycleSortKey"
           @toggle-sort-order="toggleSortOrder"
+          @toggle-view-mode="handleToggleViewMode"
           @run-latency="handleRunLatency"
           @show-batch-modal="showConfirmModal = true"
           @refresh="proxyStore.fetchGroups"
@@ -168,6 +203,7 @@ onMounted(async () => {
           :loading="loading"
           :search-text="searchText"
           :is-selectable="isSelectorGroup"
+          :layout-mode="viewMode"
           @select="handleNodeSelect"
           @test-latency="handleSingleLatency"
           @test-speed="handleSingleSpeed"

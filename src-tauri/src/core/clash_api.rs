@@ -26,7 +26,9 @@ impl ClashApiClient {
         let port = get_clash_api_port();
         let base = base_url.unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
         let client = Client::builder()
-            .timeout(Duration::from_secs(6))
+            .timeout(Duration::from_secs(60))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(50)
             .build()
             .unwrap_or_default();
 
@@ -39,7 +41,9 @@ impl ClashApiClient {
     /// 获取所有代理分组与节点
     pub async fn get_proxies(&self) -> Result<Value, AppError> {
         let url = format!("{}/proxies", self.base_url);
-        let resp = self.client.get(&url).send().await
+        let resp = self.client.get(&url)
+            .timeout(Duration::from_secs(10))
+            .send().await
             .map_err(|e| AppError::Network(format!("ClashAPI 请求失败: {}", e)))?;
 
         let val: Value = resp.json().await
@@ -57,7 +61,10 @@ impl ClashApiClient {
             self.base_url, encoded_tag, timeout_ms, encoded_url
         );
 
-        let resp = self.client.get(&url).send().await
+        let resp = self.client.get(&url)
+            .timeout(Duration::from_millis(timeout_ms + 5000))
+            .send()
+            .await
             .map_err(|e| AppError::Network(format!("延迟测试请求失败: {}", e)))?;
 
         let val: Value = resp.json().await
@@ -69,6 +76,33 @@ impl ClashApiClient {
             Err(AppError::Network("测速超时或节点不可达".to_string()))
         }
     }
+
+    /// 触发 URLTest 组的延迟测试（自动选择最优节点）
+    /// 返回选择的节点延迟（用于验证测试是否成功）
+    pub async fn trigger_urltest_group_delay(&self, group_tag: &str, test_url: &str, timeout_ms: u64) -> Result<u16, AppError> {
+        let encoded_tag = urlencoding::encode(group_tag);
+        let encoded_url = urlencoding::encode(test_url);
+        let url = format!(
+            "{}/proxies/{}/delay?timeout={}&url={}",
+            self.base_url, encoded_tag, timeout_ms, encoded_url
+        );
+
+        let resp = self.client.get(&url)
+            .timeout(Duration::from_millis(timeout_ms + 5000))
+            .send()
+            .await
+            .map_err(|e| AppError::Network(format!("URLTest 组延迟测试请求失败: {}", e)))?;
+
+        let val: Value = resp.json().await
+            .map_err(|e| AppError::Network(format!("解析 URLTest 组延迟测试 JSON 失败: {}", e)))?;
+
+        if let Some(delay) = val.get("delay").and_then(|d| d.as_u64()) {
+            Ok(delay as u16)
+        } else {
+            Err(AppError::Network("URLTest 组测速超时或不可达".to_string()))
+        }
+    }
+
 
     /// 切换 Selector 当前节点
     pub async fn select_node(&self, group_tag: &str, node_tag: &str) -> Result<(), AppError> {
@@ -122,6 +156,33 @@ impl ClashApiClient {
 
         if !resp.status().is_success() {
             return Err(AppError::Network(format!("更新配置返回错误状态: {}", resp.status())));
+        }
+
+        Ok(())
+    }
+
+    /// 关闭单条活跃连接
+
+    pub async fn close_connection(&self, id: &str) -> Result<(), AppError> {
+        let url = format!("{}/connections/{}", self.base_url, urlencoding::encode(id));
+        let resp = self.client.delete(&url).send().await
+            .map_err(|e| AppError::Network(format!("关闭连接请求失败: {}", e)))?;
+
+        if !resp.status().is_success() && resp.status() != reqwest::StatusCode::NOT_FOUND {
+            return Err(AppError::Network(format!("关闭连接返回错误状态: {}", resp.status())));
+        }
+
+        Ok(())
+    }
+
+    /// 关闭所有活跃连接
+    pub async fn close_all_connections(&self) -> Result<(), AppError> {
+        let url = format!("{}/connections", self.base_url);
+        let resp = self.client.delete(&url).send().await
+            .map_err(|e| AppError::Network(format!("关闭所有连接请求失败: {}", e)))?;
+
+        if !resp.status().is_success() {
+            return Err(AppError::Network(format!("关闭所有连接返回错误状态: {}", resp.status())));
         }
 
         Ok(())

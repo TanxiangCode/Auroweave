@@ -6,7 +6,7 @@
  * 视觉绝对重心：旋转圆环 + 呼吸动效 + 连接/待命状态图标
  *
  * 动画效果参考小米充电动画：
- *   圆环大部分暗淡，一段亮色“彗星”光带沿环旋转。
+ *   圆环大部分暗淡，一段亮色"彗星"光带沿环旋转。
  *
  * 分层结构（z-index 从低到高）：
  *   .energy-ring            — 容器 + 暗色环底 + boxShadow 光晕
@@ -15,21 +15,32 @@
  *     .energy-inner         — 静止内容层（图标 + 文字）
  */
 import { computed } from "vue";
+import { withDefaults } from "vue";
 import { CORE_GLOW_THEMES } from "../utils/core-glow-themes";
 import IdleTipsPanel from "./IdleTipsPanel.vue";
 
-const props = defineProps<{
-  proxyActive: boolean;
-  proxyMode: string;
-  rotationDeg: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    proxyActive: boolean;
+    coreStarting?: boolean;
+    proxyMode: string;
+    rotationDeg: number;
+  }>(),
+  {
+    proxyActive: false,
+    coreStarting: false,
+    proxyMode: "rule",
+    rotationDeg: 0,
+  }
+);
 
 const emit = defineEmits<{
   toggle: [];
 }>();
 
-/** 当前主题（活跃 / 空闲） */
+/** 当前主题（活跃 / 空闲 / 启动中） */
 const currentTheme = computed(() => {
+  if (props.coreStarting) return CORE_GLOW_THEMES["rule"]; // 启动中显示 rule 主题
   if (!props.proxyActive) return null;
   const mode = props.proxyMode as keyof typeof CORE_GLOW_THEMES;
   return CORE_GLOW_THEMES[mode] || CORE_GLOW_THEMES.rule;
@@ -53,11 +64,11 @@ const rotorStyle = computed(() => {
 });
 
 /** 文字样式 */
-const textStyle = computed(() => {
+const textStyle = computed<{ color?: string; textShadow?: string }>(() => {
   if (!props.proxyActive) {
     return { color: "var(--text-secondary)", textShadow: "none" };
   }
-  return currentTheme.value?.text || {};
+  return currentTheme.value?.text || { color: "var(--accent-cyan-vivid)" };
 });
 
 /** 呼吸灯光晕颜色（配合 v-bind 实现动态关键帧） */
@@ -84,12 +95,22 @@ const breathingGlowColor = computed(() => {
         ></div>
         <!-- 静止内容层（图标 + 文字不随环旋转） -->
         <div class="energy-inner">
-          <template v-if="proxyActive">
+          <!-- 启动中状态 -->
+          <template v-if="coreStarting">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="core-starting-icon" :style="{ color: textStyle.color }">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+            </svg>
+            <span class="energy-status-text starting-badge" :style="textStyle">启动中...</span>
+          </template>
+
+          <!-- 已连接状态 -->
+          <template v-else-if="proxyActive">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="core-active-icon" :style="{ color: textStyle.color }">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
             </svg>
             <span class="energy-status-text active-badge" :style="textStyle">CONNECTED</span>
           </template>
+          <!-- 待机状态 -->
           <template v-else>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="core-idle-icon">
               <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
@@ -209,7 +230,32 @@ const breathingGlowColor = computed(() => {
   margin-top: 4px;
 }
 
+.core-starting-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  animation: core-spin 1.2s linear infinite;
+}
+
+@keyframes core-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.energy-status-text.starting-badge {
+  font-size: var(--text-sm);
+  letter-spacing: 2px;
+  margin-top: 4px;
+  animation: pulse-opacity 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
 .core-active-icon {
+
   width: 48px;
   height: 48px;
   margin-bottom: 4px;

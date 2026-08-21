@@ -140,3 +140,16 @@ pub async fn get_app_traffic_stats() -> ApiResponse<Vec<AppTrafficPoint>> {
 
     ApiResponse::ok(results)
 }
+
+/// 清空历史流量统计与应用流量数据表
+#[tauri::command]
+pub async fn stats_clear_all() -> ApiResponse<()> {
+    match crate::core::stats_db::clear_all_stats() {
+        Ok(_) => {
+            log::info!("[stats] 历史流量统计数据已全部清空");
+            ApiResponse::ok(())
+        }
+        Err(e) => ApiResponse::err(format!("清空历史流量数据失败: {}", e), 500),
+    }
+}
+

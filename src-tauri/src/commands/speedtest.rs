@@ -10,33 +10,59 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tracing::info;
 
-/// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试，使用 JoinSet 并发提速）
+/// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试，使用配置的 Semaphore 动态并发）
 ///
 /// 返回 HashMap<String, u16>：
 /// - delay > 0：测速成功，值为延迟毫秒数
 /// - delay = 0：测速失败（超时或不可达），前端可区分「已测试但失败」与「未测试」
 #[tauri::command]
 pub async fn speedtest_run_latency(
-    _group_tag: String,
+    app_handle: AppHandle,
+    group_tag: String,
     node_tags: Vec<String>,
 ) -> Result<ApiResponse<HashMap<String, u16>>, AppError> {
-    info!("触发共 {} 个节点的异步并发延迟测试", node_tags.len());
+    let settings = crate::commands::settings::settings_get_internal(&app_handle);
+    let concurrency = (settings.latency_test_concurrency as usize).clamp(1, 100);
+
+    let timeout_ms = settings.latency_test_timeout_ms.clamp(500, 30000);
+    let test_url = if settings.latency_test_url.trim().is_empty() {
+        "http://www.gstatic.com/generate_204".to_string()
+    } else {
+        settings.latency_test_url.clone()
+    };
+
+    info!(
+        "触发 [{}] 分组共 {} 个节点的受控并发延迟测试 (并发上限: {}, 超时: {}ms, URL: {})",
+        group_tag,
+        node_tags.len(),
+        concurrency,
+        timeout_ms,
+        test_url
+    );
+
     let clash_client = Arc::new(ClashApiClient::default());
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut join_set = tokio::task::JoinSet::new();
 
-    for tag in node_tags {
+    for (idx, tag) in node_tags.into_iter().enumerate() {
         let client = clash_client.clone();
+        let sem = semaphore.clone();
+        let url = test_url.clone();
         join_set.spawn(async move {
-            match client.get_node_delay(&tag, "https://www.gstatic.com/generate_204", 5000).await {
+            let _permit = sem.acquire().await.ok();
+            if idx > 0 && idx % 10 == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+            }
+            match client.get_node_delay(&tag, &url, timeout_ms).await {
                 Ok(delay) => (tag, delay),
                 Err(e) => {
-                    log::warn!("[speedtest] 节点 [{}] 延迟测试失败: {}", tag, e);
-                    // 返回 0 表示已测试但失败，前端可区分「未测试」与「超时」
+                    log::debug!("[speedtest] 节点 [{}] 延迟测试失败: {}", tag, e);
                     (tag, 0u16)
                 }
             }
         });
     }
+
 
     let mut results = HashMap::new();
     while let Some(res) = join_set.join_next().await {
@@ -45,11 +71,23 @@ pub async fn speedtest_run_latency(
         }
     }
 
+    // 若当前为 auto / urltest 策略组，显式触发 sing-box 内核进行策略组级优选刷新
+    if !group_tag.is_empty() && (group_tag == "auto" || group_tag == "balance" || group_tag.ends_with("-auto")) {
+        let client = clash_client.clone();
+        let gt = group_tag.clone();
+        let url = test_url.clone();
+        tokio::spawn(async move {
+            let _ = client.trigger_urltest_group_delay(&gt, &url, timeout_ms).await;
+            log::info!("[speedtest] 已触发 URLTest 策略组 [{}] 内部最优节点重选", gt);
+        });
+    }
+
     info!("延迟测试完成: 成功 {} / 失败 {} / 总计 {}",
         results.values().filter(|&&d| d > 0).count(),
         results.values().filter(|&&d| d == 0).count(),
         results.len()
     );
+
 
     Ok(ApiResponse::ok(results))
 }

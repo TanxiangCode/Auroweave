@@ -9,11 +9,14 @@ import {
   getSubscriptions,
   importSubscription,
   deleteSubscription,
+  deleteAllSubscriptions,
   refreshSubscription,
   activateSubscription,
 } from "@/api/ipc/subscription";
+import { useToast } from "@/composables/useToast";
 
 export const useSubscriptionStore = defineStore("subscription", () => {
+  const toast = useToast();
   // ---- 状态 ----
   const subscriptions = ref<Subscription[]>([]);
   const importing = ref(false);

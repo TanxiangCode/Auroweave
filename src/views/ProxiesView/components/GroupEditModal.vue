@@ -3,9 +3,7 @@
  * 分组配置编辑弹窗
  * 作者: TanXiang
  */
-import { Teleport } from "vue";
-
-const props = defineProps<{
+defineProps<{
   visible: boolean;
   groupTag: string;
   groupType: string;
@@ -22,11 +20,11 @@ const emit = defineEmits<{
   <Teleport to="body">
     <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
       <div class="modal-card glass-effect">
-        <h3>⚙️ 编辑分组配置 — {{ groupTag }}</h3>
+        <h3>编辑分组配置 — {{ groupTag }}</h3>
         <div class="edit-form">
           <div class="form-row">
             <label>测速间隔</label>
-            <select v-model="props.config.interval" class="form-input">
+            <select v-model="config.interval" class="form-input">
               <option value="1m">1 分钟</option>
               <option value="3m">3 分钟</option>
               <option value="5m">5 分钟</option>
@@ -36,12 +34,12 @@ const emit = defineEmits<{
           </div>
           <div class="form-row" v-if="groupTag === 'balance'">
             <label>容差 (ms)</label>
-            <input v-model.number="props.config.tolerance" type="number" class="form-input" min="0" max="500" />
+            <input v-model.number="config.tolerance" type="number" class="form-input" min="0" max="500" />
             <span class="form-hint">延迟差在此范围内的节点会被轮询</span>
           </div>
           <div class="form-row">
             <label>测速 URL</label>
-            <input v-model="props.config.url" type="text" class="form-input" />
+            <input v-model="config.url" type="text" class="form-input" />
           </div>
         </div>
         <div class="modal-actions">

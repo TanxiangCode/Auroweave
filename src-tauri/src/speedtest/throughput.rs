@@ -47,8 +47,8 @@ async fn measure_download(client: &reqwest::Client, duration_secs: u64) -> Resul
         .await;
 
     let mut response = match res {
-        Ok(r) => r,
-        Err(_) => return Ok(0),
+        Ok(r) if r.status().is_success() => r,
+        _ => return Ok(0),
     };
 
     let mut downloaded_bytes: u64 = 0;
@@ -62,15 +62,16 @@ async fn measure_download(client: &reqwest::Client, duration_secs: u64) -> Resul
         }
     };
 
-    let _ = timeout(duration, test_future).await;
+    let _ = timeout(duration + Duration::from_millis(500), test_future).await;
     let elapsed = start.elapsed().as_secs_f64();
 
-    if elapsed > 0.1 {
+    if elapsed > 0.1 && downloaded_bytes > 0 {
         Ok((downloaded_bytes as f64 / elapsed) as u64)
     } else {
         Ok(0)
     }
 }
+
 
 async fn measure_upload(client: &reqwest::Client, duration_secs: u64) -> Result<u64, AppError> {
     let start = Instant::now();

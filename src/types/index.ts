@@ -63,19 +63,25 @@ export interface ProxyGroup {
   interval?: number;
 }
 
-// ============================================================
-// 实时连接与流量
-// ============================================================
-
 export interface Connection {
   id: string;
+  process?: string;
+  processPath?: string;
   destination: string;
+  destinationIP?: string;
   port: number;
+  network?: "tcp" | "udp" | string;
+  type?: string;
   outbound: string;
+  chains?: string[];
   rule: string;
+  rulePayload?: string;
   upload_bytes: number;
   download_bytes: number;
+  upload_speed?: number;
+  download_speed?: number;
   start: number;
+  dnsMode?: string;
 }
 
 export interface TrafficSnapshot {
@@ -220,12 +226,34 @@ export interface AppSettings {
   connection_timeout_secs: number;
   enable_app_traffic_tracking: boolean;
 
+  minimize_to_tray?: boolean;
+  start_minimized?: boolean;
+  hide_dock_on_close?: boolean;
+  show_tray_speed?: boolean;
+  allow_lan?: boolean;
+
+
+  // 延迟测试配置
+  latency_test_concurrency?: number;
+  latency_test_timeout_ms?: number;
+  latency_test_url?: string;
   core: {
-    runMode: "local" | "service";
+    runMode: string;
     service: {
       installedVersion: string | null;
-      lastKnownStatus: "running" | "stopped" | "not_installed" | "error";
-      lastFallbackReason: "not_installed" | "start_failed" | "uac_denied" | "timeout" | null;
+      lastKnownStatus: string;
+      lastFallbackReason: string | null;
     };
   };
+}
+
+
+export interface SingboxUpdateInfo {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_notes: string;
+  published_at: string;
+  download_url?: string;
+  download_size: number;
 }

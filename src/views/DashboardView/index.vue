@@ -31,11 +31,11 @@ const { smoothDownloadSpeed, activeConnectionCount, totalDownload, totalUpload }
 
 // === Hook 初始化 ===
 
-const { proxyActive, operating, toggleProxy, changeMode } = useProxyToggle();
+const { proxyActive, coreStarting, operating, toggleProxy, changeMode } = useProxyToggle();
 
 const { inboundMode } = useInboundMode({ proxyActive, operating });
 
-useCoreStatus({ proxyActive, operating });
+useCoreStatus({ proxyActive, coreStarting, operating });
 
 // === 流体波浪旋转角度 ===
 
@@ -68,6 +68,7 @@ subStore.fetchAll();
       <!-- 中央：能量核 -->
       <EnergyCore
         :proxy-active="proxyActive"
+        :core-starting="coreStarting"
         :proxy-mode="proxyStore.proxyMode"
         :rotation-deg="rotationDeg"
         @toggle="toggleProxy"

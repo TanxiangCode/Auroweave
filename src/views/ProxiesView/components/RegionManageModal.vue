@@ -5,7 +5,6 @@
  *
  * 包含：规则列表、规则编辑/新增表单、内置区域快捷填充
  */
-import { Teleport } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useRegionRules } from "../hooks/useRegionRules";
 import SvgIcon from "@/components/common/SvgIcon.vue";
@@ -35,7 +34,7 @@ const {
   <Teleport to="body">
     <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
       <div class="modal-card glass-effect region-modal">
-        <h3>🌍 自定义区域管理</h3>
+        <h3>自定义区域管理</h3>
 
         <!-- 编辑/新增表单 -->
         <div v-if="editingRule" class="rule-edit-form">

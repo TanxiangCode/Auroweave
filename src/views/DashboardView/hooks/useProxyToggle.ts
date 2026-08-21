@@ -8,7 +8,7 @@ import { ref } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
 import { invoke } from "@tauri-apps/api/core";
-import { info as logInfo, error as logError, warn as logWarn } from "@tauri-apps/plugin-log";
+import { warn as logWarn } from "@tauri-apps/plugin-log";
 import type { ApiResponse } from "@/types";
 
 /**
@@ -21,7 +21,9 @@ export function useProxyToggle() {
   const settingsStore = useSettingsStore();
 
   /** 代理流量接管总开关 */
-  const proxyActive = ref(true);
+  const proxyActive = ref(false); // 初始设为 false，由 checkRunningStatus 决定实际状态
+  /** 是否正在启动核心 */
+  const coreStarting = ref(false); 
   /** 操作进行中标志（防重入） */
   const operating = ref(false);
 
@@ -117,6 +119,7 @@ export function useProxyToggle() {
 
   return {
     proxyActive,
+    coreStarting,
     operating,
     toggleProxy,
     changeMode,

@@ -347,6 +347,7 @@ dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
  "base64 0.22.1",
+ "cc",
  "chrono",
  "lazy_static",
  "log",

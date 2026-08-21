@@ -7,3 +7,5 @@ pub mod speedtest;
 pub mod routing;
 pub mod logging;
 pub mod stats;
+pub mod singbox_update;
+

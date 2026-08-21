@@ -183,6 +183,23 @@ let trafficClient: WsClient<any> | null = null;
 let connectionsClient: WsClient<{ connections: Connection[] }> | null = null;
 let logClient: WsClient<{ type: string; payload: string }> | null = null;
 
+import { invoke } from "@tauri-apps/api/core";
+
+let isProxyActive = true;
+
+/** 供前端状态机同步当前代理核心是否激活 */
+export function setProxyActiveStatus(active: boolean) {
+  isProxyActive = active;
+  if (!active) {
+    // 代理关闭时立即通知托盘隐藏网速
+    invoke("tray_update_traffic", {
+      up: 0,
+      down: 0,
+      active: false,
+    }).catch(() => {});
+  }
+}
+
 export function subscribeTraffic(cb: TrafficCallback): () => void {
   trafficCallbacks.push(cb);
   if (!trafficClient) {
@@ -198,6 +215,13 @@ export function subscribeTraffic(cb: TrafficCallback): () => void {
           active_connections: raw.active_connections ?? 0,
         };
         trafficCallbacks.forEach((fn) => fn(snapshot));
+
+        // 同步通知 Rust 系统托盘 / 菜单栏实时网速 (代理未激活时自动不显示)
+        invoke("tray_update_traffic", {
+          up: snapshot.upload_speed,
+          down: snapshot.download_speed,
+          active: isProxyActive,
+        }).catch(() => {});
       },
     });
     trafficClient.connect();
@@ -206,6 +230,8 @@ export function subscribeTraffic(cb: TrafficCallback): () => void {
     trafficCallbacks = trafficCallbacks.filter((fn) => fn !== cb);
   };
 }
+
+
 
 export function subscribeConnections(cb: ConnectionsCallback): () => void {
   connectionsCallbacks.push(cb);
@@ -216,22 +242,44 @@ export function subscribeConnections(cb: ConnectionsCallback): () => void {
         // 归一化转换 Clash / Sing-box 的原始 Connection 数据结构，匹配前端 interface Connection 定义
         const normalizedConns = (data.connections || []).map((conn: any) => {
           const metadata = conn.metadata || {};
-          const chains = conn.chains || [];
+          const chains: string[] = Array.isArray(conn.chains) ? conn.chains : [];
           const destHost = metadata.host || metadata.destinationIP || "未知主机";
           const destPort = parseInt(metadata.destinationPort) || 0;
-          const outboundNode = chains[chains.length - 1] || "direct";
+          const outboundNode = chains[chains.length - 1] || conn.outbound || "direct";
+
+          const processName = metadata.process || conn.process || "";
+          const processPath = metadata.processPath || conn.processPath || "";
+          const destinationIP = metadata.destinationIP || "";
+          const network = metadata.network || "tcp";
+          const connType = metadata.type || "";
+          const rule = conn.rule || "Match";
+          const rulePayload = conn.rulePayload || "";
+          const upload_speed = Number(conn.curUploadSpeed || conn.uploadSpeed || 0);
+          const download_speed = Number(conn.curDownloadSpeed || conn.downloadSpeed || 0);
+          const dnsMode = metadata.dnsMode || "";
 
           return {
-            id: conn.id,
+            id: String(conn.id),
+            process: processName,
+            processPath,
             destination: destHost,
+            destinationIP,
             port: destPort,
+            network,
+            type: connType,
             outbound: outboundNode,
-            rule: conn.rule || "Match",
-            upload_bytes: conn.upload || 0,
-            download_bytes: conn.download || 0,
+            chains,
+            rule,
+            rulePayload,
+            upload_bytes: Number(conn.upload || 0),
+            download_bytes: Number(conn.download || 0),
+            upload_speed,
+            download_speed,
             start: conn.start ? new Date(conn.start).getTime() : Date.now(),
+            dnsMode,
           } as Connection;
         });
+
 
         connectionsCallbacks.forEach((fn) => fn({ connections: normalizedConns }));
       },

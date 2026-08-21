@@ -15,20 +15,19 @@ interface UseSpeedtestActionsOptions {
   selectedGroupTag: Ref<string>;
   rawNodes: ComputedRef<ProxyNode[]>;
   isSelectorGroup: ComputedRef<boolean>;
-  clearSearch: () => void;
 }
 
 /**
  * 测速操作 Hook
  *
- * @param options - 依赖注入：分组标签、原始节点、是否可选择、搜索清除函数
+ * @param options - 依赖注入：分组标签、原始节点、是否可选择
  */
 export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
   const proxyStore = useProxyStore();
   const speedtestStore = useSpeedtestStore();
   const toast = useToast();
 
-  const { selectedGroupTag, rawNodes, isSelectorGroup, clearSearch } = options;
+  const { selectedGroupTag, rawNodes, isSelectorGroup } = options;
 
   /** 批量测速确认弹窗 */
   const showConfirmModal = ref(false);
@@ -63,14 +62,20 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
     }
 
     await speedtestStore.testLatency(selectedGroupTag.value, tags);
+    
+    // 刷新分组状态（同步内核 auto 策略组最新 now 字段与节点状态）
+    await proxyStore.refreshGroups();
+    await proxyStore.fetchGroupNodes(selectedGroupTag.value);
+
     const success = Object.values(speedtestStore.latencyMap).filter((v) => v > 0).length;
-    toast.success("延迟测试完成", `成功 ${success} / 总计 ${tags.length}`);
+    toast.success("延迟测试完成", `有效响应: ${success} / 总计: ${tags.length}`);
   }
 
   /** 单节点延迟测试 */
   async function handleSingleLatency(nodeTag: string) {
     if (!selectedGroupTag.value) return;
     await speedtestStore.testLatency(selectedGroupTag.value, [nodeTag]);
+    await proxyStore.refreshGroups();
   }
 
   /** 单节点吞吐量测试 */

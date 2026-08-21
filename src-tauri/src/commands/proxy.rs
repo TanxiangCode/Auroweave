@@ -321,3 +321,24 @@ pub async fn proxy_get_singbox_version() -> ApiResponse<String> {
         Err(_) => ApiResponse::err("未找到内核程序", 404),
     }
 }
+
+/// 关闭单条活跃连接
+#[tauri::command]
+pub async fn proxy_close_connection(id: String) -> ApiResponse<()> {
+    let client = ClashApiClient::default();
+    match client.close_connection(&id).await {
+        Ok(_) => ApiResponse::ok(()),
+        Err(e) => ApiResponse::err(e.to_string(), 500),
+    }
+}
+
+/// 关闭所有活跃连接
+#[tauri::command]
+pub async fn proxy_close_all_connections() -> ApiResponse<()> {
+    let client = ClashApiClient::default();
+    match client.close_all_connections().await {
+        Ok(_) => ApiResponse::ok(()),
+        Err(e) => ApiResponse::err(e.to_string(), 500),
+    }
+}
+

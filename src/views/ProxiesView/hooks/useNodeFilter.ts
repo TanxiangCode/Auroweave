@@ -58,11 +58,24 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
       } else if (key === "latency") {
         const aLat = speedtestStore.latencyMap[a.tag];
         const bLat = speedtestStore.latencyMap[b.tag];
-        // 未测试的排最后
-        if (aLat === undefined && bLat === undefined) return 0;
-        if (aLat === undefined) return 1;
-        if (bLat === undefined) return -1;
-        return (aLat - bLat) * multiplier;
+
+        // 延迟排序权重：
+        // 有效延迟 (> 0): 保持原数值 (如 50, 120, 300)
+        // 超时 / 失败 (<= 0): 赋予高权重 999990 排在有效节点之后
+        // 未测试 (undefined): 赋予最高权重 999999 排在最后
+        const getWeight = (lat?: number) => {
+          if (lat === undefined) return 999999;
+          if (lat <= 0) return 999990;
+          return lat;
+        };
+
+        const wA = getWeight(aLat);
+        const wB = getWeight(bLat);
+
+        if (wA !== wB) {
+          return (wA - wB) * multiplier;
+        }
+        return a.tag.localeCompare(b.tag, "zh-CN");
       }
       return 0;
     });

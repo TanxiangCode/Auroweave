@@ -38,9 +38,10 @@ export const DEFAULT_SPEED_TEST_URLS: string[] = [
 ];
 
 /** 延迟测速 URL（urltest 出站使用） */
-export const DEFAULT_LATENCY_TEST_URL = "https://www.gstatic.com/generate_204";
-export const DEFAULT_LATENCY_TEST_INTERVAL_SEC = 300; // 5 分钟
+export const DEFAULT_LATENCY_TEST_URL = "http://www.gstatic.com/generate_204";
+export const DEFAULT_LATENCY_TEST_INTERVAL_SEC = 180; // 3 分钟 (180 秒)
 export const DEFAULT_LATENCY_TEST_TOLERANCE_MS = 50;
+
 
 // ============================================================
 // 吞吐量测速参数

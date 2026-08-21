@@ -91,6 +91,8 @@ pub fn run() {
             commands::proxy::proxy_get_mode,
             commands::proxy::proxy_set_mode,
             commands::proxy::proxy_get_singbox_version,
+            commands::proxy::proxy_close_connection,
+            commands::proxy::proxy_close_all_connections,
             commands::proxy::sysproxy_set,
             commands::proxy::app_restart_as_admin,
             commands::subscription::subscription_import,
@@ -118,19 +120,49 @@ pub fn run() {
             commands::routing::routing_get_processes,
             commands::routing::routing_get_app_rules,
             commands::routing::routing_save_app_rule,
+            commands::routing::routing_get_custom_rules,
+            commands::routing::routing_save_custom_rules,
+            commands::routing::routing_add_custom_rule,
+            commands::routing::routing_delete_custom_rule,
             // 日志管理命令
+
             commands::logging::log_read_app,
             commands::logging::log_read_service,
             commands::logging::log_clear_all,
             commands::settings::core_query_running,
-            
             // 流量统计命令
             commands::stats::get_traffic_history,
             commands::stats::get_app_traffic_stats,
+            commands::stats::stats_clear_all,
+            commands::settings::settings_restore_backup,
+            // sing-box 内核版本检测与在线更新
+            commands::singbox_update::core_check_singbox_update,
+            commands::singbox_update::core_upgrade_singbox,
+            // 托盘实时网速同步
+            system::tray::tray_update_traffic,
         ])
+
+
         .setup(move |app| {
-            let _window = app.get_webview_window("main")
+            let main_window = app.get_webview_window("main")
                 .expect("找不到主窗口，请检查 tauri.conf.json 中的窗口配置");
+
+            // 初始化系统托盘与右键快捷菜单
+            if let Err(e) = system::tray::setup_tray(app.handle()) {
+                log::error!("[tray] 初始化托盘失败: {}", e);
+            }
+
+            // 监听窗口关闭事件：拦截右上角 X，改为最小化至托盘
+            let handle_for_window = app.handle().clone();
+            main_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let settings = commands::settings::settings_get_internal(&handle_for_window);
+                    if settings.minimize_to_tray {
+                        api.prevent_close();
+                        system::tray::hide_main_window(&handle_for_window);
+                    }
+                }
+            });
 
             // 执行旧数据迁移（首次启动时将 %APPDATA% 数据迁移到 %ProgramData%）
             system::startup::migrate_legacy_data(app.handle());
@@ -147,21 +179,20 @@ pub fn run() {
                 if let Err(e) = system::startup::apply_core_mode_with_fallback(&app_handle).await {
                     log::error!("[app] 核心自愈与拉起发生错误: {}", e);
                 }
+
+                // 若开启了开机自启静默启动，隐藏窗口
+                let settings = commands::settings::settings_get_internal(&app_handle);
+                if settings.start_minimized {
+                    system::tray::hide_main_window(&app_handle);
+                }
             });
 
             // 启动后台流量监控
             core::traffic_monitor::start_monitor(app.handle().clone());
 
-            // DevTools 暂时关闭，需要调试时取消注释
-            // #[cfg(debug_assertions)]
-            // {
-            //     if let Some(window) = app.get_webview_window("main") {
-            //         window.open_devtools();
-            //     }
-            // }
-
             Ok(())
         })
+
         .build(tauri::generate_context!())
         .expect("Tauri 构建失败")
         .run(move |app_handle, event| {

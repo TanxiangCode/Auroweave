@@ -1,27 +1,33 @@
 <script setup lang="ts">
 /**
- * 节点列表面板
+ * 节点列表面板 (升级版)
  * 作者: TanXiang
  *
- * 展示当前分组的节点列表，包含 loading / empty / no-match 三种状态
+ * 支持 Grid (网格) / List (紧凑列表) 视图模式
  */
 import NodeCard from "@/components/proxy/NodeCard.vue";
-import SvgIcon from "@/components/common/SvgIcon.vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import type { ProxyNode } from "@/types";
 
-const props = defineProps<{
-  /** 节点列表（已搜索+排序） */
-  nodes: ProxyNode[];
-  /** 原始节点数量（用于判断是否为空） */
-  rawCount: number;
-  /** 是否加载中 */
-  loading: boolean;
-  /** 当前搜索关键词 */
-  searchText: string;
-  /** 是否为手动选择分组 */
-  isSelectable: boolean;
-}>();
+withDefaults(
+  defineProps<{
+    /** 节点列表（已搜索+排序） */
+    nodes: ProxyNode[];
+    /** 原始节点数量（用于判断是否为空） */
+    rawCount: number;
+    /** 是否加载中 */
+    loading: boolean;
+    /** 当前搜索关键词 */
+    searchText: string;
+    /** 是否为手动选择分组 */
+    isSelectable: boolean;
+    /** 布局模式 */
+    layoutMode?: "grid" | "list";
+  }>(),
+  {
+    layoutMode: "grid",
+  }
+);
 
 const emit = defineEmits<{
   select: [nodeTag: string];
@@ -35,22 +41,31 @@ const speedtestStore = useSpeedtestStore();
 <template>
   <!-- 加载中 -->
   <div v-if="loading" class="state-tip">
-    ⏳ 正在加载节点列表...
+    <div class="state-inner">
+      <span class="loading-spin"></span>
+      <span>正在加载代理节点列表...</span>
+    </div>
   </div>
 
   <!-- 暂无节点 -->
   <div v-else-if="rawCount === 0" class="state-tip">
-    📭 暂无节点数据，请点击刷新
+    <div class="state-inner">
+      <span class="state-icon"></span>
+      <span>暂无可用节点，请确保订阅已导入并点击刷新</span>
+    </div>
   </div>
 
   <!-- 搜索无匹配 -->
   <div v-else-if="nodes.length === 0" class="state-tip">
-    🔍 没有匹配「{{ searchText }}」的节点
+    <div class="state-inner">
+      <span class="state-icon"></span>
+      <span>没有找到匹配「{{ searchText }}」的节点</span>
+    </div>
   </div>
 
-  <!-- 节点列表 -->
+  <!-- 节点列表 / 网格容器 -->
   <div v-else class="nodes-scroll">
-    <div class="nodes-list">
+    <div class="nodes-container" :class="layoutMode">
       <NodeCard
         v-for="node in nodes"
         :key="node.tag"
@@ -60,6 +75,7 @@ const speedtestStore = useSpeedtestStore();
         :latency="speedtestStore.latencyMap[node.tag]"
         :speed-bps="speedtestStore.throughputMap[node.tag]?.download_bps"
         :is-selectable="isSelectable"
+        :layout-mode="layoutMode"
         @select="emit('select', node.tag)"
         @test-latency="emit('test-latency', node.tag)"
         @test-speed="emit('test-speed', node.tag)"
@@ -73,13 +89,22 @@ const speedtestStore = useSpeedtestStore();
   flex: 1;
   overflow-y: auto;
   margin-top: var(--space-3);
-  padding-right: var(--space-1);
+  padding-right: 4px;
 }
 
-.nodes-list {
+/* Grid 网格布局 */
+.nodes-container.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+/* List 紧凑列表布局 */
+.nodes-container.list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 6px;
 }
 
 .state-tip {
@@ -87,7 +112,30 @@ const speedtestStore = useSpeedtestStore();
   align-items: center;
   justify-content: center;
   flex: 1;
-  font-size: var(--text-sm);
   color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.state-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.state-icon {
+  font-size: 28px;
+}
+
+.loading-spin {
+  font-size: 24px;
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>
+

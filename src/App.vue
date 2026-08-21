@@ -6,7 +6,6 @@
 import { onMounted, ref, computed } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { RouterView, useRoute, useRouter } from "vue-router";
-import { KeepAlive } from "vue";
 import ControlCapsule from "@/components/chrome/ControlCapsule.vue";
 import TrafficLights from "@/components/chrome/TrafficLights.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";

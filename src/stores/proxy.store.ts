@@ -132,9 +132,19 @@ export const useProxyStore = defineStore("proxy", () => {
       } else if (key === "protocol") {
         return a.type.localeCompare(b.type) * multiplier;
       } else if (key === "latency") {
-        const a_lat = latencyMap.value.get(a.tag) ?? Infinity;
-        const b_lat = latencyMap.value.get(b.tag) ?? Infinity;
-        return (a_lat - b_lat) * multiplier;
+        const a_raw = latencyMap.value.get(a.tag);
+        const b_raw = latencyMap.value.get(b.tag);
+        const getWeight = (lat?: number) => {
+          if (lat === undefined) return 999999;
+          if (lat <= 0) return 999990;
+          return lat;
+        };
+        const a_lat = getWeight(a_raw);
+        const b_lat = getWeight(b_raw);
+        if (a_lat !== b_lat) {
+          return (a_lat - b_lat) * multiplier;
+        }
+        return a.tag.localeCompare(b.tag, "zh-CN");
       }
       return 0;
     });
@@ -262,6 +272,55 @@ export const useProxyStore = defineStore("proxy", () => {
     }
   }
 
+  /** 静默刷新分组列表（不触发 loading，用于定期更新 URLTest 组的 now 字段） */
+  async function refreshGroups() {
+    const res = await getProxyGroups();
+    if (res.success && res.data) {
+      const topTags = ["proxy", "auto", "balance"];
+      const sorted = [...res.data].sort((a, b) => {
+        const indexA = topTags.indexOf(a.tag);
+        const indexB = topTags.indexOf(b.tag);
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return a.tag.localeCompare(b.tag, "zh-CN");
+      });
+
+      // 仅当分组结构变化时才更新（避免不必要的响应式触发）
+      const oldTags = groups.value.map(g => g.tag).join(",");
+      const newTags = sorted.map(g => g.tag).join(",");
+      const structureChanged = oldTags !== newTags;
+
+      groups.value = sorted;
+
+      // 同步更新 nodeMap 中的 is_active 状态（基于最新的 now 字段）
+      for (const group of sorted) {
+        const nodes = nodeMap.value.get(group.tag);
+        if (nodes && group.now) {
+          const updated = nodes.map((n) => ({
+            ...n,
+            is_active: n.tag === group.now,
+          }));
+          // 仅当 is_active 有变化时才更新（减少不必要的 Map 重新赋值）
+          const activeChanged = nodes.some((n, i) => n.is_active !== updated[i].is_active);
+          if (activeChanged || structureChanged) {
+            nodeMap.value.set(group.tag, updated);
+          }
+        }
+      }
+
+      // 分组结构变化时清除过期的 nodeMap 缓存
+      if (structureChanged) {
+        const currentTags = new Set(sorted.map(g => g.tag));
+        for (const tag of nodeMap.value.keys()) {
+          if (!currentTags.has(tag)) {
+            nodeMap.value.delete(tag);
+          }
+        }
+      }
+    }
+  }
+
   /** 清空代理数据缓存（订阅切换后调用） */
   function clearCache() {
     groups.value = [];
@@ -326,6 +385,7 @@ export const useProxyStore = defineStore("proxy", () => {
     latencyMap,
     fetchGroups,
     fetchGroupNodes,
+    refreshGroups,
     clearCache,
     selectNode,
     changeProxyMode,

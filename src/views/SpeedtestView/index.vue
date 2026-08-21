@@ -35,12 +35,12 @@ onMounted(() => {
   <div class="speedtest-view">
     <header class="page-header">
       <div class="title-area">
-        <h1>📊 智能测速大厅</h1>
+        <h1>智能测速大厅</h1>
         <p class="subtitle">实时测量全量节点延迟与吞吐能力，助力选出最佳节点</p>
       </div>
       <div class="header-actions">
-        <button class="btn primary" @click="handleRunLatency">⚡ 批量测延迟</button>
-        <button class="btn secondary" @click="showConfirmModal = true">📶 批量吞吐量测速</button>
+        <button class="btn primary" @click="handleRunLatency">批量测延迟</button>
+        <button class="btn secondary" @click="showConfirmModal = true">批量吞吐量测速</button>
       </div>
     </header>
 
@@ -96,11 +96,11 @@ onMounted(() => {
     <Teleport to="body">
       <div v-if="showConfirmModal" class="modal-backdrop" @click.self="showConfirmModal = false">
         <div class="modal-card glass-effect">
-          <h3>⚠️ 批量吞吐量测速确认</h3>
+          <h3>批量吞吐量测速确认</h3>
           <p>将对分组 <strong>「{{ activeGroupTag }}」</strong> 的 <strong>{{ currentNodes.length }}</strong> 个节点依次进行带宽测试。</p>
           <div class="estimate-box">
-            <div>⏱️ 预计耗时: 约 {{ Math.ceil(currentNodes.length * 3 / 60) }} 分钟</div>
-            <div>📉 预计流量消耗: 约 {{ currentNodes.length * 15 }} MB</div>
+            <div>预计耗时: 约 {{ Math.ceil(currentNodes.length * 3 / 60) }} 分钟</div>
+            <div>预计流量消耗: 约 {{ currentNodes.length * 15 }} MB</div>
           </div>
           <p class="warning-tip">测速过程将以串行队列运行，以确保带宽测试结果精准无干扰。</p>
           <div class="modal-actions">

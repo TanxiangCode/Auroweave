@@ -1,29 +1,39 @@
 <script setup lang="ts">
 /**
- * 节点工具栏
+ * 节点工具栏 (升级版)
  * 作者: TanXiang
  *
- * 包含搜索框、排序切换、操作按钮（延迟测试/批量测速/刷新）
+ * 包含：搜索过滤、排序切换、Grid/List 视图模式切换、测延迟 (带加载态)、批量测速、刷新
  */
 import SvgIcon from "@/components/common/SvgIcon.vue";
 import type { NodeSortConfig } from "@/types";
 
-const props = defineProps<{
-  /** 当前分组标签 */
-  groupTag: string;
-  /** 原始节点数量 */
-  nodeCount: number;
-  /** 筛选后节点数量 */
-  filteredCount: number;
-  /** 是否正在筛选 */
-  isFiltering: boolean;
-  /** 搜索文本 */
-  searchText: string;
-  /** 排序配置 */
-  sortConfig: NodeSortConfig;
-  /** 排序标签映射 */
-  sortLabels: Record<string, string>;
-}>();
+withDefaults(
+  defineProps<{
+    /** 当前分组标签 */
+    groupTag: string;
+    /** 原始节点数量 */
+    nodeCount: number;
+    /** 筛选后节点数量 */
+    filteredCount: number;
+    /** 是否正在筛选 */
+    isFiltering: boolean;
+    /** 搜索文本 */
+    searchText: string;
+    /** 排序配置 */
+    sortConfig: NodeSortConfig;
+    /** 排序标签映射 */
+    sortLabels: Record<string, string>;
+    /** 视图模式 */
+    viewMode?: "grid" | "list";
+    /** 是否正在测延迟 */
+    isTestingLatency?: boolean;
+  }>(),
+  {
+    viewMode: "grid",
+    isTestingLatency: false,
+  }
+);
 
 const emit = defineEmits<{
   'update:searchText': [value: string];
@@ -31,22 +41,26 @@ const emit = defineEmits<{
   'toggle-sort-order': [];
   'run-latency': [];
   'show-batch-modal': [];
+  'toggle-view-mode': [mode: "grid" | "list"];
   refresh: [];
 }>();
 </script>
 
 <template>
   <div class="nodes-toolbar">
-    <!-- 左侧：标题 + 节点计数 -->
+    <!-- 左侧：标题 + 节点状态统计 -->
     <div class="toolbar-left">
-      <h2>{{ groupTag }}</h2>
-      <span class="nodes-count" v-if="nodeCount > 0">
-        共 {{ nodeCount }} 个节点
-        <span v-if="isFiltering" class="filter-count">（已筛选 {{ filteredCount }}）</span>
-      </span>
+      <div class="group-title-row">
+        <h2 class="group-title">{{ groupTag }}</h2>
+        <span class="nodes-count-pill">
+          {{ filteredCount }}
+          <span v-if="isFiltering" class="filter-total">/ {{ nodeCount }}</span>
+          个节点
+        </span>
+      </div>
     </div>
 
-    <!-- 右侧：搜索 + 排序 + 操作 -->
+    <!-- 右侧：搜索 + 排序 + 视图切换 + 操作组 -->
     <div class="toolbar-right">
       <!-- 搜索框 -->
       <div class="search-box">
@@ -55,30 +69,81 @@ const emit = defineEmits<{
           :value="searchText"
           @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
           type="text"
-          placeholder="搜索节点..."
+          placeholder="搜索节点名称/协议..."
           class="search-input"
         />
         <button v-if="searchText" class="search-clear" @click="emit('update:searchText', '')">×</button>
       </div>
 
-      <!-- 排序按钮 -->
-      <button class="btn-sort" @click="emit('cycle-sort')" :title="'排序: ' + sortLabels[sortConfig.key]">
-        <SvgIcon name="sort" :size="12" class="icon-gap" />
-        {{ sortLabels[sortConfig.key] }}
-        <span class="sort-order" @click.stop="emit('toggle-sort-order')">{{ sortConfig.order === 'asc' ? '↑' : '↓' }}</span>
+      <!-- 排序切换按钮 -->
+      <div class="sort-button-group">
+        <button
+          class="btn-sort"
+          @click="emit('cycle-sort')"
+          :title="`当前按 ${sortLabels[sortConfig.key]} 排序，点击切换排序字段`"
+        >
+          <SvgIcon name="sort" :size="12" class="icon-gap" />
+          <span>{{ sortLabels[sortConfig.key] }}</span>
+        </button>
+        <button
+          class="btn-sort-dir"
+          @click.stop="emit('toggle-sort-order')"
+          :title="sortConfig.order === 'asc' ? '升序 (点击切换为降序)' : '降序 (点击切换为升序)'"
+        >
+          {{ sortConfig.order === 'asc' ? '↑' : '↓' }}
+        </button>
+      </div>
+
+      <!-- 视图模式切换 (Grid / List) -->
+      <div class="view-mode-group">
+        <button
+          class="view-btn"
+          :class="{ active: viewMode === 'grid' }"
+          @click="emit('toggle-view-mode', 'grid')"
+          title="网格卡片视图"
+        >
+          ▦
+        </button>
+        <button
+          class="view-btn"
+          :class="{ active: viewMode === 'list' }"
+          @click="emit('toggle-view-mode', 'list')"
+          title="紧凑列表视图"
+        >
+          ☰
+        </button>
+      </div>
+
+      <div class="divider-vertical"></div>
+
+      <!-- 操作按钮组 -->
+      <button
+        class="btn-action ping"
+        :class="{ loading: isTestingLatency }"
+        :disabled="isTestingLatency"
+        @click="emit('run-latency')"
+        title="并发测试全部节点延迟"
+      >
+        <span v-if="isTestingLatency" class="spinner-ring"></span>
+        <SvgIcon v-else name="bolt" :size="12" class="icon-gap" />
+        <span>{{ isTestingLatency ? '测试中...' : '测延迟' }}</span>
       </button>
 
-      <!-- 操作按钮 -->
-      <button class="btn-action" @click="emit('run-latency')" title="延迟测试">
-        <SvgIcon name="bolt" :size="12" class="icon-gap" />
-        测延迟
-      </button>
-      <button class="btn-action" @click="emit('show-batch-modal')" title="批量测速">
+      <button
+        class="btn-action speed"
+        @click="emit('show-batch-modal')"
+        title="开启批量吞吐量下载测速"
+      >
         <SvgIcon name="wifi" :size="12" class="icon-gap" />
-        批量测速
+        <span>批量测速</span>
       </button>
-      <button class="btn-action" @click="emit('refresh')" title="刷新">
-        <SvgIcon name="refresh" :size="12" class="icon-gap" />
+
+      <button
+        class="btn-action refresh"
+        @click="emit('refresh')"
+        title="刷新节点与策略组列表"
+      >
+        <SvgIcon name="refresh" :size="12" />
       </button>
     </div>
   </div>
@@ -93,34 +158,46 @@ const emit = defineEmits<{
   border-bottom: 1px solid var(--border-subtle);
   padding-bottom: var(--space-3);
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .toolbar-left {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
+  align-items: center;
   flex-shrink: 0;
 }
 
-.toolbar-left h2 {
+.group-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.group-title {
   font-size: var(--text-md);
   font-weight: var(--weight-bold);
   color: var(--text-primary);
+  letter-spacing: -0.2px;
 }
 
-.nodes-count {
-  font-size: var(--text-xs);
+.nodes-count-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.filter-total {
   color: var(--text-tertiary);
-}
-
-.filter-count {
-  color: var(--accent-cyan);
 }
 
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -131,14 +208,15 @@ const emit = defineEmits<{
   background: var(--layer-2);
   border: 1px solid var(--border-normal);
   border-radius: var(--radius-sm);
-  padding: 0 var(--space-2);
+  padding: 0 8px;
   height: 30px;
-  gap: var(--space-1);
-  transition: border-color var(--duration-fast);
+  gap: 6px;
+  transition: all var(--duration-fast);
 }
 
 .search-box:focus-within {
-  border-color: var(--accent-blue);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan-glow);
 }
 
 .search-icon {
@@ -152,7 +230,7 @@ const emit = defineEmits<{
   outline: none;
   color: var(--text-primary);
   font-size: var(--text-xs);
-  width: 120px;
+  width: 140px;
 }
 
 .search-input::placeholder {
@@ -163,9 +241,9 @@ const emit = defineEmits<{
   background: transparent;
   border: none;
   color: var(--text-tertiary);
-  font-size: 16px;
+  font-size: 14px;
   cursor: pointer;
-  padding: 0 var(--space-1);
+  padding: 0 2px;
   line-height: 1;
 }
 
@@ -173,64 +251,157 @@ const emit = defineEmits<{
   color: var(--text-primary);
 }
 
-/* 排序按钮 */
-.btn-sort {
-  display: flex;
+/* 排序按钮组 */
+.sort-button-group {
+  display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
   background: var(--layer-2);
   border: 1px solid var(--border-normal);
   border-radius: var(--radius-sm);
+  height: 30px;
+  overflow: hidden;
+}
+
+.btn-sort {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
   color: var(--text-primary);
   font-size: var(--text-xs);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
-  gap: var(--space-1);
+  transition: background var(--duration-fast);
 }
 
 .btn-sort:hover {
-  background: var(--border-strong);
-  border-color: var(--border-accent);
+  background: var(--border-subtle);
 }
 
-.sort-order {
-  display: inline-flex;
+.btn-sort-dir {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  background: var(--border-subtle);
-  border-radius: var(--radius-xs);
+  width: 22px;
+  height: 100%;
+  background: var(--layer-3);
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  color: var(--accent-cyan);
+  font-weight: var(--weight-bold);
   font-size: 11px;
   cursor: pointer;
+  transition: background var(--duration-fast);
 }
 
-.sort-order:hover {
-  background: var(--accent-blue-glow);
-  color: var(--accent-blue);
+.btn-sort-dir:hover {
+  background: var(--border-strong);
+}
+
+/* 视图模式切换 */
+.view-mode-group {
+  display: inline-flex;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  height: 30px;
+  overflow: hidden;
+}
+
+.view-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.view-btn:hover {
+  color: var(--text-primary);
+  background: var(--border-subtle);
+}
+
+.view-btn.active {
+  background: var(--accent-cyan-glow);
+  color: var(--accent-cyan);
+  font-weight: var(--weight-bold);
+}
+
+.divider-vertical {
+  width: 1px;
+  height: 20px;
+  background: var(--border-normal);
+  margin: 0 2px;
 }
 
 /* 操作按钮 */
 .btn-action {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
+  padding: 0 10px;
+  height: 30px;
   background: var(--layer-2);
   border: 1px solid var(--border-normal);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: var(--text-xs);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: all var(--duration-fast);
 }
 
-.btn-action:hover {
+.btn-action:hover:not(:disabled) {
   background: var(--border-strong);
   border-color: var(--border-accent);
 }
 
-/* 图标间距工具类 */
+.btn-action.ping:hover:not(:disabled) {
+  color: var(--accent-orange);
+  border-color: var(--accent-orange);
+}
+
+.btn-action.ping.loading {
+  background: var(--layer-2);
+  border-color: var(--accent-orange);
+  color: var(--accent-orange);
+  opacity: 0.9;
+  cursor: wait;
+}
+
+.btn-action.speed:hover:not(:disabled) {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.btn-action:disabled:not(.loading) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.spinner-ring {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(245, 158, 11, 0.25);
+  border-top-color: var(--accent-orange);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .icon-gap {
   margin-right: 4px;
 }
 </style>
+
+
