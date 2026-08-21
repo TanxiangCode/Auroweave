@@ -43,7 +43,7 @@ const tunInterfaceName = computed(
 
 <template>
   <div class="panel-container">
-    <h2>🔌 内核运行模式</h2>
+    <h2>内核运行模式</h2>
     <p class="panel-desc">
       选择 GUI 主程序与 sing-box 内核的交互架构。在 Windows 下，推荐使用系统服务模式以实现免 UAC 的 TUN 网络接管体验。
     </p>
@@ -60,12 +60,12 @@ const tunInterfaceName = computed(
       v-if="runMode === 'local' && settingsStore.settings.tun_enabled"
       class="fallback-banner warning"
     >
-      ⚠️ 当前为本地运行模式，如果您尚未一键提权安装组件，启用 TUN 将提示提权。推荐切换至<strong>系统服务模式</strong>以获得流畅的开机自启体验。
+      当前为本地运行模式，如果您尚未一键提权安装组件，启用 TUN 将提示提权。推荐切换至<strong>系统服务模式</strong>以获得流畅的开机自启体验。
     </div>
 
     <!-- 切换失败错误展示 -->
     <div v-if="errorMsg" class="fallback-banner error">
-      ❌ 操作失败: {{ errorMsg }}
+      操作失败: {{ errorMsg }}
     </div>
 
     <!-- 系统服务详细状态面板 -->
@@ -85,7 +85,7 @@ const tunInterfaceName = computed(
 
     <hr class="separator" />
 
-    <h2>🔌 TUN 虚拟网卡</h2>
+    <h2>TUN 虚拟网卡</h2>
     <p class="panel-desc">
       TUN 模式通过虚拟网卡在系统内核层接管流量，配置对应的参数选项：
     </p>
@@ -95,7 +95,7 @@ const tunInterfaceName = computed(
 
     <!-- 为什么只需授权一次？科普卡片 -->
     <div class="info-card">
-      <div class="info-icon">💡</div>
+      <div class="info-icon"></div>
       <div class="info-body">
         <p><strong>关于免 UAC 系统服务工作机制：</strong></p>
         <p>

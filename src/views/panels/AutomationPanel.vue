@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>⚡ 场景自动化引擎</h2>
+    <h2>场景自动化引擎</h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">

@@ -1,8 +1,4 @@
-/**
- * IPC 封装层 — 应用设置命令
- * 作者: TanXiang
- */
-import type { ApiResponse, AppSettings } from "@/types";
+import type { ApiResponse, AppSettings, SingboxUpdateInfo } from "@/types";
 import { invokeWithTimeout } from "./client";
 
 /** 获取所有设置 */
@@ -62,3 +58,20 @@ export async function serviceStop(): Promise<ApiResponse<void>> {
 export async function serviceReadLog(): Promise<ApiResponse<string>> {
   return invokeWithTimeout<ApiResponse<string>>("service_read_log");
 }
+
+/** 从备份还原 config.backup.json 并重启核心 */
+export async function restoreConfigBackup(): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("settings_restore_backup");
+}
+
+/** 检查 Sing-box 内核版本更新 */
+export async function checkSingboxUpdate(): Promise<ApiResponse<SingboxUpdateInfo>> {
+  return invokeWithTimeout<ApiResponse<SingboxUpdateInfo>>("core_check_singbox_update", {}, 20000);
+}
+
+/** 在线升级 Sing-box 内核 */
+export async function upgradeSingbox(downloadUrl: string): Promise<ApiResponse<void>> {
+  return invokeWithTimeout<ApiResponse<void>>("core_upgrade_singbox", { downloadUrl }, 180000);
+}
+
+

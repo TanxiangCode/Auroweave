@@ -11,7 +11,7 @@ const { handleExport } = useLogViewer();
 
 <template>
   <div class="panel-container">
-    <h2>🛡️ 隐私与日志控制台</h2>
+    <h2>隐私与日志控制台</h2>
 
     <div class="setting-group">
       <div class="setting-item">
@@ -27,7 +27,7 @@ const { handleExport } = useLogViewer();
           <span>导出排错诊断日志</span>
           <span class="sub-label">打包内核运行环境与应用日志至桌面以便反馈</span>
         </div>
-        <button class="btn-action" @click="handleExport">📥 导出诊断包</button>
+        <button class="btn-action" @click="handleExport">导出诊断包</button>
       </div>
     </div>
 

@@ -34,12 +34,28 @@ fn default_core_settings() -> CoreSettings {
     }
 }
 
+fn default_latency_test_concurrency() -> u32 { 20 }
+fn default_latency_test_timeout_ms() -> u64 { 3000 }
+fn default_latency_test_url() -> String { "http://www.gstatic.com/generate_204".to_string() }
+fn default_true() -> bool { true }
+fn default_false() -> bool { false }
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     pub theme: String,
     pub language: String,
     pub proxy_mode: String,
     pub auto_start: bool,
+    #[serde(default = "default_true")]
+    pub minimize_to_tray: bool,
+    #[serde(default = "default_false")]
+    pub start_minimized: bool,
+    #[serde(default = "default_false")]
+    pub hide_dock_on_close: bool,
+    #[serde(default = "default_true")]
+    pub show_tray_speed: bool,
+    #[serde(default = "default_false")]
+    pub allow_lan: bool,
     pub tun_enabled: bool,
     /// TUN 虚拟网卡名称，显示 in Windows 网络适配器列表中，默认 Auroweave
     pub tun_interface_name: String,
@@ -57,6 +73,14 @@ pub struct AppSettings {
     pub connection_timeout_secs: u64,
     pub enable_app_traffic_tracking: bool,
 
+    // 延迟测试并发控制与超时参数
+    #[serde(default = "default_latency_test_concurrency")]
+    pub latency_test_concurrency: u32,
+    #[serde(default = "default_latency_test_timeout_ms")]
+    pub latency_test_timeout_ms: u64,
+    #[serde(default = "default_latency_test_url")]
+    pub latency_test_url: String,
+
     #[serde(default = "default_core_settings")]
     pub core: CoreSettings,
 }
@@ -68,7 +92,13 @@ impl Default for AppSettings {
             language: "zh-CN".to_string(),
             proxy_mode: "rule".to_string(),
             auto_start: false,
+            minimize_to_tray: true,
+            start_minimized: false,
+            hide_dock_on_close: false,
+            show_tray_speed: true,
+            allow_lan: false,
             tun_enabled: false,
+
             tun_interface_name: "Auroweave".to_string(),
             topology_enabled: false,
             performance_mode: false,
@@ -86,10 +116,18 @@ impl Default for AppSettings {
             speed_test_timeout_secs: 5,
             connection_timeout_secs: 15,
             enable_app_traffic_tracking: true,
+
+            // 延迟测试配置
+            latency_test_concurrency: 20,
+            latency_test_timeout_ms: 3000,
+            latency_test_url: "http://www.gstatic.com/generate_204".to_string(),
+
             core: default_core_settings(),
         }
     }
 }
+
+
 
 fn get_settings_path() -> PathBuf {
     let config_dir = crate::get_config_dir();
@@ -192,17 +230,38 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         }
     }
 
-    // 3. 同步代理模式到 route.final
+    // 3. 同步代理模式与 App-Matrix 应用分流规则到 route
     // sing-box 通过 route.final 决定最终出站：
     //   direct 模式 → route.final = "direct" (所有流量直连)
     //   rule/global 模式 → route.final = "proxy" (流量走代理出站)
-    // 若不同步，切换到直连后 config.json 仍保持 final="proxy"，流量仍走代理
     if let Some(route) = config_val.get_mut("route").and_then(|r| r.as_object_mut()) {
         let final_outbound = match settings.proxy_mode.as_str() {
             "direct" => "direct",
             _ => "proxy",
         };
         route.insert("final".to_string(), serde_json::json!(final_outbound));
+
+        // 同步 App-Matrix 应用分流规则到 route.rules
+        let app_rules = crate::commands::routing::load_app_rules_internal();
+        if let Some(rules_arr) = route.get_mut("rules").and_then(|r| r.as_array_mut()) {
+            // 先移除原有的 process_name 分流规则（避免重复累加）
+            rules_arr.retain(|rule| !rule.as_object().map(|obj| obj.contains_key("process_name")).unwrap_or(false));
+
+            // 在基础规则（sniff, hijack-dns, ip_is_private）之后插入应用分流规则
+            // 找到合适插入点（在 geosite/geoip 直连规则之前）
+            let insert_pos = rules_arr.iter().position(|rule| {
+                rule.get("rule_set").is_some() || rule.get("domain").is_some()
+            }).unwrap_or(rules_arr.len());
+
+            for (proc_name, outbound) in app_rules {
+                if !proc_name.is_empty() && !outbound.is_empty() {
+                    rules_arr.insert(insert_pos, serde_json::json!({
+                        "process_name": [proc_name],
+                        "outbound": outbound
+                    }));
+                }
+            }
+        }
         modified = true;
     }
 
@@ -268,6 +327,10 @@ pub fn update_settings_internal(app_handle: &tauri::AppHandle, patch: serde_json
 
     if let Ok(content) = serde_json::to_string_pretty(&current) {
         fs::write(&path, content).map_err(|e| e.to_string())?;
+    }
+
+    if let Ok(new_settings) = serde_json::from_value::<AppSettings>(current) {
+        crate::core::clash_api::set_clash_api_port(new_settings.clash_api_port);
     }
 
     let _ = rebuild_config_from_settings(app_handle);
@@ -564,10 +627,28 @@ pub async fn core_query_running(app_handle: tauri::AppHandle) -> ApiResponse<boo
             || status == crate::core::sidecar::SidecarStatus::Starting;
         
         let is_tun_process_running = if settings.tun_enabled {
-            // Windows: 通过计划任务检测；macOS/Linux: 检查 sidecar 状态即可
+            // Windows: 通过计划任务检测；macOS: 检查 PID 文件与进程存活；Linux: 检查 sidecar 状态
             #[cfg(target_os = "windows")]
             { crate::system::service_control::query_singbox_process_running() }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "macos")]
+            {
+                let pid_file = std::env::temp_dir().join("auroweave-singbox.pid");
+                if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                    if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                        std::process::Command::new("kill")
+                            .arg("-0")
+                            .arg(pid.to_string())
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             { false }
         } else {
             false
@@ -575,5 +656,31 @@ pub async fn core_query_running(app_handle: tauri::AppHandle) -> ApiResponse<boo
         
         ApiResponse::ok(is_running || is_tun_process_running)
     }
+}
+
+/// 从 config.backup.json 恢复配置文件并自动重启内核
+#[tauri::command]
+pub async fn settings_restore_backup(app_handle: tauri::AppHandle) -> ApiResponse<()> {
+    let config_dir = crate::get_config_dir();
+    let config_path = config_dir.join("config.json");
+    let backup_path = config_dir.join("config.backup.json");
+    if !backup_path.exists() {
+        return ApiResponse::err("未找到备份配置文件 (config.backup.json)".to_string(), 404);
+    }
+
+    if let Err(e) = fs::copy(&backup_path, &config_path) {
+        return ApiResponse::err(format!("还原备份文件失败: {}", e), 500);
+    }
+    log::info!("[settings] 已成功还原 config.backup.json 至 config.json");
+
+    // 重新应用设置覆写
+    let _ = rebuild_config_from_settings(&app_handle);
+
+    // 重新拉起/重载内核
+    if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
+        return ApiResponse::err(format!("备份已还原，但拉起内核失败: {}", e), 500);
+    }
+
+    ApiResponse::ok(())
 }
 

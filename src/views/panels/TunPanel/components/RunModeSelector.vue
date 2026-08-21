@@ -21,7 +21,7 @@ const emit = defineEmits<{
       :disabled="operating"
       @click="emit('select', 'local')"
     >
-      <span class="btn-title">💻 本地运行模式 (Local)</span>
+      <span class="btn-title">本地运行模式 (Local)</span>
       <span class="btn-desc">GUI 结合提权任务托管内核子进程。开启 TUN 需要首次提权配置计划任务，此后即免弹窗运行。</span>
     </button>
     <button
@@ -30,7 +30,7 @@ const emit = defineEmits<{
       :disabled="operating"
       @click="emit('select', 'service')"
     >
-      <span class="btn-title">🛡️ 系统服务模式 (Service)</span>
+      <span class="btn-title">系统服务模式 (Service)</span>
       <span class="btn-desc">由独立的 Windows 系统服务托管内核，日常开启/关闭 TUN 均免 UAC 二次弹窗，支持随开机自启运行。</span>
     </button>
   </div>

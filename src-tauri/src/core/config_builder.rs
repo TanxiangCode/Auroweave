@@ -92,6 +92,7 @@ pub struct ConfigBuilder {
     outbounds: Vec<ParsedOutbound>,
     mixed_port: u16,
     clash_api_port: u16,
+    allow_lan: bool,
     /// geosite-cn.srs 本地文件路径（如果存在则使用 type:local，否则跳过 rule-set）
     geosite_cn_path: Option<String>,
     /// geoip-cn.srs 本地文件路径
@@ -105,9 +106,16 @@ impl ConfigBuilder {
             outbounds,
             mixed_port: 8890,
             clash_api_port: 9090,
+            allow_lan: false,
             geosite_cn_path: None,
             geoip_cn_path: None,
         }
+    }
+
+    /// 设置局域网共享模式
+    pub fn with_allow_lan(mut self, allow_lan: bool) -> Self {
+        self.allow_lan = allow_lan;
+        self
     }
 
     /// 设置混合代理端口和 Clash API 端口（仅当传入值 > 0 时生效）
@@ -120,6 +128,7 @@ impl ConfigBuilder {
         }
         self
     }
+
 
     /// 设置本地 rule-set 文件路径（如果文件存在则使用 type:local 引用）
     pub fn with_local_rule_sets(mut self, geosite_cn: Option<String>, geoip_cn: Option<String>) -> Self {
@@ -167,14 +176,16 @@ impl ConfigBuilder {
             "outbounds": proxy_group_list
         }));
 
-        // 2c. 全局 "auto" urltest 出站（自动测速选最优节点）
+        // 2c. 全局 "auto" urltest 出站（自动测速选最优节点，3 分钟心跳，50ms 容差）
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "auto",
             "outbounds": node_tags.clone(),
-            "url": "https://www.gstatic.com/generate_204",
-            "interval": "15m",
-            "idle_timeout": "30m"
+            "url": "http://www.gstatic.com/generate_204",
+            "interval": "3m",
+            "idle_timeout": "15m",
+            "tolerance": 50,
+            "interrupt_exist_connections": false
         }));
 
         // 2c-2. "balance" 负载均衡出站（urltest + 短间隔 + tolerance，近似负载均衡效果）
@@ -182,23 +193,27 @@ impl ConfigBuilder {
             "type": "urltest",
             "tag": "balance",
             "outbounds": node_tags,
-            "url": "https://www.gstatic.com/generate_204",
+            "url": "http://www.gstatic.com/generate_204",
             "interval": "3m",
             "idle_timeout": "10m",
-            "tolerance": 50
+            "tolerance": 50,
+            "interrupt_exist_connections": false
         }));
 
-        // 2d. 地区 urltest 出站
+        // 2d. 地区 urltest 出站（3 分钟自动探测最优节点）
         for (region, tags) in region_map {
             final_outbounds.push(json!({
                 "type": "urltest",
                 "tag": format!("{}-auto", region),
                 "outbounds": tags,
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": "15m",
-                "idle_timeout": "30m"
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": "3m",
+                "idle_timeout": "15m",
+                "tolerance": 50,
+                "interrupt_exist_connections": false
             }));
         }
+
 
         // 2e. 节点具体出站
         final_outbounds.extend(raw_outbounds);
@@ -215,16 +230,28 @@ impl ConfigBuilder {
         server_domains.sort();
         server_domains.dedup();
 
-        let mut dns_rules = if server_domains.is_empty() {
-            vec![]
-        } else {
-            vec![json!({ "domain": server_domains, "server": "local" })]
-        };
+    let mut dns_rules = if server_domains.is_empty() {
+        vec![]
+    } else {
+        vec![json!({ "domain": server_domains, "server": "local" })]
+    };
 
-        // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则
-        if self.geosite_cn_path.is_some() {
-            dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
-        }
+    // 测速与健康检测域名强制使用 local DNS 解析，避免未选定节点时依赖 remote/proxy 产生 DNS 死锁
+    dns_rules.push(json!({
+        "domain": [
+            "www.gstatic.com",
+            "connectivitycheck.gstatic.com",
+            "cp.cloudflare.com",
+            "msftconnecttest.com"
+        ],
+        "server": "local"
+    }));
+
+    // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则
+    if self.geosite_cn_path.is_some() {
+        dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
+    }
+
 
         // ---- 阶段4: 组装路由 ----
         // 检查本地 rule-set 文件是否存在
@@ -237,6 +264,53 @@ impl ConfigBuilder {
             { "protocol": "dns", "action": "hijack-dns" },
             { "ip_is_private": true, "outbound": "direct" }
         ]);
+
+        // 注入 App-Matrix 应用分流规则 (优先级高于通用域名分流)
+        let app_rules = crate::commands::routing::load_app_rules_internal();
+        if let Some(rules) = route_rules.as_array_mut() {
+            for (proc_name, outbound) in app_rules {
+                if !proc_name.is_empty() && !outbound.is_empty() {
+                    rules.push(json!({
+                        "process_name": [proc_name],
+                        "outbound": outbound
+                    }));
+                }
+            }
+        }
+
+        // 注入自定义域名 / IP 分流规则 (仅注入 enabled == true)
+        let custom_rules = crate::commands::routing::load_custom_rules_internal();
+        if let Some(rules) = route_rules.as_array_mut() {
+            for cr in custom_rules {
+                if !cr.enabled || cr.payload.trim().is_empty() || cr.outbound_tag.trim().is_empty() {
+                    continue;
+                }
+                let payload = cr.payload.trim().to_string();
+                let outbound = cr.outbound_tag.trim().to_string();
+
+                match cr.rule_type.as_str() {
+                    "domain" => {
+                        rules.push(json!({ "domain": [payload], "outbound": outbound }));
+                    }
+                    "domain_suffix" => {
+                        rules.push(json!({ "domain_suffix": [payload], "outbound": outbound }));
+                    }
+                    "domain_keyword" => {
+                        rules.push(json!({ "domain_keyword": [payload], "outbound": outbound }));
+                    }
+                    "domain_regex" => {
+                        rules.push(json!({ "domain_regex": [payload], "outbound": outbound }));
+                    }
+                    "ip_cidr" => {
+                        rules.push(json!({ "ip_cidr": [payload], "outbound": outbound }));
+                    }
+                    _ => {
+                        rules.push(json!({ "domain_suffix": [payload], "outbound": outbound }));
+                    }
+                }
+            }
+        }
+
 
         if has_geosite {
             rule_set_config.push(json!({
@@ -312,10 +386,11 @@ impl ConfigBuilder {
                 {
                     "type": "mixed",
                     "tag": "mixed-in",
-                    "listen": "127.0.0.1",
+                    "listen": if self.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
                     "listen_port": self.mixed_port
                 }
             ],
+
             "outbounds": final_outbounds,
             "route": route,
             "experimental": {

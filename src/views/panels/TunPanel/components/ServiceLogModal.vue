@@ -3,8 +3,6 @@
  * 服务运行日志弹窗
  * 作者: TanXiang
  */
-import { Teleport } from "vue";
-
 defineProps<{
   visible: boolean;
   logContent: string;
@@ -21,7 +19,7 @@ const emit = defineEmits<{
     <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
       <div class="modal-card glass-effect log-modal">
         <div class="modal-header">
-          <span class="modal-icon">📋</span>
+          <span class="modal-icon"></span>
           <h3>系统服务运行日志</h3>
           <button class="close-x" @click="emit('close')">×</button>
         </div>
@@ -29,7 +27,7 @@ const emit = defineEmits<{
           <pre class="log-content">{{ logContent || "暂无日志内容" }}</pre>
         </div>
         <div class="modal-actions">
-          <button class="btn text" @click="emit('refresh')">🔄 刷新</button>
+          <button class="btn text" @click="emit('refresh')">刷新</button>
           <button class="btn text" @click="emit('close')">关闭</button>
         </div>
       </div>

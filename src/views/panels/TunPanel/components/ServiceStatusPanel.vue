@@ -5,8 +5,6 @@
  *
  * 展示服务运行状态网格与控制按钮
  */
-import { Teleport } from "vue";
-
 defineProps<{
   serviceStatus: {
     installedVersion: string | null;
@@ -28,7 +26,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="service-manager-box">
-    <h3>🛡️ 系统服务状态控制</h3>
+    <h3>系统服务状态控制</h3>
 
     <div class="status-grid">
       <!-- 状态显示 -->
@@ -48,7 +46,7 @@ const emit = defineEmits<{
 
       <!-- 故障指示 -->
       <div v-if="serviceStatus.lastFallbackReason" class="grid-item full-width fallback-alert">
-        💡 最近一次回退原因:
+        最近一次回退原因:
         <strong>
           {{ serviceStatus.lastFallbackReason === 'not_installed' ? '未安装系统服务' : '服务启动失败' }}
         </strong>
@@ -78,7 +76,7 @@ const emit = defineEmits<{
         :disabled="operating"
         @click="emit('view-log')"
       >
-        📋 查看服务日志
+        查看服务日志
       </button>
       <button
         v-if="serviceStatus.lastKnownStatus !== 'not_installed'"
@@ -86,7 +84,7 @@ const emit = defineEmits<{
         :disabled="operating"
         @click="emit('uninstall')"
       >
-        🗑️ 卸载服务
+        卸载服务
       </button>
       <button
         v-else
@@ -94,7 +92,7 @@ const emit = defineEmits<{
         :disabled="operating"
         @click="emit('install')"
       >
-        🛠️ 安装服务
+        安装服务
       </button>
     </div>
   </div>

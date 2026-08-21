@@ -21,7 +21,7 @@ const {
   <div class="log-console-container glass-effect">
     <div class="console-header">
       <div class="header-left">
-        <span class="console-title">📁 实时运行日志</span>
+        <span class="console-title">实时运行日志</span>
         <div class="tab-group compact">
           <button
             v-for="tab in tabs"
@@ -35,8 +35,8 @@ const {
         </div>
       </div>
       <div class="header-right">
-        <button class="btn-tool" @click="fetchLogs">🔄 刷新</button>
-        <button class="btn-tool danger" @click="clearAllLogs">🗑️ 一键清空所有日志</button>
+        <button class="btn-tool" @click="fetchLogs">刷新</button>
+        <button class="btn-tool danger" @click="clearAllLogs">一键清空所有日志</button>
       </div>
     </div>
 

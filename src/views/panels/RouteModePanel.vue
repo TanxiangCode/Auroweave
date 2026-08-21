@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>🔀 代理模式与端口设置</h2>
+    <h2>代理模式与端口设置</h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -8,9 +8,9 @@
           <span class="sub-label">切换当前全局路由分流规则</span>
         </div>
         <select v-model="settingsStore.settings.proxy_mode" class="select-input" @change="saveMode">
-          <option value="rule">🔀 规则模式 (Rule)</option>
-          <option value="global">🌐 全局代理 (Global)</option>
-          <option value="direct">⚡ 直连模式 (Direct)</option>
+          <option value="rule">规则模式 (Rule)</option>
+          <option value="global">全局代理 (Global)</option>
+          <option value="direct">直连模式 (Direct)</option>
         </select>
       </div>
 

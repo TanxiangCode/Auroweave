@@ -129,7 +129,7 @@ async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str) 
 async fn build_and_apply_config(
     app_handle: &AppHandle,
     outbounds: Vec<crate::core::parser::ParsedOutbound>,
-    sidecar_manager: &SidecarManager,
+    _sidecar_manager: &SidecarManager,
 ) -> Result<u32, AppError> {
     if outbounds.is_empty() {
         return Err(AppError::Config("解析出的节点为空，无法生成配置".to_string()));
@@ -152,11 +152,14 @@ async fn build_and_apply_config(
         "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
     ).await;
 
+    let settings = crate::commands::settings::settings_get_internal(app_handle);
     let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(app_handle);
     let config_builder = ConfigBuilder::new(outbounds)
         .with_ports(mixed_port, clash_api_port)
+        .with_allow_lan(settings.allow_lan)
         .with_local_rule_sets(geosite_cn_path, geoip_cn_path);
     let config_json = config_builder.build()?;
+
 
     let config_path = config_dir.join("config.json");
     let config_path_str = config_path.to_string_lossy().to_string();
@@ -178,15 +181,18 @@ async fn build_and_apply_config(
 
     // 热重载或拉起 sing-box
     let clash_client = ClashApiClient::default();
-    let reload_success = clash_client.reload_config(&config_path_str).await.is_ok();
+    let reload_result = clash_client.reload_config(&config_path_str).await;
+    let reload_success = reload_result.is_ok();
 
     if !reload_success {
-        log::info!("[subscription] ClashAPI 未响应，尝试拉起 sing-box 子进程...");
-        if let Err(e) = sidecar_manager.start(&config_path_str).await {
+        let err_msg = reload_result.err().map(|e| e.to_string()).unwrap_or_default();
+        log::info!("[subscription] ClashAPI 热重载未生效 ({})，通过统一核心自愈恢复流程拉起内核...", err_msg);
+        
+        if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(app_handle).await {
             log::error!("[subscription] 拉起 sing-box 失败 ({})，尝试自动回滚备份...", e);
             if backup_path.exists() {
                 let _ = fs::copy(&backup_path, &config_path);
-                let _ = sidecar_manager.start(&config_path_str).await;
+                let _ = crate::system::startup::apply_core_mode_with_fallback(app_handle).await;
             }
             return Err(AppError::Sidecar(format!(
                 "启动核心失败，已自动回滚备份: {}",
@@ -195,6 +201,64 @@ async fn build_and_apply_config(
         }
     } else {
         log::info!("[subscription] sing-box 已成功通过 ClashAPI 热重载配置");
+    }
+
+    // 等待 ClashAPI 完全就绪（热重载后需要短暂时间让新配置生效）
+    let mut api_ready = false;
+    for i in 0..10 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+        if clash_client.get_proxies().await.is_ok() {
+            api_ready = true;
+            log::info!("[subscription] ClashAPI 已就绪 (等待 {}ms)", (i + 1) * 300);
+            break;
+        }
+    }
+    if !api_ready {
+        log::warn!("[subscription] ClashAPI 在 3 秒内未就绪，后续代理列表可能暂时为空");
+    }
+
+    // 关键修复：配置重载后自动触发 URLTest 组测速，使其能选择最优节点
+    // 避免用户看不到 auto 组当前使用的节点
+    if api_ready {
+        let urltest_groups = match clash_client.get_proxies().await {
+            Ok(json) => {
+                if let Some(proxies) = json.get("proxies").and_then(|p| p.as_object()) {
+                    proxies.iter()
+                        .filter(|(_, v)| {
+                            v.get("type").and_then(|t| t.as_str()) == Some("URLTest")
+                                && !v.get("now").and_then(|n| n.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
+                        })
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                }
+            }
+            Err(e) => {
+                log::warn!("[subscription] 获取 URLTest 组失败: {}", e);
+                Vec::new()
+            }
+        };
+
+        if !urltest_groups.is_empty() {
+            let test_count = urltest_groups.len();
+            log::info!("[subscription] 检测到 {} 个未选择节点的 URLTest 组，开始自动测速", test_count);
+            
+            for group_tag in urltest_groups {
+                log::info!("[subscription] 触发 URLTest 组 {} 的自动测速", group_tag);
+                // 调用新添加的 trigger_urltest_group_delay 方法
+                let delay_url = "http://www.gstatic.com/generate_204";
+                let _ = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(10),
+                    clash_client.trigger_urltest_group_delay(&group_tag, delay_url, 5000)
+                ).await;
+
+
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+
+            log::info!("[subscription] 已触发 {} 个 URLTest 组的自动测速，使其选择最优节点", test_count);
+        }
     }
 
     // 同步系统代理状态

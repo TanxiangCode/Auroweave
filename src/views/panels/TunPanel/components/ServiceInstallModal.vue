@@ -18,12 +18,12 @@ const emit = defineEmits<{
     <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
       <div class="modal-card glass-effect">
         <div class="modal-header">
-          <span class="modal-icon">🛡️</span>
+          <span class="modal-icon"></span>
           <h3>安装 Auroweave 系统服务</h3>
         </div>
         <div class="modal-body">
           <p>启用系统服务模式需要安装 <strong>Auroweave Core Service</strong> 到您的 Windows 系统中。</p>
-          <p class="warning-text">⚠️ 此操作需要申请一次系统管理员权限（弹出 UAC 窗口）。完成安装后，日常使用中启用/关闭 TUN 均不再弹出该提示。</p>
+          <p class="warning-text">此操作需要申请一次系统管理员权限（弹出 UAC 窗口）。完成安装后，日常使用中启用/关闭 TUN 均不再弹出该提示。</p>
           <p>是否立即开始安装？</p>
         </div>
         <div class="modal-actions">

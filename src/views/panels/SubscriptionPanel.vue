@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>📦 订阅管理</h2>
+    <h2>订阅管理</h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -12,19 +12,19 @@
 
       <!-- 快速导入模组 -->
       <div class="import-card glass-effect">
-        <h3>🚀 导入新订阅</h3>
+        <h3>导入新订阅</h3>
         <div class="input-form">
           <input v-model="subName" type="text" placeholder="订阅别名 (如: SKYLUMO加速器)" class="text-input" />
           <input v-model="subUrl" type="text" placeholder="订阅 URL (如: https://...)" class="text-input" />
           <button class="btn-import" :disabled="importing" @click="handleImport">
-            {{ importing ? '正在导入解析中...' : '🚀 开始导入' }}
+            {{ importing ? '正在导入解析中...' : '开始导入' }}
           </button>
         </div>
       </div>
 
       <!-- 已导入订阅列表 -->
       <div class="subscriptions-card glass-effect">
-        <h3>📋 已导入订阅 ({{ subscriptions.length }})</h3>
+        <h3>已导入订阅 ({{ subscriptions.length }})</h3>
         <div v-if="subscriptions.length === 0" class="empty-tip">
           尚未导入任何订阅，请在上方添加
         </div>
@@ -159,20 +159,41 @@ async function handleActivate(id: string) {
   operating.value = null;
 }
 
-async function handleRefresh(id: string) {
-  operating.value = id;
-  const res = await subStore.refreshSub(id);
-  if (res.success) {
-    toast.success("订阅刷新成功", `解析出 ${res.data?.node_count || 0} 个节点`);
-    proxyStore.clearCache();
-    await proxyStore.fetchGroups();
-  } else {
-    toast.error("刷新失败", res.error);
+  async function handleRefresh(id: string) {
+    operating.value = id;
+    const res = await subStore.refreshSub(id);
+    if (res.success) {
+      toast.success("订阅刷新成功", `解析出 ${res.data?.node_count || 0} 个节点`);
+      proxyStore.clearCache();
+      // 关键修复：等待 sing-box 完全就绪后再拉取代理列表，避免 ClashAPI 请求失败
+      // 后端 build_and_apply_config 已等待 ClashAPI 就绪，但前端也需要短暂缓冲
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // 重试机制：最多尝试3次拉取代理列表
+      let retryCount = 0;
+      let groupsFetched = false;
+      while (retryCount < 3 && !groupsFetched) {
+        await proxyStore.fetchGroups();
+        if (proxyStore.groups.length > 0) {
+          groupsFetched = true;
+          break;
+        }
+        retryCount++;
+        if (retryCount < 3) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      if (!groupsFetched) {
+        toast.warning("代理列表暂时为空", "Sing-box 可能还在初始化，请稍后刷新");
+      }
+    } else {
+      toast.error("刷新失败", res.error);
+    }
+    operating.value = null;
   }
-  operating.value = null;
-}
 
-async function handleDelete(id: string) {
+  async function handleDelete(id: string) {
   const sub = subscriptions.value.find(s => s.id === id);
   if (!sub) return;
 
