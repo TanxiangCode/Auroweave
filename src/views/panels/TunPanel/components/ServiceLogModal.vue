@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 服务运行日志弹窗
  * 作者: TanXiang
@@ -27,7 +28,7 @@ const emit = defineEmits<{
           <pre class="log-content">{{ logContent || "暂无日志内容" }}</pre>
         </div>
         <div class="modal-actions">
-          <button class="btn text" @click="emit('refresh')">刷新</button>
+          <button class="btn text" @click="emit('refresh')"><BaseIcon name="RefreshCw" :size="14" /> 刷新</button>
           <button class="btn text" @click="emit('close')">关闭</button>
         </div>
       </div>

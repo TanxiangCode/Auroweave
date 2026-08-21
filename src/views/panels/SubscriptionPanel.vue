@@ -1,6 +1,9 @@
 <template>
   <div class="panel-container">
-    <h2>订阅管理</h2>
+    <h2>
+      <BaseIcon name="Layers" :size="20" class="panel-header-icon" />
+      订阅管理
+    </h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -12,11 +15,15 @@
 
       <!-- 快速导入模组 -->
       <div class="import-card glass-effect">
-        <h3>导入新订阅</h3>
+        <h3>
+          <BaseIcon name="PlusCircle" :size="16" />
+          导入新订阅
+        </h3>
         <div class="input-form">
           <input v-model="subName" type="text" placeholder="订阅别名 (如: SKYLUMO加速器)" class="text-input" />
           <input v-model="subUrl" type="text" placeholder="订阅 URL (如: https://...)" class="text-input" />
           <button class="btn-import" :disabled="importing" @click="handleImport">
+            <BaseIcon v-if="!importing" name="Download" :size="14" />
             {{ importing ? '正在导入解析中...' : '开始导入' }}
           </button>
         </div>
@@ -24,7 +31,11 @@
 
       <!-- 已导入订阅列表 -->
       <div class="subscriptions-card glass-effect">
-        <h3>已导入订阅 ({{ subscriptions.length }})</h3>
+        <h3>
+          <BaseIcon name="List" :size="16" />
+          已导入订阅 ({{ subscriptions.length }})
+        </h3>
+
         <div v-if="subscriptions.length === 0" class="empty-tip">
           尚未导入任何订阅，请在上方添加
         </div>
@@ -89,6 +100,8 @@ import { useSettingsStore } from "@/stores/settings.store";
 import { useSubscriptionStore } from "@/stores/subscription.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useToast } from "@/composables/useToast";
+import BaseIcon from "@/components/common/BaseIcon.vue";
+
 
 const settingsStore = useSettingsStore();
 const subStore = useSubscriptionStore();

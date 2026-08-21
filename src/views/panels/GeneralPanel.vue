@@ -1,9 +1,23 @@
+<script setup lang="ts">
+import { useSettingsStore } from "@/stores/settings.store";
+import BaseIcon from "@/components/common/BaseIcon.vue";
+
+const settingsStore = useSettingsStore();
+
+async function save() {
+  await settingsStore.updateSettings(settingsStore.settings);
+}
+
+</script>
+
 <template>
   <div class="panel-container">
     <!-- 外观与偏好 -->
     <div class="setting-card glass-effect">
       <div class="card-header">
-        <span class="card-icon"></span>
+        <span class="card-icon">
+          <BaseIcon name="Palette" :size="20" />
+        </span>
         <div class="card-title-group">
           <h3>外观与语言</h3>
           <p>个性化界面视窗主题风格与显示语言</p>
@@ -29,8 +43,8 @@
             <span class="sub-label">切换客户端操作语言</span>
           </div>
           <select v-model="settingsStore.settings.language" class="select-input" @change="save">
-            <option value="zh-CN">🇨🇳 简体中文 (Simplified Chinese)</option>
-            <option value="en-US">🇺🇸 English (US)</option>
+            <option value="zh-CN">简体中文 (Simplified Chinese)</option>
+            <option value="en-US">English (US)</option>
           </select>
         </div>
       </div>
@@ -39,12 +53,15 @@
     <!-- 视窗与启动行为 -->
     <div class="setting-card glass-effect">
       <div class="card-header">
-        <span class="card-icon"></span>
+        <span class="card-icon">
+          <BaseIcon name="Sliders" :size="20" />
+        </span>
         <div class="card-title-group">
           <h3>系统托盘与自启行为</h3>
           <p>配置登录自启、托盘后台常驻与窗口关闭策略</p>
         </div>
       </div>
+
 
       <div class="card-body">
         <div class="setting-item">
@@ -118,7 +135,9 @@
     <!-- 网络共享与监控 -->
     <div class="setting-card glass-effect">
       <div class="card-header">
-        <span class="card-icon"></span>
+        <span class="card-icon">
+          <BaseIcon name="Network" :size="20" />
+        </span>
         <div class="card-title-group">
           <h3>网络共享与应用审计</h3>
           <p>控制局域网内其他设备代理共享与应用级进程流量监控</p>
@@ -156,20 +175,8 @@
   </div>
 </template>
 
-<script setup lang="ts">
-import { useSettingsStore } from "@/stores/settings.store";
-import { useToast } from "@/composables/useToast";
-
-const settingsStore = useSettingsStore();
-const toast = useToast();
-
-async function save() {
-  await settingsStore.updateSettings(settingsStore.settings);
-  toast.success("通用设置已保存");
-}
-</script>
-
 <style scoped>
+
 .panel-container {
   display: flex;
   flex-direction: column;

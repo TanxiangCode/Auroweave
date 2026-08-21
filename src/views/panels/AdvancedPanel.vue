@@ -3,7 +3,7 @@
     <!-- 1. Sing-box 内核版本与在线升级管理 -->
     <div class="setting-card glass-effect highlight-border">
       <div class="card-header">
-        <span class="card-icon"></span>
+        <span class="card-icon"><BaseIcon name="FlaskConical" :size="20" /></span>
         <div class="card-title-group">
           <h3>Sing-box 内核版本管理</h3>
           <p>检测官方 GitHub Release 最新内核版本并提供一键在线升级与热重启</p>
@@ -26,7 +26,7 @@
             <span v-if="updateInfo.has_update" class="update-found-badge">
               发现新版本 {{ updateInfo.latest_version }}
             </span>
-            <span v-else class="up-to-date-badge">✓ 已是最新版本</span>
+            <span v-else class="up-to-date-badge"><BaseIcon name="Check" :size="13" /> 已是最新版本</span>
           </div>
         </div>
 
@@ -62,7 +62,7 @@
     <!-- 2. 延迟与吞吐量测速配置 -->
     <div class="setting-card glass-effect">
       <div class="card-header">
-        <span class="card-icon"></span>
+        <span class="card-icon"><BaseIcon name="FlaskConical" :size="20" /></span>
         <div class="card-title-group">
           <h3>延迟测试与吞吐量测速</h3>
           <p>配置全节点批量并发测速、下载吞吐量测试源与网络超时阈值</p>
@@ -164,7 +164,7 @@
     <!-- 3. 系统性能与灾备恢复 -->
     <div class="setting-card glass-effect">
       <div class="card-header">
-        <span class="card-icon"></span>
+        <span class="card-icon"><BaseIcon name="FlaskConical" :size="20" /></span>
         <div class="card-title-group">
           <h3>性能模式与灾备恢复</h3>
           <p>控制 GPU 毛玻璃渲染与异常配置一键还原</p>
@@ -213,6 +213,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";

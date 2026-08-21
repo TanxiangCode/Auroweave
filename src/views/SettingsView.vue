@@ -32,6 +32,8 @@ const activePanel = ref<PanelKey>("general");
 const highlightTarget = ref<string>("");
 const searchKeyword = ref<string>("");
 
+import BaseIcon from "@/components/common/BaseIcon.vue";
+
 interface NavItem {
   key: PanelKey;
   icon: string;
@@ -40,15 +42,15 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { key: "general", icon: "GEN", label: "通用设置", keywords: ["通用", "主题", "语言", "自启", "托盘", "最小化", "局域网", "共享", "allow lan", "general", "theme"] },
-  { key: "subscription", icon: "SUB", label: "订阅管理", keywords: ["订阅", "节点", "更新", "导入", "sub", "node"] },
-  { key: "routemode", icon: "MOD", label: "代理模式", keywords: ["模式", "规则", "全局", "直连", "mode", "rule", "global"] },
-  { key: "dns", icon: "DNS", label: "DNS 配置", keywords: ["dns", "域名解析", "nameserver", "fakeip", "doh"] },
-  { key: "tun", icon: "TUN", label: "TUN 网卡", keywords: ["tun", "虚拟网卡", "网关", "gvisor", "系统服务", "service"] },
-  { key: "automation", icon: "AUT", label: "场景自动化", keywords: ["自动化", "wifi", "ssid", "切换", "auto"] },
-  { key: "hotkey", icon: "KEY", label: "全局热键", keywords: ["热键", "快捷键", "command palette", "hotkey"] },
-  { key: "privacy", icon: "SEC", label: "隐私与日志", keywords: ["隐私", "日志", "清空", "导出", "log", "privacy"] },
-  { key: "advanced", icon: "ADV", label: "高级与内核", keywords: ["高级", "sing-box", "内核", "升级", "版本", "测速", "延迟", "并发", "超时", "备份", "advanced", "speed", "core", "update"] },
+  { key: "general", icon: "Sliders", label: "通用设置", keywords: ["通用", "主题", "语言", "自启", "托盘", "最小化", "局域网", "共享", "allow lan", "general", "theme"] },
+  { key: "subscription", icon: "Layers", label: "订阅管理", keywords: ["订阅", "节点", "更新", "导入", "sub", "node"] },
+  { key: "routemode", icon: "GitFork", label: "代理模式", keywords: ["模式", "规则", "全局", "直连", "mode", "rule", "global"] },
+  { key: "dns", icon: "Globe", label: "DNS 配置", keywords: ["dns", "域名解析", "nameserver", "fakeip", "doh"] },
+  { key: "tun", icon: "Cpu", label: "TUN 网卡", keywords: ["tun", "虚拟网卡", "网关", "gvisor", "系统服务", "service"] },
+  { key: "automation", icon: "Zap", label: "场景自动化", keywords: ["自动化", "wifi", "ssid", "切换", "auto"] },
+  { key: "hotkey", icon: "Command", label: "全局热键", keywords: ["热键", "快捷键", "command palette", "hotkey"] },
+  { key: "privacy", icon: "ShieldCheck", label: "隐私与日志", keywords: ["隐私", "日志", "清空", "导出", "log", "privacy"] },
+  { key: "advanced", icon: "FlaskConical", label: "高级与内核", keywords: ["高级", "sing-box", "内核", "升级", "版本", "测速", "延迟", "并发", "超时", "备份", "advanced", "speed", "core", "update"] },
 ];
 
 const filteredNavItems = computed(() => {
@@ -81,18 +83,14 @@ onMounted(() => {
     <aside class="settings-sidebar glass-effect">
       <!-- 搜索过滤框 -->
       <div class="nav-search-box">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-svg-icon">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
+        <BaseIcon name="Search" :size="14" class="search-svg-icon" />
         <input
           v-model="searchKeyword"
           type="text"
           placeholder="搜索设置项 (如: 端口、内核、DNS)..."
         />
-        <button v-if="searchKeyword" class="btn-clear" @click="searchKeyword = ''">✕</button>
+        <button v-if="searchKeyword" class="btn-clear" @click="searchKeyword = ''"><BaseIcon name="X" :size="12" /></button>
       </div>
-
 
       <!-- 导航列表 -->
       <nav class="nav-list">
@@ -103,9 +101,12 @@ onMounted(() => {
           :class="{ active: activePanel === item.key }"
           @click="activePanel = item.key"
         >
-          <span class="nav-icon">{{ item.icon }}</span>
+          <span class="nav-icon">
+            <BaseIcon :name="item.icon" :size="16" />
+          </span>
           <span class="nav-label">{{ item.label }}</span>
         </button>
+
 
         <div v-if="filteredNavItems.length === 0" class="no-nav-match">
           未匹配到设置项

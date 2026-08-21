@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * TUN 虚拟网卡名称配置
  * 作者: TanXiang
@@ -61,7 +62,7 @@ async function saveName() {
           @blur="saveName"
         />
         <span v-if="saving" class="status-text saving">保存中…</span>
-        <span v-else-if="saved" class="status-text saved">✓ 已保存</span>
+        <span v-else-if="saved" class="status-text saved"><BaseIcon name="Check" :size="13" /> 已保存</span>
       </div>
     </div>
   </div>

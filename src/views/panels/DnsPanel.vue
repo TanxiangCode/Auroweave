@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>DNS 安全与延迟测试配置</h2>
+    <h2><BaseIcon name="Globe" :size="20" class="panel-header-icon" /> DNS 安全与延迟测试配置</h2>
     <div class="setting-group">
       <!-- 远端加密 DNS -->
       <div class="setting-item">
@@ -90,6 +90,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, watch } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";

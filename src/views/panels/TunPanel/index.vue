@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * TUN 网卡配置与系统服务管理面板 — 主入口
  * 作者: TanXiang
@@ -43,7 +44,7 @@ const tunInterfaceName = computed(
 
 <template>
   <div class="panel-container">
-    <h2>内核运行模式</h2>
+    <h2><BaseIcon name="Cpu" :size="20" class="panel-header-icon" /> 内核运行模式</h2>
     <p class="panel-desc">
       选择 GUI 主程序与 sing-box 内核的交互架构。在 Windows 下，推荐使用系统服务模式以实现免 UAC 的 TUN 网络接管体验。
     </p>
@@ -85,7 +86,7 @@ const tunInterfaceName = computed(
 
     <hr class="separator" />
 
-    <h2>TUN 虚拟网卡</h2>
+    <h2><BaseIcon name="Network" :size="20" class="panel-header-icon" /> TUN 虚拟网卡</h2>
     <p class="panel-desc">
       TUN 模式通过虚拟网卡在系统内核层接管流量，配置对应的参数选项：
     </p>

@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>代理模式与端口设置</h2>
+    <h2><BaseIcon name="GitFork" :size="20" class="panel-header-icon" /> 代理模式与端口设置</h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -46,6 +46,7 @@
   </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useToast } from "@/composables/useToast";

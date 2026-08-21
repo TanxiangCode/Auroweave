@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 系统服务状态面板
  * 作者: TanXiang
@@ -26,7 +27,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="service-manager-box">
-    <h3>系统服务状态控制</h3>
+    <h3><BaseIcon name="Shield" :size="16" /> 系统服务状态控制</h3>
 
     <div class="status-grid">
       <!-- 状态显示 -->

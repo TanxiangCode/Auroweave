@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>场景自动化引擎</h2>
+    <h2><BaseIcon name="Zap" :size="20" class="panel-header-icon" /> 场景自动化引擎</h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -14,6 +14,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 </script>
 
 <style scoped>
