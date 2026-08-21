@@ -12,8 +12,25 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SubscriptionUserInfo {
+    pub upload_bytes: u64,
+    pub download_bytes: u64,
+    pub total_bytes: u64,
+    pub expire_timestamp: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SubscriptionFilterRule {
+    pub include_pattern: Option<String>,
+    pub exclude_pattern: Option<String>,
+    pub rename_pattern: Option<String>,
+    pub rename_replace: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Subscription {
@@ -21,11 +38,23 @@ pub struct Subscription {
     pub name: String,
     pub url: String,
     pub format: String,
+    #[serde(default = "default_source_type")]
+    pub source_type: String, // "remote" | "local_file" | "clipboard"
+    pub local_file_path: Option<String>,
+    pub user_agent: Option<String>,
+    pub auto_update_interval_hours: Option<u32>,
     pub last_updated: Option<i64>,
     pub node_count: Option<u32>,
     #[serde(default)]
     pub is_active: bool,
+    pub user_info: Option<SubscriptionUserInfo>,
+    pub filter_rule: Option<SubscriptionFilterRule>,
 }
+
+fn default_source_type() -> String {
+    "remote".to_string()
+}
+
 
 /// 获取订阅持久化文件路径
 fn get_subscriptions_path() -> std::path::PathBuf {
@@ -54,10 +83,48 @@ fn save_subscriptions(subs: &[Subscription]) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 内部核心函数：拉取订阅 URL 内容并解析为 outbounds
-async fn fetch_and_parse(url: &str) -> Result<(SubscriptionFormat, Vec<crate::core::parser::ParsedOutbound>), AppError> {
+
+/// 解析 HTTP 响应头中的 Subscription-Userinfo
+/// 格式示例: upload=1073741824; download=10737418240; total=107374182400; expire=1735689600
+fn parse_subscription_userinfo(header_val: &str) -> Option<SubscriptionUserInfo> {
+    let mut upload = 0u64;
+    let mut download = 0u64;
+    let mut total = 0u64;
+    let mut expire = None;
+
+    for part in header_val.split(';') {
+        let part = part.trim();
+        if let Some((k, v)) = part.split_once('=') {
+            let k = k.trim().to_lowercase();
+            let v = v.trim();
+            match k.as_str() {
+                "upload" => upload = v.parse().unwrap_or(0),
+                "download" => download = v.parse().unwrap_or(0),
+                "total" => total = v.parse().unwrap_or(0),
+                "expire" => expire = v.parse().ok(),
+                _ => {}
+            }
+        }
+    }
+
+    if total > 0 || upload > 0 || download > 0 || expire.is_some() {
+        Some(SubscriptionUserInfo {
+            upload_bytes: upload,
+            download_bytes: download,
+            total_bytes: total,
+            expire_timestamp: expire,
+        })
+    } else {
+        None
+    }
+}
+
+/// 内部核心函数：拉取订阅 URL 内容并解析为 outbounds 与 userinfo
+async fn fetch_and_parse(url: &str, custom_ua: Option<&str>) -> Result<(SubscriptionFormat, Vec<crate::core::parser::ParsedOutbound>, Option<SubscriptionUserInfo>), AppError> {
+    let ua = custom_ua.unwrap_or("ClashMeta/1.18.0 sing-box/1.9.0");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
+        .user_agent(ua)
         .build()
         .map_err(|e| AppError::Network(format!("创建网络客户端失败: {}", e)))?;
 
@@ -67,13 +134,22 @@ async fn fetch_and_parse(url: &str) -> Result<(SubscriptionFormat, Vec<crate::co
         .await
         .map_err(|e| AppError::Network(format!("拉取订阅失败: {}", e)))?;
 
+    let user_info = resp
+        .headers()
+        .get("subscription-userinfo")
+        .or_else(|| resp.headers().get("Subscription-Userinfo"))
+        .and_then(|h| h.to_str().ok())
+        .and_then(parse_subscription_userinfo);
+
     let content = resp
         .text()
         .await
         .map_err(|e| AppError::Network(format!("读取订阅响应失败: {}", e)))?;
 
-    parse_subscription_content(&content)
+    let (format, outbounds) = parse_subscription_content(&content)?;
+    Ok((format, outbounds, user_info))
 }
+
 
 /// 下载 rule-set .srs 文件到本地缓存目录
 ///
@@ -291,7 +367,7 @@ pub async fn subscription_import(
     }
 
     // 1+2. 拉取并解析
-    let (format, outbounds) = match fetch_and_parse(&url).await {
+    let (format, outbounds, user_info) = match fetch_and_parse(&url, None).await {
         Ok(res) => res,
         Err(e) => {
             log::error!("[subscription] 拉取/解析订阅失败: {}", e);
@@ -333,9 +409,15 @@ pub async fn subscription_import(
         name,
         url,
         format: format_str,
+        source_type: "remote".to_string(),
+        local_file_path: None,
+        user_agent: None,
+        auto_update_interval_hours: Some(12),
         last_updated: Some(chrono::Utc::now().timestamp_millis()),
         node_count: Some(node_count),
         is_active: true,
+        user_info,
+        filter_rule: None,
     };
 
     all_subs.push(sub.clone());
@@ -400,7 +482,7 @@ pub async fn subscription_refresh(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    let (format, outbounds) = match fetch_and_parse(&sub.url).await {
+    let (format, outbounds, user_info) = match fetch_and_parse(&sub.url, sub.user_agent.as_deref()).await {
         Ok(res) => res,
         Err(e) => return Ok(ApiResponse::err(e, 400)),
     };
@@ -413,10 +495,13 @@ pub async fn subscription_refresh(
     }
     .to_string();
 
+    let outbounds = apply_filter_rules(outbounds, sub.filter_rule.as_ref());
+
     let node_count = match build_and_apply_config(&app_handle, outbounds, sidecar_manager.inner()).await {
         Ok(n) => n,
         Err(e) => return Ok(ApiResponse::err(e, 500)),
     };
+
 
     for s in all_subs.iter_mut() {
         if s.id == id {
@@ -424,6 +509,9 @@ pub async fn subscription_refresh(
             s.node_count = Some(node_count);
             s.format = format_str.clone();
             s.is_active = true;
+            if user_info.is_some() {
+                s.user_info = user_info.clone();
+            }
         } else {
             s.is_active = false;
         }
@@ -453,7 +541,7 @@ pub async fn subscription_activate(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    let (format, outbounds) = match fetch_and_parse(&sub.url).await {
+    let (format, outbounds, user_info) = match fetch_and_parse(&sub.url, sub.user_agent.as_deref()).await {
         Ok(res) => res,
         Err(e) => {
             log::error!("[subscription] 切换订阅拉取失败: {}", e);
@@ -469,6 +557,8 @@ pub async fn subscription_activate(
     }
     .to_string();
 
+    let outbounds = apply_filter_rules(outbounds, sub.filter_rule.as_ref());
+
     let node_count = match build_and_apply_config(&app_handle, outbounds, sidecar_manager.inner()).await {
         Ok(n) => n,
         Err(e) => {
@@ -477,12 +567,16 @@ pub async fn subscription_activate(
         }
     };
 
+
     for s in all_subs.iter_mut() {
         if s.id == id {
             s.is_active = true;
             s.last_updated = Some(chrono::Utc::now().timestamp_millis());
             s.node_count = Some(node_count);
             s.format = format_str.clone();
+            if user_info.is_some() {
+                s.user_info = user_info.clone();
+            }
         } else {
             s.is_active = false;
         }
@@ -495,4 +589,177 @@ pub async fn subscription_activate(
         .cloned()
         .unwrap_or(sub);
     Ok(ApiResponse::ok(updated))
+}
+
+
+/// 直接从纯文本内容或本地文件导入
+#[tauri::command]
+pub async fn subscription_import_content(
+    app_handle: AppHandle,
+    name: String,
+    content: String,
+    source_type: String,
+    file_path: Option<String>,
+    _auto_group: bool,
+    sidecar_manager: State<'_, Arc<SidecarManager>>,
+) -> Result<ApiResponse<Subscription>, AppError> {
+    log::info!("[subscription] 导入自定义文本/文件: {} ({})", name, source_type);
+
+    let (format, outbounds) = match parse_subscription_content(&content) {
+        Ok(res) => res,
+        Err(e) => {
+            log::error!("[subscription] 解析文本内容失败: {}", e);
+            return Ok(ApiResponse::err(e, 400));
+        }
+    };
+
+    let format_str = match format {
+        SubscriptionFormat::SingboxJson => "singbox",
+        SubscriptionFormat::ClashYaml => "clash",
+        SubscriptionFormat::Base64Uri => "v2ray",
+        SubscriptionFormat::Unknown => "unknown",
+    }
+    .to_string();
+
+    let node_count = match build_and_apply_config(&app_handle, outbounds, sidecar_manager.inner()).await {
+        Ok(n) => n,
+        Err(e) => {
+            log::error!("[subscription] 应用配置失败: {}", e);
+            return Ok(ApiResponse::err(e, 500));
+        }
+    };
+
+    let mut all_subs = load_subscriptions();
+    for s in all_subs.iter_mut() {
+        s.is_active = false;
+    }
+
+    let sub = Subscription {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        url: file_path.clone().unwrap_or_else(|| "clipboard://local".to_string()),
+        format: format_str,
+        source_type,
+        local_file_path: file_path,
+        user_agent: None,
+        auto_update_interval_hours: None,
+        last_updated: Some(chrono::Utc::now().timestamp_millis()),
+        node_count: Some(node_count),
+        is_active: true,
+        user_info: None,
+        filter_rule: None,
+    };
+
+    all_subs.push(sub.clone());
+    let _ = save_subscriptions(&all_subs);
+
+    Ok(ApiResponse::ok(sub))
+}
+
+/// 修改订阅基础属性（别名、URL、自定义 UA、自动更新周期）
+#[tauri::command]
+pub async fn subscription_update_meta(
+    id: String,
+    name: Option<String>,
+    url: Option<String>,
+    user_agent: Option<String>,
+    auto_update_interval_hours: Option<u32>,
+    filter_rule: Option<SubscriptionFilterRule>,
+) -> ApiResponse<Subscription> {
+    let mut all_subs = load_subscriptions();
+    let mut updated_sub = None;
+
+    if let Some(s) = all_subs.iter_mut().find(|s| s.id == id) {
+        if let Some(n) = name { s.name = n; }
+        if let Some(u) = url { s.url = u; }
+        s.user_agent = user_agent;
+        s.auto_update_interval_hours = auto_update_interval_hours;
+        if filter_rule.is_some() {
+            s.filter_rule = filter_rule;
+        }
+        updated_sub = Some(s.clone());
+    }
+
+    if let Some(sub) = updated_sub {
+        if let Err(e) = save_subscriptions(&all_subs) {
+            return ApiResponse::err(format!("保存订阅属性失败: {}", e), 500);
+        }
+        ApiResponse::ok(sub)
+    } else {
+        ApiResponse::err("找不到对应订阅", 404)
+    }
+}
+
+
+
+
+/// 对节点列表应用过滤与重命名清洗规则
+pub fn apply_filter_rules(
+    mut outbounds: Vec<crate::core::parser::ParsedOutbound>,
+    rule: Option<&SubscriptionFilterRule>,
+) -> Vec<crate::core::parser::ParsedOutbound> {
+    let rule = match rule {
+        Some(r) => r,
+        None => return outbounds,
+    };
+
+    // 1. 排除规则 (例如 官网|重置|流量|客服)
+    if let Some(ref exc) = rule.exclude_pattern {
+        if !exc.trim().is_empty() {
+            if let Ok(re) = regex::Regex::new(exc.trim()) {
+                outbounds.retain(|node| !re.is_match(&node.tag));
+            }
+        }
+    }
+
+    // 2. 包含规则 (例如 香港|日本|新加坡|美国)
+    if let Some(ref inc) = rule.include_pattern {
+        if !inc.trim().is_empty() {
+            if let Ok(re) = regex::Regex::new(inc.trim()) {
+                outbounds.retain(|node| re.is_match(&node.tag));
+            }
+        }
+    }
+
+    // 3. 正则重命名规则
+    if let (Some(ref pat), Some(ref rep)) = (&rule.rename_pattern, &rule.rename_replace) {
+        if !pat.trim().is_empty() {
+            if let Ok(re) = regex::Regex::new(pat.trim()) {
+                for node in outbounds.iter_mut() {
+                    node.tag = re.replace_all(&node.tag, rep.as_str()).to_string();
+                }
+            }
+        }
+    }
+
+    outbounds
+}
+
+/// 启动后台订阅自动静默更新调度器
+pub fn start_auto_update_scheduler(app_handle: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1800)); // 每 30 分钟轮询一次
+        loop {
+            interval.tick().await;
+            let subs = load_subscriptions();
+            let now_ms = chrono::Utc::now().timestamp_millis();
+
+            for sub in subs {
+                if let Some(hours) = sub.auto_update_interval_hours {
+                    if hours > 0 && sub.source_type == "remote" && sub.is_active {
+                        let interval_ms = (hours as i64) * 3600 * 1000;
+                        let last_up = sub.last_updated.unwrap_or(0);
+                        if now_ms - last_up >= interval_ms {
+                            log::info!("[auto_updater] 订阅 {} 到达静默更新周期 ({} 小时)，开始后台更新...", sub.name, hours);
+                            let app_clone = app_handle.clone();
+                            let sub_id = sub.id.clone();
+                            if let Some(sidecar_mgr) = app_handle.try_state::<Arc<SidecarManager>>() {
+                                let _ = subscription_refresh(app_clone, sub_id, sidecar_mgr).await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 }

@@ -96,7 +96,10 @@ pub fn run() {
             commands::proxy::sysproxy_set,
             commands::proxy::app_restart_as_admin,
             commands::subscription::subscription_import,
+            commands::subscription::subscription_import_content,
+            commands::subscription::subscription_update_meta,
             commands::subscription::subscription_get_all,
+
             commands::subscription::subscription_delete,
             commands::subscription::subscription_delete_all,
             commands::subscription::subscription_refresh,
@@ -190,7 +193,11 @@ pub fn run() {
             // 启动后台流量监控
             core::traffic_monitor::start_monitor(app.handle().clone());
 
+            // 启动后台订阅自动静默更新调度器
+            commands::subscription::start_auto_update_scheduler(app.handle().clone());
+
             Ok(())
+
         })
 
         .build(tauri::generate_context!())
