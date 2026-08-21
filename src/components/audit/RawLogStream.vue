@@ -2,7 +2,7 @@
   <div class="raw-log-container glass-effect">
     <div class="log-toolbar">
       <div class="toolbar-left">
-        <span class="log-title">🧑‍💻 Sing-box 内核终端日志流</span>
+        <span class="log-title"> Sing-box 内核终端日志流</span>
         <span class="log-count">({{ filteredLogs.length }} / {{ logs.length }} 行)</span>
       </div>
 
@@ -50,7 +50,7 @@
           <input type="checkbox" v-model="autoScroll" />
           自动滚底
         </label>
-        <button class="btn-tool" @click="copyAllLogs" title="复制当前可见日志">📋 复制</button>
+        <button class="btn-tool" @click="copyAllLogs" title="复制当前可见日志"> 复制</button>
         <button class="btn-tool danger" @click="logs = []">清空日志</button>
       </div>
     </div>

@@ -56,7 +56,7 @@
           title="单个节点延迟测试"
           @click.stop="$emit('test-latency', nodeTag)"
         >
-          <span v-if="isLatencyTesting" class="spin-icon">🌀</span>
+          <span v-if="isLatencyTesting" class="spin-icon"><BaseIcon name="RefreshCw" :size="12" class="spin" /></span>
           <SvgIcon v-else name="bolt" :size="11" />
         </button>
 
@@ -67,7 +67,7 @@
           title="单个节点下行测速"
           @click.stop="$emit('test-speed', nodeTag)"
         >
-          <span v-if="isTesting" class="spin-icon">🌀</span>
+          <span v-if="isTesting" class="spin-icon"><BaseIcon name="RefreshCw" :size="12" class="spin" /></span>
           <SvgIcon v-else name="wifi" :size="11" />
         </button>
       </div>
@@ -76,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 策略组节点卡片组件 (支持 Grid / List 视图)
  * 作者: TanXiang

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 节点工具栏 (升级版)
  * 作者: TanXiang
@@ -110,7 +111,7 @@ const emit = defineEmits<{
           @click="emit('toggle-view-mode', 'list')"
           title="紧凑列表视图"
         >
-          ☰
+          <BaseIcon name="List" :size="14" />
         </button>
       </div>
 

@@ -7,8 +7,9 @@
     <!-- 左侧：应用图标与主体信息 -->
     <div class="card-left">
       <div class="app-icon-wrap" :title="record.process || record.appDisplayName">
-        <span class="icon">{{ record.appIcon }}</span>
+        <BaseIcon :name="record.appIcon || 'Cpu'" :size="18" class="semantic-app-icon" />
       </div>
+
 
       <div class="main-info">
         <div class="title-row">
@@ -41,7 +42,7 @@
     <!-- 右侧：出站链路与流量速率元数据 -->
     <div class="card-right">
       <div class="outbound-pill" :class="record.type">
-        <span class="outbound-icon">{{ record.type === 'direct' ? '🎯' : record.type === 'blocked' ? '🚫' : '🚀' }}</span>
+        <span class="outbound-icon">{{ record.type === 'direct' ? '' : record.type === 'blocked' ? '' : '' }}</span>
         <span class="outbound-name">{{ record.outbound }}</span>
       </div>
 
@@ -56,7 +57,9 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
+
 
 defineProps<{
   record: SemanticAuditRecord;

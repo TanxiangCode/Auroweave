@@ -9,9 +9,9 @@
         @click="remove(toast.id)"
       >
         <div class="toast-icon">
-          <span v-if="toast.type === 'success'">✓</span>
-          <span v-else-if="toast.type === 'error'">✕</span>
-          <span v-else-if="toast.type === 'warning'">⚠️</span>
+          <span v-if="toast.type === 'success'"><BaseIcon name="Check" :size="16" /></span>
+          <span v-else-if="toast.type === 'error'"><BaseIcon name="X" :size="14" /></span>
+          <span v-else-if="toast.type === 'warning'"><BaseIcon name="AlertTriangle" :size="16" /></span>
           <span v-else>ℹ</span>
         </div>
         <div class="toast-content">
@@ -24,6 +24,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useToast } from "@/composables/useToast";
 
 const { toasts, remove } = useToast();

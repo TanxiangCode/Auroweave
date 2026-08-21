@@ -4,7 +4,7 @@
     <div class="toolbar-primary-row">
       <!-- 搜索框 -->
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <span class="search-icon"><BaseIcon name="Search" :size="14" /></span>
         <input
           :value="searchQuery"
           @input="$emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
@@ -16,7 +16,7 @@
           class="btn-clear-search"
           @click="$emit('update:searchQuery', '')"
         >
-          ✕
+          <BaseIcon name="X" :size="12" />
         </button>
       </div>
 
@@ -27,28 +27,28 @@
           :class="{ active: statusFilter === 'all' }"
           @click="$emit('update:statusFilter', 'all')"
         >
-          全部 ({{ totalCount }})
+          <BaseIcon name="Layers" :size="13" /> 全部 ({{ totalCount }})
         </button>
         <button
           class="capsule proxied"
           :class="{ active: statusFilter === 'proxied' }"
           @click="$emit('update:statusFilter', 'proxied')"
         >
-          🚀 加密代理
+           加密代理
         </button>
         <button
           class="capsule direct"
           :class="{ active: statusFilter === 'direct' }"
           @click="$emit('update:statusFilter', 'direct')"
         >
-          🎯 大陆直连
+           大陆直连
         </button>
         <button
           class="capsule blocked"
           :class="{ active: statusFilter === 'blocked' }"
           @click="$emit('update:statusFilter', 'blocked')"
         >
-          🚫 安全拦截
+           安全拦截
         </button>
       </div>
 
@@ -106,7 +106,7 @@
             @click="$emit('update:viewMode', 'semantic')"
             title="智能语义化叙事卡片流"
           >
-            🛡️ 语义流
+             语义流
           </button>
           <button
             class="view-tab-btn"
@@ -114,7 +114,7 @@
             @click="$emit('update:viewMode', 'table')"
             title="专业高密度拓扑连接明细表"
           >
-            📊 明细表
+             明细表
           </button>
           <button
             class="view-tab-btn"
@@ -122,7 +122,7 @@
             @click="$emit('update:viewMode', 'raw')"
             title="底层内核原始终端日志"
           >
-            🧑‍💻 内核日志
+             内核日志
           </button>
         </div>
       </div>
@@ -131,6 +131,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 defineProps<{
   searchQuery: string;
   statusFilter: "all" | "proxied" | "direct" | "blocked";

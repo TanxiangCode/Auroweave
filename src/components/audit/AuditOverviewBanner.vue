@@ -13,7 +13,7 @@
 
       <!-- 节点加密 -->
       <div class="metric-item" title="经节点加密转发的海外连接">
-        <span class="metric-icon">🚀</span>
+        <span class="metric-icon text-cyan"><BaseIcon name="Compass" :size="14" /></span>
         <span class="metric-label">加密代理</span>
         <span class="metric-val text-cyan">{{ proxiedCount }}</span>
       </div>
@@ -22,7 +22,7 @@
 
       <!-- 大陆直连 -->
       <div class="metric-item" title="大陆直连无中转连接">
-        <span class="metric-icon">🎯</span>
+        <span class="metric-icon text-green"><BaseIcon name="Zap" :size="14" /></span>
         <span class="metric-label">大陆直连</span>
         <span class="metric-val text-green">{{ directCount }}</span>
       </div>
@@ -31,7 +31,7 @@
 
       <!-- 安全阻断 -->
       <div class="metric-item" title="广告与恶意域名拦截">
-        <span class="metric-icon">🚫</span>
+        <span class="metric-icon text-red"><BaseIcon name="Ban" :size="14" /></span>
         <span class="metric-label">安全阻断</span>
         <span class="metric-val text-red">{{ blockedCount }}</span>
       </div>
@@ -40,7 +40,7 @@
 
       <!-- 实时总吞吐 -->
       <div class="metric-item throughput" title="瞬时网络总吞吐速率">
-        <span class="metric-icon">⚡</span>
+        <span class="metric-icon text-amber"><BaseIcon name="Activity" :size="14" /></span>
         <div class="speed-group">
           <span class="speed-down">↓ {{ downloadSpeed }}</span>
           <span class="speed-up">↑ {{ uploadSpeed }}</span>
@@ -66,7 +66,7 @@
         @click="$emit('close-all')"
         title="切断当前所有活跃网络连接"
       >
-        <span class="btn-icon">🔌</span>
+        <span class="btn-icon"></span>
         <span>全部切断</span>
       </button>
 
@@ -75,7 +75,7 @@
         @click="$emit('clear-history')"
         title="清空已记录的历史审计条目"
       >
-        <span class="btn-icon">🗑️</span>
+        <span class="btn-icon"></span>
         <span>清空</span>
       </button>
     </div>
@@ -83,6 +83,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 defineProps<{
   activeCount: number;
   proxiedCount: number;

@@ -13,9 +13,9 @@
 
         <div class="header-right">
           <span class="status-badge" :class="isActive ? 'online' : 'closed'">
-            {{ isActive ? '🟢 活跃连接' : '⚪ 历史会话' }}
+            {{ isActive ? ' 活跃连接' : ' 历史会话' }}
           </span>
-          <button class="btn-close" @click="$emit('close')">✕</button>
+          <button class="btn-close" @click="$emit('close')"><BaseIcon name="X" :size="14" /></button>
         </div>
       </div>
 
@@ -24,7 +24,7 @@
         <!-- 语义解说区 -->
         <div class="semantic-box" :class="record.type">
           <div class="semantic-title-row">
-            <span class="box-icon">{{ record.type === 'direct' ? '🎯' : record.type === 'blocked' ? '🚫' : '🚀' }}</span>
+            <span class="box-icon">{{ record.type === 'direct' ? '' : record.type === 'blocked' ? '' : '' }}</span>
             <span class="box-title">{{ record.semanticTitle }}</span>
           </div>
           <p class="box-desc">{{ record.semanticDesc }}</p>
@@ -37,25 +37,25 @@
 
         <!-- 转发链路可视化 -->
         <div class="section">
-          <div class="section-title">🌐 分流路由拓扑链</div>
+          <div class="section-title"> 分流路由拓扑链</div>
           <div class="chain-flow">
             <div class="node-step">
               <span class="step-icon">{{ record.appIcon }}</span>
               <span class="step-name">{{ record.appDisplayName }}</span>
             </div>
-            <span class="arrow-right">➔</span>
+            <span class="arrow-right">→</span>
             <div class="node-step">
-              <span class="step-icon">📋</span>
+              <span class="step-icon"></span>
               <span class="step-name">{{ record.ruleMatched }}</span>
             </div>
-            <span class="arrow-right">➔</span>
+            <span class="arrow-right">→</span>
             <div class="node-step highlight">
-              <span class="step-icon">🚀</span>
+              <span class="step-icon"></span>
               <span class="step-name">{{ record.outbound }}</span>
             </div>
-            <span class="arrow-right">➔</span>
+            <span class="arrow-right">→</span>
             <div class="node-step">
-              <span class="step-icon">🎯</span>
+              <span class="step-icon"></span>
               <span class="step-name">{{ record.domain }}</span>
             </div>
           </div>
@@ -63,13 +63,13 @@
 
         <!-- 元数据网格 -->
         <div class="section">
-          <div class="section-title">🔍 详细网络元数据</div>
+          <div class="section-title"> 详细网络元数据</div>
           <div class="metadata-grid">
             <div class="meta-item">
               <span class="meta-label">连接 ID</span>
               <div class="meta-val-row">
                 <span class="meta-val mono">{{ record.id }}</span>
-                <button class="btn-copy" @click="copyText(record.id)">📋</button>
+                <button class="btn-copy" @click="copyText(record.id)"></button>
               </div>
             </div>
 
@@ -77,7 +77,7 @@
               <span class="meta-label">目标主机 / IP</span>
               <div class="meta-val-row">
                 <span class="meta-val mono">{{ record.domain }}</span>
-                <button class="btn-copy" @click="copyText(record.domain)">📋</button>
+                <button class="btn-copy" @click="copyText(record.domain)"></button>
               </div>
             </div>
 
@@ -85,7 +85,7 @@
               <span class="meta-label">目标解析 IP</span>
               <div class="meta-val-row">
                 <span class="meta-val mono">{{ record.destinationIP }}:{{ record.port }}</span>
-                <button class="btn-copy" @click="copyText(`${record.destinationIP}:${record.port}`)">📋</button>
+                <button class="btn-copy" @click="copyText(`${record.destinationIP}:${record.port}`)"></button>
               </div>
             </div>
 
@@ -98,7 +98,7 @@
               <span class="meta-label">可执行文件绝对路径</span>
               <div class="meta-val-row">
                 <span class="meta-val mono path-text" :title="record.processPath">{{ record.processPath }}</span>
-                <button class="btn-copy" @click="copyText(record.processPath)">📋</button>
+                <button class="btn-copy" @click="copyText(record.processPath)"></button>
               </div>
             </div>
 
@@ -133,7 +133,7 @@
           @click="handleAddAppMatrix(record.process)"
           title="将该应用添加到 App-Matrix 进程路由规则"
         >
-          📱 添加至 App-Matrix 进程分流
+           添加至 App-Matrix 进程分流
         </button>
 
         <button
@@ -141,7 +141,7 @@
           class="btn-footer-action danger"
           @click="handleClose(record.id)"
         >
-          🔌 立即切断该连接
+           立即切断该连接
         </button>
       </div>
     </div>
@@ -149,6 +149,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useRouter } from "vue-router";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
 import { useToast } from "@/composables/useToast";

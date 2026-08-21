@@ -6,7 +6,7 @@
  * 视觉设计：
  * - 紧凑超精致毛玻璃浮层
  * - 遵守防误触设计：设置与关闭按钮物理隔离 > 60px
- * - macOS 环境下隐藏右侧 ─/⬜/✕ 按钮 (由 macOS 原生红绿灯接管)
+ * - macOS 环境下隐藏右侧 ─/⬜/<BaseIcon name="X" :size="12" /> 按钮 (由 macOS 原生红绿灯接管)
  */
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -137,7 +137,7 @@ function handleSettingsClick() {
       </button>
     </div>
 
-    <!-- ⚙️ 设置按钮 (在设置页内高亮) -->
+    <!-- <BaseIcon name="Settings" :size="14" /> 设置按钮 (在设置页内高亮) -->
     <button
       class="capsule-btn settings-btn"
       :class="{ active: route.path === '/settings' }"

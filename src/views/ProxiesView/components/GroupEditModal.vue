@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 分组配置编辑弹窗
  * 作者: TanXiang
@@ -20,7 +21,7 @@ const emit = defineEmits<{
   <Teleport to="body">
     <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
       <div class="modal-card glass-effect">
-        <h3>编辑分组配置 — {{ groupTag }}</h3>
+        <h3><BaseIcon name="Sliders" :size="16" /> 编辑分组配置 — {{ groupTag }}</h3>
         <div class="edit-form">
           <div class="form-row">
             <label>测速间隔</label>

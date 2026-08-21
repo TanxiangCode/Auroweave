@@ -38,8 +38,9 @@
             <!-- 应用进程 -->
             <td class="td-app">
               <div class="app-cell">
-                <span class="app-icon">{{ rec.appIcon }}</span>
+                <BaseIcon :name="rec.appIcon || 'Cpu'" :size="16" class="table-app-icon" />
                 <div class="app-info">
+
                   <span class="app-name">{{ rec.appDisplayName }}</span>
                   <span class="proc-name" v-if="rec.process && rec.process !== rec.appDisplayName" :title="rec.process">
                     {{ rec.process }}
@@ -63,9 +64,9 @@
             <td class="td-outbound">
               <div class="outbound-cell">
                 <span class="outbound-badge" :class="rec.type">
-                  {{ rec.type === 'direct' ? '🎯 直连' : rec.type === 'blocked' ? '🚫 阻断' : '🚀 代理' }}
+                  {{ rec.type === 'direct' ? ' 直连' : rec.type === 'blocked' ? ' 阻断' : ' 代理' }}
                 </span>
-                <span class="node-tag" :title="rec.chains?.join(' ➔ ') || rec.outbound">
+                <span class="node-tag" :title="rec.chains?.join(' → ') || rec.outbound">
                   {{ rec.outbound }}
                 </span>
               </div>
@@ -99,7 +100,7 @@
                   title="查看详细溯源信息"
                   @click="$emit('select', rec)"
                 >
-                  🔍
+                  
                 </button>
                 <button
                   v-if="isActive(rec.id)"
@@ -107,7 +108,7 @@
                   title="切断此连接"
                   @click="$emit('close', rec.id)"
                 >
-                  🔌
+                  
                 </button>
               </div>
             </td>
@@ -119,7 +120,9 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
+
 
 const props = defineProps<{
   records: SemanticAuditRecord[];

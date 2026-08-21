@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 自定义区域管理弹窗
  * 作者: TanXiang
@@ -34,7 +35,7 @@ const {
   <Teleport to="body">
     <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
       <div class="modal-card glass-effect region-modal">
-        <h3>自定义区域管理</h3>
+        <h3><BaseIcon name="Globe" :size="16" /> 自定义区域管理</h3>
 
         <!-- 编辑/新增表单 -->
         <div v-if="editingRule" class="rule-edit-form">

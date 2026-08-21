@@ -5,7 +5,7 @@
         <div class="command-palette-modal glass-effect">
           <!-- 搜索框 -->
           <div class="search-bar">
-            <span class="search-icon">🔍</span>
+            <BaseIcon name="Search" :size="16" class="search-icon" />
             <input
               ref="inputRef"
               v-model="query"
@@ -32,7 +32,7 @@
               @mousemove="activeIndex = index"
               @click="executeCommand(cmd)"
             >
-              <div class="cmd-icon">{{ cmd.icon }}</div>
+              <div class="cmd-icon"><BaseIcon :name="cmd.icon" :size="16" /></div>
               <div class="cmd-info">
                 <div class="cmd-title">{{ cmd.title }}</div>
                 <div class="cmd-subtitle">{{ cmd.subtitle }}</div>
@@ -54,6 +54,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useToast } from "@/composables/useToast";
@@ -98,7 +99,7 @@ const allCommands = computed<CommandItem[]>(() => {
     {
       id: "mode-rule",
       category: "代理模式",
-      icon: "🔀",
+      icon: "GitFork",
       title: "切换到 规则模式 (Rule)",
       subtitle: "智能分流，常用国内流量直连",
       action: async () => {
@@ -109,7 +110,7 @@ const allCommands = computed<CommandItem[]>(() => {
     {
       id: "mode-global",
       category: "代理模式",
-      icon: "🌐",
+      icon: "Globe",
       title: "切换到 全局模式 (Global)",
       subtitle: "所有网络流量强制走代理",
       action: async () => {
@@ -120,7 +121,7 @@ const allCommands = computed<CommandItem[]>(() => {
     {
       id: "mode-direct",
       category: "代理模式",
-      icon: "⚡",
+      icon: "Zap",
       title: "切换到 直连模式 (Direct)",
       subtitle: "所有网络流量直连，不经过代理",
       action: async () => {
@@ -133,7 +134,7 @@ const allCommands = computed<CommandItem[]>(() => {
     {
       id: "nav-proxies",
       category: "系统操作",
-      icon: "🚀",
+      icon: "Radio",
       title: "打开 代理节点大厅",
       subtitle: "查看与选择具体节点分组",
       action: () => router.push("/proxies"),
@@ -141,7 +142,7 @@ const allCommands = computed<CommandItem[]>(() => {
     {
       id: "nav-settings",
       category: "系统操作",
-      icon: "⚙️",
+      icon: "Settings",
       title: "打开 软件设置",
       subtitle: "修改系统代理、开机启动与极客配置",
       action: () => router.push("/settings"),
@@ -149,7 +150,7 @@ const allCommands = computed<CommandItem[]>(() => {
     {
       id: "nav-speedtest",
       category: "系统操作",
-      icon: "📊",
+      icon: "Gauge",
       title: "打开 智能测速与质量监控",
       subtitle: "一键并发测试全量节点延迟",
       action: () => router.push("/speedtest"),
@@ -162,7 +163,7 @@ const allCommands = computed<CommandItem[]>(() => {
       list.push({
         id: `node-${group.tag}-${proxyName}`,
         category: "代理节点",
-        icon: "📍",
+        icon: "MapPin",
         title: proxyName,
         subtitle: `属于分组: ${group.tag}`,
         action: async () => {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 左栏分组选择器 (升级版)
  * 作者: TanXiang
@@ -43,13 +44,62 @@ const filteredRegionGroups = computed(() => {
 });
 
 function getGroupIcon(tag: string, type: string): string {
-  if (tag === "proxy") return "P";
-  if (tag === "auto") return "A";
-  if (tag === "balance") return "B";
-  if (type === "urltest") return "U";
-  return "G";
+  if (tag === "proxy") return "Compass";
+  if (tag === "auto") return "Zap";
+  if (tag === "balance") return "Scale";
+  if (type === "urltest") return "Globe";
+  return "Folder";
 }
 
+
+
+interface RegionBadgeInfo {
+  code: string;
+  bg: string;
+  color: string;
+}
+
+function getRegionBadge(tag: string): RegionBadgeInfo {
+  const t = tag.toUpperCase();
+  if (t.includes("HK") || tag.includes("香港")) {
+    return { code: "HK", bg: "rgba(0, 242, 254, 0.15)", color: "#00f2fe" };
+  }
+  if (t.includes("JP") || tag.includes("日本")) {
+    return { code: "JP", bg: "rgba(255, 94, 98, 0.15)", color: "#ff5e62" };
+  }
+  if (t.includes("US") || tag.includes("美国") || tag.includes("美國")) {
+    return { code: "US", bg: "rgba(79, 172, 254, 0.15)", color: "#4facfe" };
+  }
+  if (t.includes("TW") || tag.includes("台湾") || tag.includes("台灣")) {
+    return { code: "TW", bg: "rgba(67, 233, 123, 0.15)", color: "#43e97b" };
+  }
+  if (t.includes("SG") || tag.includes("新加坡") || tag.includes("狮城")) {
+    return { code: "SG", bg: "rgba(250, 112, 154, 0.15)", color: "#fa709a" };
+  }
+  if (t.includes("KR") || tag.includes("韩国") || tag.includes("韓國")) {
+    return { code: "KR", bg: "rgba(56, 249, 215, 0.15)", color: "#38f9d7" };
+  }
+  if (t.includes("UK") || t.includes("GB") || tag.includes("英国")) {
+    return { code: "UK", bg: "rgba(161, 140, 209, 0.15)", color: "#a18cd1" };
+  }
+  if (t.includes("DE") || tag.includes("德国")) {
+    return { code: "DE", bg: "rgba(254, 207, 239, 0.15)", color: "#fecfef" };
+  }
+  if (t.includes("FR") || tag.includes("法国")) {
+    return { code: "FR", bg: "rgba(69, 162, 255, 0.15)", color: "#45a2ff" };
+  }
+  if (t.includes("CA") || tag.includes("加拿大")) {
+    return { code: "CA", bg: "rgba(255, 120, 117, 0.15)", color: "#ff7875" };
+  }
+  if (t.includes("AU") || tag.includes("澳大利亚") || tag.includes("澳洲")) {
+    return { code: "AU", bg: "rgba(255, 197, 61, 0.15)", color: "#ffc53d" };
+  }
+  
+  // 提取首字母
+  const letters = tag.replace(/[^a-zA-Z]/g, "").toUpperCase();
+  const code = letters.length >= 2 ? letters.slice(0, 2) : tag.slice(0, 2).toUpperCase();
+  return { code: code || "GL", bg: "rgba(255, 255, 255, 0.1)", color: "rgba(255, 255, 255, 0.85)" };
+}
 
 function getGroupTypeLabel(tag: string, type: string): string {
   if (tag === "proxy") return "主选择器";
@@ -120,11 +170,12 @@ function getGroupTypeLabel(tag: string, type: string): string {
           >
             <div class="group-header-info">
               <div class="group-name-wrapper">
-                <span class="group-type-emoji">{{ getGroupIcon(group.tag, group.type) }}</span>
+                <BaseIcon :name="getGroupIcon(group.tag, group.type)" :size="15" class="group-type-icon" />
                 <span class="group-name" :title="group.tag">{{ group.tag }}</span>
                 <span v-if="routingGroupTags.has(group.tag)" class="route-pulse-dot" title="当前活跃出口链路成员"></span>
               </div>
               <span class="group-type-badge" :class="group.tag">{{ getGroupTypeLabel(group.tag, group.type) }}</span>
+
             </div>
 
             <div class="group-footer-info">
@@ -184,6 +235,7 @@ function getGroupTypeLabel(tag: string, type: string): string {
           >
             <div class="group-header-info">
               <div class="group-name-wrapper">
+                <span class="region-code-badge" :style="{ background: getRegionBadge(group.tag).bg, color: getRegionBadge(group.tag).color }">{{ getRegionBadge(group.tag).code }}</span>
                 <span class="group-name" :title="group.tag">{{ group.tag }}</span>
                 <span v-if="routingGroupTags.has(group.tag)" class="route-pulse-dot" title="当前活跃出口链路成员"></span>
               </div>
@@ -555,3 +607,21 @@ function getGroupTypeLabel(tag: string, type: string): string {
 }
 </style>
 
+
+<style scoped>
+.region-code-badge {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  line-height: 14px;
+  border: 1px solid currentColor;
+  opacity: 0.9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+</style>
