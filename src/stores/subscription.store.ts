@@ -8,12 +8,15 @@ import type { Subscription } from "@/types";
 import {
   getSubscriptions,
   importSubscription,
+  importContentSubscription,
+  updateSubscriptionMeta,
   deleteSubscription,
   deleteAllSubscriptions,
   refreshSubscription,
   activateSubscription,
 } from "@/api/ipc/subscription";
 import { useToast } from "@/composables/useToast";
+
 
 export const useSubscriptionStore = defineStore("subscription", () => {
   const toast = useToast();
@@ -52,6 +55,44 @@ export const useSubscriptionStore = defineStore("subscription", () => {
       importError.value = res.error ?? "导入失败";
     }
     importing.value = false;
+    return res;
+  }
+
+  async function importContentSub(
+    name: string,
+    content: string,
+    sourceType: string,
+    filePath?: string,
+    autoGroup = true
+  ) {
+    importing.value = true;
+    importError.value = null;
+    const res = await importContentSubscription(name, content, sourceType, filePath, autoGroup);
+    if (res.success && res.data) {
+      await fetchAll();
+    } else {
+      importError.value = res.error ?? "解析导入失败";
+    }
+    importing.value = false;
+    return res;
+  }
+
+  async function updateSubMeta(
+    id: string,
+    meta: {
+      name?: string;
+      url?: string;
+      userAgent?: string;
+      autoUpdateIntervalHours?: number;
+      filterRule?: import("@/types").SubscriptionFilterRule;
+    }
+  ) {
+
+    const res = await updateSubscriptionMeta(id, meta);
+    if (res.success && res.data) {
+      const idx = subscriptions.value.findIndex((s) => s.id === id);
+      if (idx !== -1) subscriptions.value[idx] = res.data;
+    }
     return res;
   }
 
@@ -100,6 +141,8 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     importError,
     fetchAll,
     importSub,
+    importContentSub,
+    updateSubMeta,
     removeSub,
     removeAllSubs,
     refreshSub,
@@ -107,3 +150,4 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     hasUrl,
   };
 });
+

@@ -113,14 +113,34 @@ export interface DnsAuditRecord {
 
 export type SubscriptionFormat = "clash" | "mihomo" | "v2ray" | "singbox";
 
+export interface SubscriptionUserInfo {
+  upload_bytes?: number;
+  download_bytes?: number;
+  total_bytes?: number;
+  expire_timestamp?: number;
+}
+
+export interface SubscriptionFilterRule {
+  include_pattern?: string;
+  exclude_pattern?: string;
+  rename_pattern?: string;
+  rename_replace?: string;
+}
+
 export interface Subscription {
   id: string;
   name: string;
   url: string;
-  format: SubscriptionFormat;
+  format: SubscriptionFormat | string;
+  source_type?: "remote" | "local_file" | "clipboard" | string;
+  local_file_path?: string;
+  user_agent?: string;
+  auto_update_interval_hours?: number;
   last_updated?: number;
   node_count?: number;
   is_active?: boolean;
+  user_info?: SubscriptionUserInfo;
+  filter_rule?: SubscriptionFilterRule;
   traffic?: {
     upload: number;
     download: number;
@@ -128,6 +148,7 @@ export interface Subscription {
     expire?: number;
   };
 }
+
 
 // ============================================================
 // 节点排序与自定义分组

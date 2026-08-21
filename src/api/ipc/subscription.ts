@@ -53,3 +53,44 @@ export async function activateSubscription(
     SUBSCRIPTION_FETCH_TIMEOUT_MS
   );
 }
+
+/** 直接导入内容（剪贴板节点列表/本地文件） */
+export async function importContentSubscription(
+  name: string,
+  content: string,
+  sourceType: string,
+  filePath?: string,
+  autoGroup: boolean = true
+): Promise<ApiResponse<Subscription>> {
+  return invokeWithTimeout<ApiResponse<Subscription>>(
+    "subscription_import_content",
+    { name, content, sourceType, filePath, autoGroup },
+    SUBSCRIPTION_FETCH_TIMEOUT_MS
+  );
+}
+
+/** 更新订阅元数据 */
+export async function updateSubscriptionMeta(
+  id: string,
+  meta: {
+    name?: string;
+    url?: string;
+    userAgent?: string;
+    autoUpdateIntervalHours?: number;
+    filterRule?: import("@/types").SubscriptionFilterRule;
+  }
+): Promise<ApiResponse<Subscription>> {
+  return invokeWithTimeout<ApiResponse<Subscription>>(
+    "subscription_update_meta",
+    {
+      id,
+      name: meta.name,
+      url: meta.url,
+      userAgent: meta.userAgent,
+      autoUpdateIntervalHours: meta.autoUpdateIntervalHours,
+      filterRule: meta.filterRule,
+    }
+  );
+}
+
+
