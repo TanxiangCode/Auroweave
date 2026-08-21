@@ -4,13 +4,13 @@
     <div class="matrix-toolbar">
       <!-- 搜索框 -->
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <BaseIcon name="Search" :size="14" class="search-icon" />
         <input
           v-model="searchQuery"
           type="text"
           placeholder="搜索应用名称、进程名或 PID..."
         />
-        <button v-if="searchQuery" class="btn-clear" @click="searchQuery = ''">✕</button>
+        <button v-if="searchQuery" class="btn-clear" @click="searchQuery = ''"><BaseIcon name="X" :size="12" /></button>
       </div>
 
       <!-- 分类胶囊过滤 -->
@@ -20,7 +20,7 @@
           :class="{ active: selectedCategory === 'all' && !filterCustomOnly }"
           @click="selectCategory('all')"
         >
-          全量应用 ({{ filteredProcesses.length }})
+          <BaseIcon name="Layers" :size="13" /> 全量应用 ({{ filteredProcesses.length }})
         </button>
 
         <button
@@ -28,7 +28,7 @@
           :class="{ active: filterCustomOnly }"
           @click="toggleCustomFilter"
         >
-          ⭐ 独立绑定 ({{ customCount }})
+           <BaseIcon name="Star" :size="13" /> 独立绑定 ({{ customCount }})
         </button>
 
         <button
@@ -36,7 +36,7 @@
           :class="{ active: selectedCategory === 'developer' }"
           @click="selectCategory('developer')"
         >
-          💻 开发者
+           <BaseIcon name="Cpu" :size="13" /> 开发者
         </button>
 
         <button
@@ -44,7 +44,7 @@
           :class="{ active: selectedCategory === 'browser' }"
           @click="selectCategory('browser')"
         >
-          🌐 浏览器
+           <BaseIcon name="Globe" :size="13" /> 浏览器
         </button>
 
         <button
@@ -52,7 +52,7 @@
           :class="{ active: selectedCategory === 'social' }"
           @click="selectCategory('social')"
         >
-          💬 社交
+           <BaseIcon name="MessageSquare" :size="13" /> 社交
         </button>
 
         <button
@@ -60,7 +60,7 @@
           :class="{ active: selectedCategory === 'media' }"
           @click="selectCategory('media')"
         >
-          🎬 影音
+           <BaseIcon name="Film" :size="13" /> 影音
         </button>
       </div>
 
@@ -71,7 +71,7 @@
       </label>
 
       <button class="btn-refresh" @click="fetchData" :disabled="loading">
-        <span :class="{ spinning: loading }">🔄</span>
+        <span :class="{ spinning: loading }"></span>
         <span>{{ loading ? '扫描中...' : '刷新进程' }}</span>
       </button>
     </div>
@@ -79,12 +79,12 @@
     <!-- 进程列表区 -->
     <div class="matrix-body">
       <div v-if="loading && processes.length === 0" class="state-box glass-effect">
-        <span class="spinner">⏳</span>
+        <span class="spinner"></span>
         <p>正在深度检测活跃系统应用与进程网络栈...</p>
       </div>
 
       <div v-else-if="filteredProcesses.length === 0" class="state-box glass-effect">
-        <span class="empty-icon">📂</span>
+        <span class="empty-icon"></span>
         <p>未找到符合过滤条件的应用进程</p>
       </div>
 
@@ -98,8 +98,20 @@
           <!-- 左侧：应用图标与名称信息 -->
           <div class="card-left">
             <div class="app-icon-wrap" :title="item.appInfo.displayName">
-              <span class="app-emoji">{{ item.appInfo.icon }}</span>
+              <img
+                v-if="item.proc.icon_base64"
+                :src="item.proc.icon_base64"
+                class="app-native-icon"
+                alt="app icon"
+              />
+              <BaseIcon
+                v-else
+                :name="item.appInfo.icon || 'Cpu'"
+                :size="20"
+                class="app-matrix-icon"
+              />
             </div>
+
 
             <div class="app-details">
               <div class="name-row">
@@ -118,7 +130,7 @@
           <!-- 中间：分流指引连线 -->
           <div class="routing-arrow">
             <span class="arrow-line"></span>
-            <span class="arrow-head">➔</span>
+            <BaseIcon name="ArrowRight" :size="13" class="arrow-icon" />
           </div>
 
           <!-- 右侧：出站绑定器 -->
@@ -135,6 +147,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, computed, onMounted } from "vue";
 import {
   getSystemProcesses,
@@ -273,7 +286,7 @@ async function handleRuleChange(processName: string, outboundTag: string) {
     appRules.value[processName] = outboundTag;
   }
   await saveAppRule(processName, outboundTag);
-  toast.success("应用分流已更新", `[${processName}] ➔ ${outboundTag || '默认策略'}`);
+  toast.success("应用分流已更新", `[${processName}] → ${outboundTag || '默认策略'}`);
 }
 
 onMounted(() => {
@@ -488,7 +501,17 @@ onMounted(() => {
   justify-content: center;
   font-size: 18px;
   flex-shrink: 0;
+  overflow: hidden;
 }
+
+.app-native-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+
 
 .app-details {
   display: flex;

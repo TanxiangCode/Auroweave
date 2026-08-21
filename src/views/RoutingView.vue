@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 分流配置中心 — 主视图
  * 作者: TanXiang
@@ -57,7 +58,7 @@ onMounted(() => {
         <div class="divider"></div>
 
         <div class="metric-chip" title="内置 GeoSite 与 GeoIP 大陆直连规则">
-          <span class="chip-icon">🇨🇳</span>
+          <span class="chip-icon"></span>
           <span class="chip-label">GeoSite 大陆直连</span>
           <span class="chip-val">已内置</span>
         </div>
@@ -70,7 +71,7 @@ onMounted(() => {
           :class="{ active: activeTab === 'matrix' }"
           @click="activeTab = 'matrix'"
         >
-          应用分流
+          <BaseIcon name="LayoutGrid" :size="15" /> 应用分流
         </button>
 
         <button
@@ -78,7 +79,7 @@ onMounted(() => {
           :class="{ active: activeTab === 'rules' }"
           @click="activeTab = 'rules'"
         >
-          域名规则
+          <BaseIcon name="Globe" :size="15" /> 域名规则
         </button>
 
         <button
@@ -86,7 +87,7 @@ onMounted(() => {
           :class="{ active: activeTab === 'topology' }"
           @click="activeTab = 'topology'"
         >
-          拓扑画布
+          <BaseIcon name="Share2" :size="15" /> 拓扑画布
         </button>
       </div>
     </header>

@@ -10,7 +10,7 @@
 
       <div class="toolbar-actions">
         <button class="btn-tool" @click="zoomIn" title="放大画布"></button>
-        <button class="btn-tool" @click="zoomOut" title="缩小画布">➖</button>
+        <button class="btn-tool" @click="zoomOut" title="缩小画布">-</button>
         <button class="btn-tool" @click="resetView" title="重置居中视角">居中</button>
         <button
           class="btn-tool"
@@ -18,7 +18,7 @@
           @click="enableParticles = !enableParticles"
           title="开启/关闭极光粒子流光动效"
         >
-          ✨ 流光
+           流光
         </button>
       </div>
     </div>
@@ -79,7 +79,7 @@
           <!-- 第 1 列：入站流量 (Inbounds) -->
           <div class="column-group">
             <div class="col-header">
-              <span class="col-icon"></span>
+              <span class="col-icon"><BaseIcon name="Download" :size="16" /></span>
               <span class="col-name">流量入站层</span>
             </div>
             <div class="nodes-list">
@@ -88,7 +88,7 @@
                 :class="{ selected: selectedNode === 'inbound_mixed' }"
                 @click="toggleSelectNode('inbound_mixed')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Layers" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">Mixed 混合代理</span>
                   <span class="node-sub">127.0.0.1:8890</span>
@@ -101,7 +101,7 @@
                 :class="{ selected: selectedNode === 'inbound_tun' }"
                 @click="toggleSelectNode('inbound_tun')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Cpu" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">TUN 虚拟网卡</span>
                   <span class="node-sub">全局透明接管</span>
@@ -114,7 +114,7 @@
           <!-- 第 2 列：规则引擎 (Rules Engine) -->
           <div class="column-group">
             <div class="col-header">
-              <span class="col-icon"></span>
+              <span class="col-icon"><BaseIcon name="GitFork" :size="16" /></span>
               <span class="col-name">智能分流引擎</span>
             </div>
             <div class="nodes-list">
@@ -123,7 +123,7 @@
                 :class="{ selected: selectedNode === 'rule_app' }"
                 @click="toggleSelectNode('rule_app')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="LayoutGrid" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">App-Matrix 进程规则</span>
                   <span class="node-sub">{{ appRulesCount }} 个进程已绑定</span>
@@ -135,7 +135,7 @@
                 :class="{ selected: selectedNode === 'rule_custom' }"
                 @click="toggleSelectNode('rule_custom')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Globe" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">自定义域名 / IP 规则</span>
                   <span class="node-sub">{{ customRulesCount }} 条规则生效</span>
@@ -147,7 +147,7 @@
                 :class="{ selected: selectedNode === 'rule_geosite' }"
                 @click="toggleSelectNode('rule_geosite')"
               >
-                <div class="node-icon">🇨🇳</div>
+                <div class="node-icon"><BaseIcon name="MapPin" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">GeoSite 大陆白名单</span>
                   <span class="node-sub">geosite-cn + geoip-cn</span>
@@ -159,7 +159,7 @@
                 :class="{ selected: selectedNode === 'rule_final' }"
                 @click="toggleSelectNode('rule_final')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Compass" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">Final 默认兜底策略</span>
                   <span class="node-sub">全量境外流量代理</span>
@@ -171,7 +171,7 @@
           <!-- 第 3 列：出站节点与策略组 (Outbounds) -->
           <div class="column-group">
             <div class="col-header">
-              <span class="col-icon"></span>
+              <span class="col-icon"><BaseIcon name="Send" :size="16" /></span>
               <span class="col-name">出站节点策略</span>
             </div>
             <div class="nodes-list">
@@ -180,7 +180,7 @@
                 :class="{ selected: selectedNode === 'outbound_proxy' }"
                 @click="toggleSelectNode('outbound_proxy')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Radio" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">PROXY 代理节点池</span>
                   <span class="node-sub text-cyan">{{ currentProxyNode }}</span>
@@ -192,7 +192,7 @@
                 :class="{ selected: selectedNode === 'outbound_direct' }"
                 @click="toggleSelectNode('outbound_direct')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Zap" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">DIRECT 大陆直连</span>
                   <span class="node-sub text-green">零延迟直通</span>
@@ -204,7 +204,7 @@
                 :class="{ selected: selectedNode === 'outbound_block' }"
                 @click="toggleSelectNode('outbound_block')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Ban" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">BLOCK 安全阻断</span>
                   <span class="node-sub text-red">隐私探针拦截</span>
@@ -216,7 +216,7 @@
           <!-- 第 4 列：目标网络生态 (Target Ecosystem) -->
           <div class="column-group">
             <div class="col-header">
-              <span class="col-icon"></span>
+              <span class="col-icon"><BaseIcon name="Server" :size="16" /></span>
               <span class="col-name">目标网络生态</span>
             </div>
             <div class="nodes-list">
@@ -225,7 +225,7 @@
                 :class="{ selected: selectedNode === 'target_global' }"
                 @click="toggleSelectNode('target_global')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="Globe2" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">海外互联网 & AI 服务</span>
                   <span class="node-sub">OpenAI, GitHub, YouTube</span>
@@ -237,7 +237,7 @@
                 :class="{ selected: selectedNode === 'target_cn' }"
                 @click="toggleSelectNode('target_cn')"
               >
-                <div class="node-icon">🇨🇳</div>
+                <div class="node-icon"><BaseIcon name="MapPin" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">大陆国内网络生态</span>
                   <span class="node-sub">国内电商、微信、B站</span>
@@ -249,7 +249,7 @@
                 :class="{ selected: selectedNode === 'target_block' }"
                 @click="toggleSelectNode('target_block')"
               >
-                <div class="node-icon"></div>
+                <div class="node-icon"><BaseIcon name="ShieldAlert" :size="18" /></div>
                 <div class="node-info">
                   <span class="node-title">恶意拦截与遥测威胁</span>
                   <span class="node-sub">广告追踪探针</span>
@@ -264,6 +264,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, computed, onMounted } from "vue";
 import { getAppRules, getCustomRules } from "@/api/ipc/routing";
 import { getProxyGroups } from "@/api/ipc/proxy";

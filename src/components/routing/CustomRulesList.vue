@@ -10,7 +10,7 @@
           type="text"
           placeholder="搜索域名、后缀、关键字、IP 或备注..."
         />
-        <button v-if="searchQuery" class="btn-clear" @click="searchQuery = ''">✕</button>
+        <button v-if="searchQuery" class="btn-clear" @click="searchQuery = ''"><BaseIcon name="X" :size="14" /></button>
       </div>
 
       <!-- 类型胶囊筛选 -->
@@ -54,7 +54,7 @@
 
       <!-- 新增规则按钮 -->
       <button class="btn-add-rule primary" @click="openAddModal">
-        <span>添加分流规则</span>
+        <span class="btn-add-content"><BaseIcon name="Plus" :size="15" /> 添加分流规则</span>
       </button>
     </div>
 
@@ -91,7 +91,7 @@
           <!-- 中间：分流流向 -->
           <div class="rule-arrow">
             <span class="arrow-line"></span>
-            <span class="arrow-head">➔</span>
+            <span class="arrow-head">→</span>
           </div>
 
           <!-- 右侧：出站绑定器与操作 -->
@@ -129,7 +129,7 @@
       <div class="modal-card glass-effect">
         <div class="modal-header">
           <h3>{{ isEditing ? '编辑分流规则' : '添加自定义分流规则' }}</h3>
-          <button class="btn-close" @click="showModal = false">✕</button>
+          <button class="btn-close" @click="showModal = false"><BaseIcon name="X" :size="14" /></button>
         </div>
 
         <div class="modal-body">
@@ -219,6 +219,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, computed, onMounted } from "vue";
 import {
   getCustomRules,
@@ -319,7 +320,7 @@ async function submitRule() {
 
   const res = await addCustomRule({ ...formRule.value });
   if (res.success) {
-    toast.success("规则已保存", `[${formRule.value.payload}] ➔ ${formRule.value.outbound_tag}`);
+    toast.success("规则已保存", `[${formRule.value.payload}] → ${formRule.value.outbound_tag}`);
     showModal.value = false;
     await fetchData();
   } else {
@@ -336,7 +337,7 @@ async function toggleRuleEnabled(rule: CustomRuleItem) {
 async function handleOutboundChange(rule: CustomRuleItem, outbound: string) {
   rule.outbound_tag = outbound;
   await addCustomRule(rule);
-  toast.success("分流策略已更新", `[${rule.payload}] ➔ ${outbound}`);
+  toast.success("分流策略已更新", `[${rule.payload}] → ${outbound}`);
 }
 
 async function handleDeleteRule(id: string) {

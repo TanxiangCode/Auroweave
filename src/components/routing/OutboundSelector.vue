@@ -7,7 +7,8 @@
       @click="isOpen = !isOpen"
       title="点击选择出站策略或节点"
     >
-      <span class="trigger-icon">{{ currentIcon }}</span>
+      <span class="trigger-icon"><BaseIcon :name="currentIcon" :size="14" /></span>
+
       <span class="trigger-label">{{ currentLabel }}</span>
       <span class="trigger-arrow" :class="{ rotated: isOpen }">▼</span>
     </div>
@@ -23,9 +24,9 @@
             :class="{ active: !modelValue || modelValue === 'default' }"
             @click="selectOption('default')"
           >
-            <span class="opt-icon">⚡</span>
+            <span class="opt-icon"><BaseIcon name="GitFork" :size="14" /></span>
             <span class="opt-name">跟随默认全局策略 (Default)</span>
-            <span class="check-icon" v-if="!modelValue || modelValue === 'default'">✓</span>
+            <span class="check-icon" v-if="!modelValue || modelValue === 'default'"><BaseIcon name="Check" :size="13" /></span>
           </div>
 
           <div
@@ -33,9 +34,9 @@
             :class="{ active: modelValue === 'direct' }"
             @click="selectOption('direct')"
           >
-            <span class="opt-icon text-green">🎯</span>
+            <span class="opt-icon text-green"><BaseIcon name="Zap" :size="14" /></span>
             <span class="opt-name">DIRECT · 大陆本地直连</span>
-            <span class="check-icon" v-if="modelValue === 'direct'">✓</span>
+            <span class="check-icon" v-if="modelValue === 'direct'"><BaseIcon name="Check" :size="13" /></span>
           </div>
 
           <div
@@ -43,9 +44,9 @@
             :class="{ active: modelValue === 'proxy' }"
             @click="selectOption('proxy')"
           >
-            <span class="opt-icon text-cyan">🚀</span>
+            <span class="opt-icon text-cyan"></span>
             <span class="opt-name">PROXY · 节点池代理加速</span>
-            <span class="check-icon" v-if="modelValue === 'proxy'">✓</span>
+            <span class="check-icon" v-if="modelValue === 'proxy'"><BaseIcon name="Check" :size="13" /></span>
           </div>
 
           <div
@@ -53,9 +54,9 @@
             :class="{ active: modelValue === 'block' }"
             @click="selectOption('block')"
           >
-            <span class="opt-icon text-red">🚫</span>
+            <span class="opt-icon text-red"></span>
             <span class="opt-name">BLOCK · 阻断联网访问</span>
-            <span class="check-icon" v-if="modelValue === 'block'">✓</span>
+            <span class="check-icon" v-if="modelValue === 'block'"><BaseIcon name="Check" :size="13" /></span>
           </div>
         </div>
 
@@ -70,10 +71,10 @@
               :class="{ active: modelValue === node.tag }"
               @click="selectOption(node.tag)"
             >
-              <span class="opt-icon">🌐</span>
+              <span class="opt-icon"></span>
               <span class="opt-name mono">{{ node.tag }}</span>
               <span class="node-delay" v-if="node.latency?.latency && node.latency.latency > 0">{{ node.latency.latency }}ms</span>
-              <span class="check-icon" v-if="modelValue === node.tag">✓</span>
+              <span class="check-icon" v-if="modelValue === node.tag"></span>
             </div>
 
           </div>
@@ -84,6 +85,7 @@
 </template>
 
 <script setup lang="ts">
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { getGroupNodes } from "@/api/ipc/proxy";
 import type { ProxyNode } from "@/types";
@@ -121,12 +123,13 @@ const currentType = computed(() => {
 
 const currentIcon = computed(() => {
   const v = props.modelValue;
-  if (!v || v === "default") return "⚡";
-  if (v === "direct") return "🎯";
-  if (v === "proxy") return "🚀";
-  if (v === "block") return "🚫";
-  return "🌐";
+  if (!v || v === "default") return "GitFork";
+  if (v === "direct") return "Zap";
+  if (v === "proxy") return "Compass";
+  if (v === "block") return "Ban";
+  return "Globe";
 });
+
 
 function selectOption(val: string) {
   emit("update:modelValue", val);
