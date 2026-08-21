@@ -177,7 +177,9 @@ export interface SystemProcess {
   bound_outbound?: string;
   is_uwp?: boolean;
   uwp_package_name?: string;
+  icon_base64?: string;
 }
+
 
 export type AutomationTriggerType = "ssid" | "network_type" | "time";
 export type AutomationActionType = "switch_proxy_mode" | "switch_node" | "switch_group";

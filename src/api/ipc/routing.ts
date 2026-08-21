@@ -9,7 +9,9 @@ export interface SystemProcessItem {
   pid: number;
   name: string;
   exe_path: string;
+  icon_base64?: string;
 }
+
 
 /** 获取当前系统活跃应用进程列表 */
 export async function getSystemProcesses(): Promise<ApiResponse<SystemProcessItem[]>> {

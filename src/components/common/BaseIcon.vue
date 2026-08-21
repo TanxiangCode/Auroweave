@@ -1,0 +1,142 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import {
+  Sliders,
+  Layers,
+  GitFork,
+  Globe,
+  Cpu,
+  Zap,
+  Command,
+  ShieldCheck,
+  FlaskConical,
+  Search,
+  Palette,
+  Network,
+  PlusCircle,
+  Download,
+  List,
+  Plus,
+  Trash2,
+  RefreshCw,
+  Gauge,
+  Activity,
+  AlertTriangle,
+  Clock,
+  TrendingDown,
+  LayoutGrid,
+  Share2,
+  Compass,
+  Radio,
+  Ban,
+  Server,
+  Globe2,
+  MapPin,
+  ShieldAlert,
+  Scale,
+  Folder,
+  Wrench,
+  Shield,
+  FileText,
+  X,
+  Grid,
+  Menu,
+  Copy,
+  Film,
+  MessageSquare,
+  Star,
+  Crosshair,
+  Check,
+  Send,
+  HelpCircle,
+  Circle,
+} from "lucide-vue-next";
+
+interface Props {
+  name: string;
+  size?: number | string;
+  strokeWidth?: number;
+  color?: string;
+  class?: string;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  size: 16,
+  strokeWidth: 2,
+  color: "currentColor",
+});
+
+const iconMap: Record<string, any> = {
+  Sliders,
+  Layers,
+  GitFork,
+  Globe,
+  Cpu,
+  Zap,
+  Command,
+  ShieldCheck,
+  FlaskConical,
+  Search,
+  Palette,
+  Network,
+  PlusCircle,
+  Download,
+  List,
+  Plus,
+  Trash2,
+  RefreshCw,
+  Gauge,
+  Activity,
+  AlertTriangle,
+  Clock,
+  TrendingDown,
+  LayoutGrid,
+  Share2,
+  Compass,
+  Radio,
+  Ban,
+  Server,
+  Globe2,
+  MapPin,
+  ShieldAlert,
+  Scale,
+  Folder,
+  Wrench,
+  Shield,
+  FileText,
+  X,
+  Grid,
+  Menu,
+  Copy,
+  Film,
+  MessageSquare,
+  Star,
+  Crosshair,
+  Check,
+  Send,
+};
+
+const iconComponent = computed(() => {
+  if (!props.name) return Circle;
+  return iconMap[props.name] || HelpCircle || Circle;
+});
+</script>
+
+<template>
+  <component
+    :is="iconComponent"
+    :size="size"
+    :stroke-width="strokeWidth"
+    :color="color"
+    :class="['base-icon', props.class]"
+  />
+</template>
+
+<style scoped>
+.base-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+</style>

@@ -51,9 +51,9 @@ const CATEGORY_RULES: SemanticCategoryRule[] = [
     titleTemplate: (app) => `${app} 广告与遥测探针`,
     descTemplate: (_app, outbound, isDirect, isBlock) =>
       isBlock
-        ? "🛡️ 已在 DNS/路由层直接熔断阻断，阻止设备指纹与隐私数据外泄"
+        ? "已在 DNS/路由层直接熔断阻断，阻止设备指纹与隐私数据外泄"
         : isDirect
-        ? "⚠️ 广告请求穿透直连，建议在规则中配置 Block 策略"
+        ? "广告请求穿透直连，建议在规则中配置 Block 策略"
         : `经 [${outbound}] 节点发送，可能存在追踪风险`,
     badges: ["隐私防护", "广告过滤", "遥测阻断"],
     risk: "warning",
@@ -126,7 +126,7 @@ const CATEGORY_RULES: SemanticCategoryRule[] = [
     descTemplate: (app, outbound, isDirect) =>
       isDirect
         ? `命中 geosite-cn 规则，由 ${app} 发起国内直连穿透，零中转毫秒级响应`
-        : `⚠️ 国内目标被 [${outbound}] 代理，如非特殊需求建议调整分流策略为直连`,
+        : `国内目标被 [${outbound}] 代理，如非特殊需求建议调整分流策略为直连`,
     badges: ["大陆直连", "零延迟", "节省流量"],
     risk: "safe",
   },
