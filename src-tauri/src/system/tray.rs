@@ -10,25 +10,26 @@ pub const TRAY_ID: &str = "auroweave-tray";
 
 /// 初始化系统托盘与右键菜单
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let show_item = MenuItemBuilder::with_id("show_window", "显示主界面").build(app)?;
-    let settings_item = MenuItemBuilder::with_id("open_settings", "偏好设置...").build(app)?;
+    let show_item = MenuItemBuilder::with_id("show_window", "⌘  显示主界面").build(app)?;
+    let settings_item = MenuItemBuilder::with_id("open_settings", "⚙  偏好设置...").build(app)?;
 
     // 代理模式切换子菜单
-    let mode_rule = MenuItemBuilder::with_id("mode_rule", "规则分流 (Rule)").build(app)?;
-    let mode_global = MenuItemBuilder::with_id("mode_global", "全局代理 (Global)").build(app)?;
-    let mode_direct = MenuItemBuilder::with_id("mode_direct", "大陆直连 (Direct)").build(app)?;
+    let mode_rule = MenuItemBuilder::with_id("mode_rule", "•  规则分流 (Rule)").build(app)?;
+    let mode_global = MenuItemBuilder::with_id("mode_global", "•  全局代理 (Global)").build(app)?;
+    let mode_direct = MenuItemBuilder::with_id("mode_direct", "•  大陆直连 (Direct)").build(app)?;
 
-    let mode_submenu = SubmenuBuilder::new(app, "代理模式")
+    let mode_submenu = SubmenuBuilder::new(app, "⌥  代理模式")
         .item(&mode_rule)
         .item(&mode_global)
         .item(&mode_direct)
         .build()?;
 
     // 系统代理与 TUN 切换
-    let sysproxy_item = MenuItemBuilder::with_id("toggle_sysproxy", "系统代理 (System Proxy)").build(app)?;
-    let restart_item = MenuItemBuilder::with_id("restart_kernel", "重启内核服务 (Restart Core)").build(app)?;
+    let sysproxy_item = MenuItemBuilder::with_id("toggle_sysproxy", "◈  系统代理 (System Proxy)").build(app)?;
+    let restart_item = MenuItemBuilder::with_id("restart_kernel", "⟳  重启内核服务 (Restart Core)").build(app)?;
 
-    let quit_item = MenuItemBuilder::with_id("quit_app", "退出 Auroweave (Quit)").build(app)?;
+    let quit_item = MenuItemBuilder::with_id("quit_app", "⏻  退出 Auroweave (Quit)").build(app)?;
+
 
     let separator1 = PredefinedMenuItem::separator(app)?;
     let separator2 = PredefinedMenuItem::separator(app)?;

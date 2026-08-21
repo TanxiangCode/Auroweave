@@ -57,6 +57,33 @@ pub struct SystemProcess {
     pub pid: u32,
     pub name: String,
     pub exe_path: String,
+    pub icon_base64: Option<String>,
+}
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn macos_get_app_icon_base64(exe_path: *const std::os::raw::c_char) -> *mut std::os::raw::c_char;
+    fn macos_free_string(ptr: *mut std::os::raw::c_char);
+}
+
+/// 提取指定进程的原生系统图标 (PNG Base64)
+pub fn get_native_app_icon(exe_path: &str) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        if exe_path.is_empty() {
+            return None;
+        }
+        let c_path = std::ffi::CString::new(exe_path).ok()?;
+        unsafe {
+            let res_ptr = macos_get_app_icon_base64(c_path.as_ptr());
+            if !res_ptr.is_null() {
+                let s = std::ffi::CStr::from_ptr(res_ptr).to_str().ok().map(|s| s.to_string());
+                macos_free_string(res_ptr);
+                return s;
+            }
+        }
+    }
+    None
 }
 
 /// 获取当前系统活跃应用进程列表
@@ -79,10 +106,12 @@ pub fn get_active_processes() -> Vec<SystemProcess> {
         let exe_path = process.exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
 
         if !name.is_empty() {
+            let icon_base64 = get_native_app_icon(&exe_path);
             list.push(SystemProcess {
                 pid: pid_u32,
                 name,
                 exe_path,
+                icon_base64,
             });
         }
     }
@@ -93,3 +122,4 @@ pub fn get_active_processes() -> Vec<SystemProcess> {
 
     list
 }
+
