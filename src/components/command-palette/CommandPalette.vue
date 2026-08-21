@@ -140,10 +140,34 @@ const allCommands = computed<CommandItem[]>(() => {
       action: () => router.push("/proxies"),
     },
     {
+      id: "nav-subscriptions",
+      category: "系统操作",
+      icon: "Rss",
+      title: "打开 订阅中心",
+      subtitle: "管理机场订阅、流量监控与节点更新",
+      action: () => router.push("/subscriptions"),
+    },
+    {
+      id: "nav-routing",
+      category: "系统操作",
+      icon: "GitFork",
+      title: "打开 分流规则与拓扑",
+      subtitle: "配置应用分流、域名规则与出站策略",
+      action: () => router.push("/routing"),
+    },
+    {
+      id: "nav-audit",
+      category: "系统操作",
+      icon: "ShieldCheck",
+      title: "打开 安全审计控制台",
+      subtitle: "实时抓包监控与 DNS 连接诊断",
+      action: () => router.push("/audit"),
+    },
+    {
       id: "nav-settings",
       category: "系统操作",
       icon: "Settings",
-      title: "打开 软件设置",
+      title: "打开 偏好设置",
       subtitle: "修改系统代理、开机启动与极客配置",
       action: () => router.push("/settings"),
     },
@@ -156,6 +180,7 @@ const allCommands = computed<CommandItem[]>(() => {
       action: () => router.push("/speedtest"),
     },
   ];
+
 
   // 动态加入已有代理分组和节点
   proxyStore.groups.forEach((group) => {

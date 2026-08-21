@@ -10,7 +10,9 @@
  */
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import SvgIcon from "@/components/common/SvgIcon.vue";
+import BaseIcon from "@/components/common/BaseIcon.vue";
+
+
 import {
   SETTINGS_CLOSE_MIN_GAP_PX,
   WINDOW_DEFAULT_WIDTH,
@@ -103,7 +105,7 @@ function handleSettingsClick() {
         title="首页"
         @click="router.push('/')"
       >
-        <SvgIcon name="home" :size="13" />
+        <BaseIcon name="Compass" :size="13" />
       </button>
       
       <!-- 代理大厅 -->
@@ -113,9 +115,19 @@ function handleSettingsClick() {
         title="代理大厅"
         @click="router.push('/proxies')"
       >
-        <SvgIcon name="proxies" :size="13" />
+        <BaseIcon name="Radio" :size="13" />
       </button>
       
+      <!-- 订阅中心 (一级核心模块) -->
+      <button
+        class="capsule-btn nav-btn"
+        :class="{ active: route.path === '/subscriptions' }"
+        title="订阅中心"
+        @click="router.push('/subscriptions')"
+      >
+        <BaseIcon name="Rss" :size="13" />
+      </button>
+
       <!-- 分流规则 -->
       <button
         class="capsule-btn nav-btn"
@@ -123,7 +135,7 @@ function handleSettingsClick() {
         title="分流规则"
         @click="router.push('/routing')"
       >
-        <SvgIcon name="routing" :size="13" />
+        <BaseIcon name="GitFork" :size="13" />
       </button>
       
       <!-- 安全审计 -->
@@ -133,19 +145,20 @@ function handleSettingsClick() {
         title="安全审计"
         @click="router.push('/audit')"
       >
-        <SvgIcon name="audit" :size="13" />
+        <BaseIcon name="ShieldCheck" :size="13" />
       </button>
     </div>
 
-    <!-- <BaseIcon name="Settings" :size="14" /> 设置按钮 (在设置页内高亮) -->
+    <!-- 设置按钮 (在设置页内高亮) -->
     <button
       class="capsule-btn settings-btn"
       :class="{ active: route.path === '/settings' }"
-      title="设置"
+      title="偏好设置"
       @click="handleSettingsClick"
     >
-      <SvgIcon name="settings" :size="13" />
+      <BaseIcon name="Settings" :size="13" />
     </button>
+
 
     <!-- 非 macOS 平台下的窗口控制按钮群 (设置与关闭分割间距遵循 SETTINGS_CLOSE_MIN_GAP_PX 防误触) -->
     <template v-if="!isMac">

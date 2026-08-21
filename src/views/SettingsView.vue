@@ -43,8 +43,9 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { key: "general", icon: "Sliders", label: "通用设置", keywords: ["通用", "主题", "语言", "自启", "托盘", "最小化", "局域网", "共享", "allow lan", "general", "theme"] },
-  { key: "subscription", icon: "Layers", label: "订阅管理", keywords: ["订阅", "节点", "更新", "导入", "sub", "node"] },
+  { key: "subscription", icon: "Rss", label: "订阅管理", keywords: ["订阅", "节点", "更新", "导入", "sub", "node"] },
   { key: "routemode", icon: "GitFork", label: "代理模式", keywords: ["模式", "规则", "全局", "直连", "mode", "rule", "global"] },
+
   { key: "dns", icon: "Globe", label: "DNS 配置", keywords: ["dns", "域名解析", "nameserver", "fakeip", "doh"] },
   { key: "tun", icon: "Cpu", label: "TUN 网卡", keywords: ["tun", "虚拟网卡", "网关", "gvisor", "系统服务", "service"] },
   { key: "automation", icon: "Zap", label: "场景自动化", keywords: ["自动化", "wifi", "ssid", "切换", "auto"] },

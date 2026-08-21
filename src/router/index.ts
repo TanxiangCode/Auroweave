@@ -29,11 +29,18 @@ const router = createRouter({
       meta: { title: "代理节点" },
     },
     {
+      path: "/subscriptions",
+      name: "subscriptions",
+      component: () => import("@/views/SubscriptionsView/index.vue"),
+      meta: { title: "订阅管理" },
+    },
+    {
       path: "/routing",
       name: "routing",
       component: () => import("@/views/RoutingView.vue"),
       meta: { title: "分流配置" },
     },
+
     {
       path: "/audit",
       name: "audit",

@@ -48,17 +48,26 @@ import {
   Crosshair,
   Check,
   Send,
+  Rss,
+  Calendar,
+  HardDrive,
+  FileUp,
+  ClipboardList,
+  Settings,
+  Settings2,
   HelpCircle,
   Circle,
 } from "lucide-vue-next";
+
 
 interface Props {
   name: string;
   size?: number | string;
   strokeWidth?: number;
   color?: string;
-  class?: string;
+  class?: any;
 }
+
 
 const props = withDefaults(defineProps<Props>(), {
   size: 16,
@@ -114,7 +123,16 @@ const iconMap: Record<string, any> = {
   Crosshair,
   Check,
   Send,
+  Rss,
+  Calendar,
+  HardDrive,
+  FileUp,
+  ClipboardList,
+  Settings,
+  Settings2,
 };
+
+
 
 const iconComponent = computed(() => {
   if (!props.name) return Circle;

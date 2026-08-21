@@ -1,9 +1,15 @@
 <template>
   <div class="panel-container">
-    <h2>
-      <BaseIcon name="Layers" :size="20" class="panel-header-icon" />
-      订阅管理
-    </h2>
+    <div class="panel-header-row">
+      <h2>
+        <BaseIcon name="Rss" :size="20" class="panel-header-icon" />
+        订阅管理
+      </h2>
+      <button class="btn-goto-full" @click="$router.push('/subscriptions')">
+        <BaseIcon name="Rss" :size="13" />
+        <span>打开全屏订阅中心 ➔</span>
+      </button>
+    </div>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -12,6 +18,7 @@
         </div>
         <input type="checkbox" v-model="settingsStore.settings.auto_group_on_import" class="switch" @change="save" />
       </div>
+
 
       <!-- 快速导入模组 -->
       <div class="import-card glass-effect">
@@ -294,6 +301,39 @@ function formatTime(ts?: number): string {
   font-size: var(--text-sm);
   text-align: center;
   padding: var(--space-3);
+}
+
+.panel-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.panel-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-goto-full {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(0, 242, 254, 0.1);
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  color: #00f2fe;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-goto-full:hover {
+  background: rgba(0, 242, 254, 0.2);
+  color: #fff;
+  transform: translateX(2px);
 }
 
 .subscription-list {

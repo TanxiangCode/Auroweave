@@ -8,6 +8,7 @@
  */
 import { computed } from "vue";
 import { useRouter } from "vue-router";
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useSubscriptionStore } from "@/stores/subscription.store";
 
 const router = useRouter();
@@ -16,9 +17,9 @@ const subStore = useSubscriptionStore();
 /** 是否已有订阅 */
 const hasSubscriptions = computed(() => subStore.subscriptions.length > 0);
 
-/** 跳转到订阅管理面板 */
+/** 跳转到订阅管理中心 */
 function goToSubscription() {
-  router.push("/settings?panel=subscription");
+  router.push("/subscriptions");
 }
 </script>
 
@@ -31,15 +32,12 @@ function goToSubscription() {
 
     <!-- 无订阅时的快捷入口 -->
     <button v-if="!hasSubscriptions" class="sub-entry-btn" @click="goToSubscription">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>
+      <BaseIcon name="Rss" :size="13" />
       <span>导入订阅</span>
     </button>
   </div>
 </template>
+
 
 <style scoped>
 .idle-tips-container {
