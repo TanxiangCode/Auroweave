@@ -74,7 +74,7 @@ pub fn run() {
                     tauri_plugin_log::TargetKind::Webview
                 ))
                 // 日志级别：默认 Trace
-                .level(log::LevelFilter::Trace)
+                .level(log::LevelFilter::Info)
                 // Tauri 内部框架仅记录 Warn 以上，减少噪音
                 .level_for("tauri", log::LevelFilter::Warn)
                 .level_for("tao", log::LevelFilter::Warn)
@@ -104,6 +104,7 @@ pub fn run() {
             commands::subscription::subscription_delete_all,
             commands::subscription::subscription_refresh,
             commands::subscription::subscription_activate,
+            commands::subscription::subscription_inspect,
             commands::settings::settings_get_all,
             commands::settings::settings_save,
             commands::settings::settings_inject_terminal_proxy,

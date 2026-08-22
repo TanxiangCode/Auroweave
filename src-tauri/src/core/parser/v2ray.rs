@@ -8,14 +8,34 @@ use base64::Engine;
 use serde_json::json;
 use url::Url;
 
+/// 解析包含多行节点 URI 或 Base64 编码的订阅内容
 pub fn parse_v2ray_base64(content: &str) -> Result<Vec<ParsedOutbound>, AppError> {
     let clean = content.trim().replace("\r\n", "\n").replace('\r', "");
-    let decoded = flexible_base64_decode(&clean).unwrap_or_else(|| clean.clone());
+    if clean.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    let lines = decoded.lines();
+    // 第一级嗅探：检查是否直接是多行明文 URI 列表
+    let mut outbounds = parse_lines_to_outbounds(&clean);
+    if !outbounds.is_empty() {
+        return Ok(outbounds);
+    }
+
+    // 第二级嗅探：整串内容可能是 Base64 编码
+    if let Some(decoded) = flexible_base64_decode(&clean) {
+        outbounds = parse_lines_to_outbounds(&decoded);
+        if !outbounds.is_empty() {
+            return Ok(outbounds);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+/// 逐行解析文本中的节点 URI
+fn parse_lines_to_outbounds(text: &str) -> Vec<ParsedOutbound> {
     let mut outbounds = Vec::new();
-
-    for line in lines {
+    for line in text.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -25,13 +45,15 @@ pub fn parse_v2ray_base64(content: &str) -> Result<Vec<ParsedOutbound>, AppError
             outbounds.push(parsed);
         }
     }
-
-    Ok(outbounds)
+    outbounds
 }
 
 /// 兼容多种 Base64 编码变体与补齐
-fn flexible_base64_decode(input: &str) -> Option<String> {
-    let sanitized = input.replace([' ', '\n', '\t'], "");
+pub fn flexible_base64_decode(input: &str) -> Option<String> {
+    let sanitized: String = input
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '-' || *c == '_' || *c == '=')
+        .collect();
     if sanitized.is_empty() {
         return None;
     }
@@ -59,7 +81,9 @@ fn flexible_base64_decode(input: &str) -> Option<String> {
     None
 }
 
+/// 解析单条 URI 链接
 fn parse_single_uri(uri: &str) -> Option<ParsedOutbound> {
+    let uri = uri.trim();
     if uri.starts_with("vmess://") {
         parse_vmess_uri(uri)
     } else if uri.starts_with("ss://") {
@@ -89,6 +113,320 @@ fn extract_tag(parsed_url: &Url, default_name: &str) -> String {
     default_name.to_string()
 }
 
+/// VMess 链接解析器
+fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
+    let b64_str = uri.strip_prefix("vmess://")?;
+    let decoded_bytes = flexible_base64_decode(b64_str).or_else(|| {
+        STANDARD.decode(b64_str).ok().and_then(|b| String::from_utf8(b).ok())
+    })?;
+
+    let v: serde_json::Value = serde_json::from_str(&decoded_bytes).ok()?;
+
+    let name = v.get("ps")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("VMess")
+        .to_string();
+
+    let server = v.get("add")
+        .or_else(|| v.get("host"))
+        .and_then(|s| s.as_str())?
+        .to_string();
+
+    // 兼容数字或字符串格式的 port
+    let port = match v.get("port") {
+        Some(serde_json::Value::Number(n)) => n.as_u64().map(|p| p as u16),
+        Some(serde_json::Value::String(s)) => s.parse::<u16>().ok(),
+        _ => None,
+    }?;
+
+    let uuid = v.get("id").and_then(|s| s.as_str())?.to_string();
+    let alter_id = match v.get("aid") {
+        Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0),
+        Some(serde_json::Value::String(s)) => s.parse::<u64>().unwrap_or(0),
+        _ => 0,
+    };
+    let security = v.get("scy").or_else(|| v.get("cipher")).and_then(|s| s.as_str()).unwrap_or("auto");
+
+    let mut raw_json = json!({
+        "type": "vmess",
+        "tag": name,
+        "server": server,
+        "server_port": port,
+        "uuid": uuid,
+        "security": security,
+        "alter_id": alter_id
+    });
+
+    let net = v.get("net").and_then(|s| s.as_str()).unwrap_or("tcp");
+    let tls = v.get("tls").and_then(|s| s.as_str()).map(|s| s == "tls" || s == "1").unwrap_or(false);
+    let sni = v.get("sni").and_then(|s| s.as_str()).or_else(|| v.get("host").and_then(|s| s.as_str()));
+
+    if tls {
+        let mut tls_obj = json!({ "enabled": true });
+        if let Some(s) = sni {
+            if !s.is_empty() {
+                tls_obj["server_name"] = json!(s);
+            }
+        }
+        raw_json["tls"] = tls_obj;
+    }
+
+    if net == "ws" {
+        let path = v.get("path").and_then(|s| s.as_str()).unwrap_or("/");
+        let host = v.get("host").and_then(|s| s.as_str()).unwrap_or("");
+        let mut transport = json!({
+            "type": "ws",
+            "path": path
+        });
+        if !host.is_empty() {
+            transport["headers"] = json!({ "Host": host });
+        }
+        raw_json["transport"] = transport;
+    } else if net == "grpc" {
+        let path = v.get("path").and_then(|s| s.as_str()).unwrap_or("");
+        raw_json["transport"] = json!({
+            "type": "grpc",
+            "service_name": path
+        });
+    }
+
+    Some(ParsedOutbound {
+        tag: name,
+        r#type: "vmess".to_string(),
+        server: Some(server),
+        server_port: Some(port),
+        raw_json,
+    })
+}
+
+/// Shadowsocks 链接解析器 (支持 SIP002 标准与 Legacy Base64 格式)
+fn parse_ss_uri(uri: &str) -> Option<ParsedOutbound> {
+    let raw_part = uri.strip_prefix("ss://")?;
+    let (body, tag) = match raw_part.split_once('#') {
+        Some((b, t)) => (b, urlencoding::decode(t).unwrap_or_else(|_| t.into()).to_string()),
+        None => (raw_part, "Shadowsocks".to_string()),
+    };
+
+    // 格式1: SIP002 -> ss://BASE64(method:password)@server:port
+    if let Some((user_info_b64, server_part)) = body.split_once('@') {
+        let decoded_user = flexible_base64_decode(user_info_b64)
+            .or_else(|| String::from_utf8(STANDARD.decode(user_info_b64).ok()?).ok())
+            .unwrap_or_else(|| user_info_b64.to_string());
+
+        let (method, password) = match decoded_user.split_once(':') {
+            Some((m, p)) => (m.to_string(), p.to_string()),
+            None => ("aes-256-gcm".to_string(), decoded_user),
+        };
+
+        let (server, port) = parse_host_port(server_part)?;
+
+        return Some(ParsedOutbound {
+            tag: tag.clone(),
+            r#type: "shadowsocks".to_string(),
+            server: Some(server.clone()),
+            server_port: Some(port),
+            raw_json: json!({
+                "type": "shadowsocks",
+                "tag": tag,
+                "server": server,
+                "server_port": port,
+                "method": method,
+                "password": password
+            }),
+        });
+    }
+
+    // 格式2: Legacy -> ss://BASE64(method:password@server:port)
+    if let Some(decoded_full) = flexible_base64_decode(body) {
+        if let Some((user_info, server_part)) = decoded_full.split_once('@') {
+            let (method, password) = match user_info.split_once(':') {
+                Some((m, p)) => (m.to_string(), p.to_string()),
+                None => ("aes-256-gcm".to_string(), user_info.to_string()),
+            };
+            let (server, port) = parse_host_port(server_part)?;
+
+            return Some(ParsedOutbound {
+                tag: tag.clone(),
+                r#type: "shadowsocks".to_string(),
+                server: Some(server.clone()),
+                server_port: Some(port),
+                raw_json: json!({
+                    "type": "shadowsocks",
+                    "tag": tag,
+                    "server": server,
+                    "server_port": port,
+                    "method": method,
+                    "password": password
+                }),
+            });
+        }
+    }
+
+    None
+}
+
+/// 辅助解析 host:port
+fn parse_host_port(s: &str) -> Option<(String, u16)> {
+    let s = s.split('?').next().unwrap_or(s); // 去除 query
+    let s = s.split('/').next().unwrap_or(s);
+    if let Some((h, p)) = s.rsplit_once(':') {
+        let port = p.parse::<u16>().ok()?;
+        let host = h.trim_start_matches('[').trim_end_matches(']').to_string();
+        Some((host, port))
+    } else {
+        None
+    }
+}
+
+/// VLESS 链接解析器
+fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
+    let parsed_url = Url::parse(uri).ok()?;
+    let tag = extract_tag(&parsed_url, "VLESS");
+    let server = parsed_url.host_str()?.to_string();
+    let port = parsed_url.port()?;
+    let uuid = parsed_url.username().to_string();
+
+    let mut sni = None;
+    let mut security = None;
+    let mut pbk = None;
+    let mut sid = None;
+    let mut flow = None;
+    let mut net_type = None;
+    let mut path = None;
+    let mut service_name = None;
+
+    for (k, v) in parsed_url.query_pairs() {
+        match k.as_ref() {
+            "sni" | "serverName" => sni = Some(v.to_string()),
+            "security" => security = Some(v.to_string()),
+            "pbk" => pbk = Some(v.to_string()),
+            "sid" => sid = Some(v.to_string()),
+            "flow" => flow = Some(v.to_string()),
+            "type" => net_type = Some(v.to_string()),
+            "path" => path = Some(v.to_string()),
+            "serviceName" => service_name = Some(v.to_string()),
+            _ => {}
+        }
+    }
+
+    let mut raw_json = json!({
+        "type": "vless",
+        "tag": tag,
+        "server": server,
+        "server_port": port,
+        "uuid": uuid
+    });
+
+    if let Some(f) = flow {
+        if !f.is_empty() {
+            raw_json["flow"] = json!(f);
+        }
+    }
+
+    // 处理 TLS / Reality
+    let sec = security.as_deref().unwrap_or("none");
+    if sec == "reality" {
+        let mut reality_obj = json!({
+            "enabled": true,
+            "reality": {
+                "enabled": true,
+                "public_key": pbk.unwrap_or_default(),
+                "short_id": sid.unwrap_or_default()
+            }
+        });
+        if let Some(s) = sni {
+            reality_obj["server_name"] = json!(s);
+        }
+        raw_json["tls"] = reality_obj;
+    } else if sec == "tls" {
+        let mut tls_obj = json!({ "enabled": true });
+        if let Some(s) = sni {
+            tls_obj["server_name"] = json!(s);
+        }
+        raw_json["tls"] = tls_obj;
+    }
+
+    // 处理 Transport
+    if let Some(t) = net_type {
+        if t == "ws" {
+            raw_json["transport"] = json!({
+                "type": "ws",
+                "path": path.unwrap_or_else(|| "/".to_string())
+            });
+        } else if t == "grpc" {
+            raw_json["transport"] = json!({
+                "type": "grpc",
+                "service_name": service_name.or(path).unwrap_or_default()
+            });
+        }
+    }
+
+    Some(ParsedOutbound {
+        tag,
+        r#type: "vless".to_string(),
+        server: Some(server),
+        server_port: Some(port),
+        raw_json,
+    })
+}
+
+/// Trojan 链接解析器
+fn parse_trojan_uri(uri: &str) -> Option<ParsedOutbound> {
+    let parsed_url = Url::parse(uri).ok()?;
+    let tag = extract_tag(&parsed_url, "Trojan");
+    let server = parsed_url.host_str()?.to_string();
+    let port = parsed_url.port()?;
+    let password = parsed_url.username().to_string();
+
+    let mut sni = None;
+    let mut net_type = None;
+    let mut path = None;
+
+    for (k, v) in parsed_url.query_pairs() {
+        match k.as_ref() {
+            "sni" | "peer" => sni = Some(v.to_string()),
+            "type" => net_type = Some(v.to_string()),
+            "path" => path = Some(v.to_string()),
+            _ => {}
+        }
+    }
+
+    let mut tls_obj = json!({ "enabled": true });
+    if let Some(s) = sni {
+        tls_obj["server_name"] = json!(s);
+    } else {
+        tls_obj["server_name"] = json!(server);
+    }
+
+    let mut raw_json = json!({
+        "type": "trojan",
+        "tag": tag,
+        "server": server,
+        "server_port": port,
+        "password": password,
+        "tls": tls_obj
+    });
+
+    if let Some(t) = net_type {
+        if t == "ws" {
+            raw_json["transport"] = json!({
+                "type": "ws",
+                "path": path.unwrap_or_else(|| "/".to_string())
+            });
+        }
+    }
+
+    Some(ParsedOutbound {
+        tag,
+        r#type: "trojan".to_string(),
+        server: Some(server),
+        server_port: Some(port),
+        raw_json,
+    })
+}
+
+/// Hysteria2 链接解析器
 fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     let parsed_url = Url::parse(uri).ok()?;
     let tag = extract_tag(&parsed_url, "Hysteria2");
@@ -139,7 +477,7 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     }
 
     Some(ParsedOutbound {
-        tag: extract_tag(&parsed_url, "Hysteria2"),
+        tag,
         r#type: "hysteria2".to_string(),
         server: Some(server),
         server_port: Some(port),
@@ -147,6 +485,7 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     })
 }
 
+/// AnyTLS 链接解析器
 fn parse_anytls_uri(uri: &str) -> Option<ParsedOutbound> {
     let parsed_url = Url::parse(uri).ok()?;
     let tag = extract_tag(&parsed_url, "AnyTLS");
@@ -179,107 +518,11 @@ fn parse_anytls_uri(uri: &str) -> Option<ParsedOutbound> {
     });
 
     Some(ParsedOutbound {
-        tag: extract_tag(&parsed_url, "AnyTLS"),
+        tag,
         r#type: "vless".to_string(),
         server: Some(server),
         server_port: Some(port),
         raw_json,
-    })
-}
-
-fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
-    let b64_str = uri.strip_prefix("vmess://")?;
-    let decoded_bytes = flexible_base64_decode(b64_str).or_else(|| {
-        STANDARD.decode(b64_str).ok().and_then(|b| String::from_utf8(b).ok())
-    })?;
-
-    let v: serde_json::Value = serde_json::from_str(&decoded_bytes).ok()?;
-
-    let name = v.get("ps").and_then(|s| s.as_str()).unwrap_or("VMess").to_string();
-    let server = v.get("add")?.as_str()?.to_string();
-    let port = v.get("port")?.as_str()?.parse::<u16>().ok()?;
-    let uuid = v.get("id")?.as_str()?.to_string();
-
-    Some(ParsedOutbound {
-        tag: name.clone(),
-        r#type: "vmess".to_string(),
-        server: Some(server.clone()),
-        server_port: Some(port),
-        raw_json: json!({
-            "type": "vmess",
-            "tag": name,
-            "server": server,
-            "server_port": port,
-            "uuid": uuid,
-            "security": "auto"
-        }),
-    })
-}
-
-fn parse_ss_uri(uri: &str) -> Option<ParsedOutbound> {
-    let parsed_url = Url::parse(uri).ok()?;
-    let tag = extract_tag(&parsed_url, "Shadowsocks");
-    let server = parsed_url.host_str()?.to_string();
-    let port = parsed_url.port()?;
-    let user_info = parsed_url.username();
-
-    Some(ParsedOutbound {
-        tag: tag.clone(),
-        r#type: "shadowsocks".to_string(),
-        server: Some(server.clone()),
-        server_port: Some(port),
-        raw_json: json!({
-            "type": "shadowsocks",
-            "tag": tag,
-            "server": server,
-            "server_port": port,
-            "method": "aes-256-gcm",
-            "password": user_info
-        }),
-    })
-}
-
-fn parse_trojan_uri(uri: &str) -> Option<ParsedOutbound> {
-    let parsed_url = Url::parse(uri).ok()?;
-    let tag = extract_tag(&parsed_url, "Trojan");
-    let server = parsed_url.host_str()?.to_string();
-    let port = parsed_url.port()?;
-    let password = parsed_url.username();
-
-    Some(ParsedOutbound {
-        tag: tag.clone(),
-        r#type: "trojan".to_string(),
-        server: Some(server.clone()),
-        server_port: Some(port),
-        raw_json: json!({
-            "type": "trojan",
-            "tag": tag,
-            "server": server,
-            "server_port": port,
-            "password": password
-        }),
-    })
-}
-
-fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
-    let parsed_url = Url::parse(uri).ok()?;
-    let tag = extract_tag(&parsed_url, "VLESS");
-    let server = parsed_url.host_str()?.to_string();
-    let port = parsed_url.port()?;
-    let uuid = parsed_url.username();
-
-    Some(ParsedOutbound {
-        tag: tag.clone(),
-        r#type: "vless".to_string(),
-        server: Some(server.clone()),
-        server_port: Some(port),
-        raw_json: json!({
-            "type": "vless",
-            "tag": tag,
-            "server": server,
-            "server_port": port,
-            "uuid": uuid
-        }),
     })
 }
 
@@ -288,12 +531,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_parse_vmess_number_and_string_port() {
+        let vmess_json_num = json!({
+            "v": "2",
+            "ps": "测试节点-数字端口",
+            "add": "1.2.3.4",
+            "port": 443,
+            "id": "a0000000-0000-0000-0000-000000000001",
+            "net": "ws",
+            "type": "none",
+            "tls": "tls"
+        });
+        let b64 = STANDARD.encode(vmess_json_num.to_string());
+        let uri = format!("vmess://{}", b64);
+        let parsed = parse_vmess_uri(&uri);
+        assert!(parsed.is_some());
+        let p = parsed.unwrap();
+        assert_eq!(p.tag, "测试节点-数字端口");
+        assert_eq!(p.server_port, Some(443));
+    }
+
+    #[test]
+    fn test_parse_ss_sip002() {
+        let user_info = STANDARD.encode("aes-128-gcm:pass123");
+        let uri = format!("ss://{}@1.2.3.4:8388#%F0%9F%87%BA%F0%9F%87%B8%20%E7%BE%8E%E5%9B%BD", user_info);
+        let parsed = parse_ss_uri(&uri);
+        assert!(parsed.is_some());
+        let p = parsed.unwrap();
+        assert_eq!(p.server_port, Some(8388));
+        assert_eq!(p.raw_json["method"], "aes-128-gcm");
+        assert_eq!(p.raw_json["password"], "pass123");
+    }
+
+    #[test]
     fn test_parse_user_subscription() {
         let sample = "YW55dGxzOi8vYmQ5NDEwZmItZDgyOS00ODI3LWIzYWQtNzAwMzlmMjI4YjVmQHVzYS45OTY2NjkwLnh5ejo1MDAxLz90eXBlPXRjcCZpbnNlY3VyZT0xJmZwPWNocm9tZSZzbmk9aW9zYXBwcy5pdHVuZXMuYXBwbGUuY29tIyVFNSU4OSVBOSVFNCVCRCU5OSVFNiVCNSU4MSVFOSU4NyU4RiVFRiVCQyU5OTk5OTkyNzIuOTUlMjBHQg0KaHlzdGVyaWEyOi8vYmQ5NDEwZmItZDgyOS00ODI3LWIzYWQtNzAwMzlmMjI4YjVmQHVzYS45OTY2Njkw.eHl6OjEwMDAwLz9pbnNlY3VyZT0xJnNuaT1pb3NhcHBzLml0dW5lcy5hcHBsZS5jb20mb2Jmcz1zYWxhbWFuZGVyJm9iZnMtcGFzc3dvcmQ9WXpneU9Ua3dORGs0WlRVMk5UZGlOQSUzRCUzRCZtcG9ydD0xMDAwMC0xOTk5OSMlRjAlOUYlODclQkElRjAlOUYlODclQjglMjAlRTclQkUlOEUlRTUlOUIlQkQtJUU5JTk4JUJGJUU0VCVBQy0wMS0lRjAlOUYlOTMlQjY=";
         let res = parse_v2ray_base64(sample).unwrap();
-        for out in &res {
-            println!("Parsed Tag: {}", out.tag);
-        }
         assert!(!res.is_empty());
     }
 }
+

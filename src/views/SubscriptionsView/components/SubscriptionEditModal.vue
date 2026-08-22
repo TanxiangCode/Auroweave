@@ -7,10 +7,11 @@
  * - 基础属性：别名、URL、自定义 UA、后台自动更新周期
  * - 规则清洗：排除关键词/正则过滤、保留节点正则过滤、正则批量重命名
  */
-import { ref, watch } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useSubscriptionStore } from "@/stores/subscription.store";
 import { useToast } from "@/composables/useToast";
+import { getSingboxVersion } from "@/api/ipc/proxy";
 import type { Subscription } from "@/types";
 
 const props = defineProps<{
@@ -29,6 +30,18 @@ const toast = useToast();
 type TabKey = "general" | "filter";
 const activeTab = ref<TabKey>("general");
 
+const DEFAULT_UA = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36";
+const currentSingboxVer = ref("1.14.0-beta.9");
+
+onMounted(async () => {
+  try {
+    const res = await getSingboxVersion();
+    if (res.success && res.data) {
+      currentSingboxVer.value = res.data;
+    }
+  } catch (_) {}
+});
+
 const editName = ref("");
 const editUrl = ref("");
 const editUa = ref("");
@@ -42,14 +55,14 @@ const renameReplace = ref("");
 
 const isSaving = ref(false);
 
-const uaPresets = [
-  { label: "默认 (ClashMeta / sing-box)", value: "ClashMeta/1.18.0 sing-box/1.9.0" },
-  { label: "Clash.Meta", value: "clash.meta/v1.18.0" },
-  { label: "sing-box 官方", value: "sing-box/1.9.0" },
-  { label: "Quantumult X", value: "Quantumult%20X/1.0.30" },
+const uaPresets = computed(() => [
+  { label: "默认 (Pixel 9 / Chrome 151 移动端)", value: DEFAULT_UA },
+  { label: "Clash.Meta", value: "clash.meta/v1.18.10" },
+  { label: `sing-box 官方 (v${currentSingboxVer.value})`, value: `sing-box/${currentSingboxVer.value}` },
   { label: "v2rayN", value: "v2rayN/6.23" },
+  { label: "Quantumult X", value: "Quantumult%20X/1.0.30" },
   { label: "Surge 5", value: "Surge/2800" },
-];
+]);
 
 watch(
   () => props.subscription,
@@ -57,7 +70,7 @@ watch(
     if (sub) {
       editName.value = sub.name;
       editUrl.value = sub.url;
-      editUa.value = sub.user_agent || "ClashMeta/1.18.0 sing-box/1.9.0";
+      editUa.value = sub.user_agent || DEFAULT_UA;
       autoUpdateHours.value = sub.auto_update_interval_hours ?? 12;
 
       excludePattern.value = sub.filter_rule?.exclude_pattern || "";

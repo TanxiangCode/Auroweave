@@ -119,9 +119,30 @@ fn parse_subscription_userinfo(header_val: &str) -> Option<SubscriptionUserInfo>
     }
 }
 
+/// 获取原始订阅数据文件路径
+fn get_raw_subscription_path(id: &str) -> std::path::PathBuf {
+    let dir = crate::get_config_dir().join("subscriptions_raw");
+    let _ = fs::create_dir_all(&dir);
+    dir.join(format!("{}.txt", id))
+}
+
+/// 保存原始订阅文本
+fn save_raw_subscription(id: &str, content: &str) {
+    let path = get_raw_subscription_path(id);
+    let _ = fs::write(&path, content);
+}
+
+/// 读取已持久化的原始订阅文本
+fn load_raw_subscription(id: &str) -> Option<String> {
+    let path = get_raw_subscription_path(id);
+    fs::read_to_string(&path).ok()
+}
+
+pub const DEFAULT_SUBSCRIPTION_UA: &str = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36";
+
 /// 内部核心函数：拉取订阅 URL 内容并解析为 outbounds 与 userinfo
-async fn fetch_and_parse(url: &str, custom_ua: Option<&str>) -> Result<(SubscriptionFormat, Vec<crate::core::parser::ParsedOutbound>, Option<SubscriptionUserInfo>), AppError> {
-    let ua = custom_ua.unwrap_or("ClashMeta/1.18.0 sing-box/1.9.0");
+async fn fetch_and_parse(url: &str, custom_ua: Option<&str>) -> Result<(SubscriptionFormat, Vec<crate::core::parser::ParsedOutbound>, Option<SubscriptionUserInfo>, String), AppError> {
+    let ua = custom_ua.unwrap_or(DEFAULT_SUBSCRIPTION_UA);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(ua)
@@ -147,7 +168,7 @@ async fn fetch_and_parse(url: &str, custom_ua: Option<&str>) -> Result<(Subscrip
         .map_err(|e| AppError::Network(format!("读取订阅响应失败: {}", e)))?;
 
     let (format, outbounds) = parse_subscription_content(&content)?;
-    Ok((format, outbounds, user_info))
+    Ok((format, outbounds, user_info, content))
 }
 
 
@@ -367,7 +388,7 @@ pub async fn subscription_import(
     }
 
     // 1+2. 拉取并解析
-    let (format, outbounds, user_info) = match fetch_and_parse(&url, None).await {
+    let (format, outbounds, user_info, raw_text) = match fetch_and_parse(&url, None).await {
         Ok(res) => res,
         Err(e) => {
             log::error!("[subscription] 拉取/解析订阅失败: {}", e);
@@ -420,6 +441,7 @@ pub async fn subscription_import(
         filter_rule: None,
     };
 
+    save_raw_subscription(&sub.id, &raw_text);
     all_subs.push(sub.clone());
     if let Err(e) = save_subscriptions(&all_subs) {
         log::warn!("[subscription] 持久化订阅列表失败: {}", e);
@@ -442,6 +464,7 @@ pub async fn subscription_delete(id: String) -> ApiResponse<()> {
     let before_len = all_subs.len();
     all_subs.retain(|s| s.id != id);
     if all_subs.len() < before_len {
+        let _ = fs::remove_file(get_raw_subscription_path(&id));
         if let Err(e) = save_subscriptions(&all_subs) {
             return ApiResponse::err(format!("删除订阅失败: {}", e), 500);
         }
@@ -454,6 +477,9 @@ pub async fn subscription_delete(id: String) -> ApiResponse<()> {
 #[tauri::command]
 pub async fn subscription_delete_all() -> ApiResponse<()> {
     log::info!("[subscription] 删除所有订阅");
+
+    let raw_dir = crate::get_config_dir().join("subscriptions_raw");
+    let _ = fs::remove_dir_all(&raw_dir);
 
     if !get_subscriptions_path().exists() {
         return ApiResponse::ok(());
@@ -482,10 +508,12 @@ pub async fn subscription_refresh(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    let (format, outbounds, user_info) = match fetch_and_parse(&sub.url, sub.user_agent.as_deref()).await {
+    let (format, outbounds, user_info, raw_text) = match fetch_and_parse(&sub.url, sub.user_agent.as_deref()).await {
         Ok(res) => res,
         Err(e) => return Ok(ApiResponse::err(e, 400)),
     };
+
+    save_raw_subscription(&id, &raw_text);
 
     let format_str = match format {
         SubscriptionFormat::SingboxJson => "singbox",
@@ -501,7 +529,6 @@ pub async fn subscription_refresh(
         Ok(n) => n,
         Err(e) => return Ok(ApiResponse::err(e, 500)),
     };
-
 
     for s in all_subs.iter_mut() {
         if s.id == id {
@@ -541,13 +568,15 @@ pub async fn subscription_activate(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    let (format, outbounds, user_info) = match fetch_and_parse(&sub.url, sub.user_agent.as_deref()).await {
+    let (format, outbounds, user_info, raw_text) = match fetch_and_parse(&sub.url, sub.user_agent.as_deref()).await {
         Ok(res) => res,
         Err(e) => {
             log::error!("[subscription] 切换订阅拉取失败: {}", e);
             return Ok(ApiResponse::err(e, 400));
         }
     };
+
+    save_raw_subscription(&id, &raw_text);
 
     let format_str = match format {
         SubscriptionFormat::SingboxJson => "singbox",
@@ -566,7 +595,6 @@ pub async fn subscription_activate(
             return Ok(ApiResponse::err(e, 500));
         }
     };
-
 
     for s in all_subs.iter_mut() {
         if s.id == id {
@@ -590,7 +618,6 @@ pub async fn subscription_activate(
         .unwrap_or(sub);
     Ok(ApiResponse::ok(updated))
 }
-
 
 /// 直接从纯文本内容或本地文件导入
 #[tauri::command]
@@ -650,10 +677,70 @@ pub async fn subscription_import_content(
         filter_rule: None,
     };
 
+    save_raw_subscription(&sub.id, &content);
     all_subs.push(sub.clone());
-    let _ = save_subscriptions(&all_subs);
+    if let Err(e) = save_subscriptions(&all_subs) {
+        log::warn!("[subscription] 持久化订阅列表失败: {}", e);
+    }
 
     Ok(ApiResponse::ok(sub))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SubscriptionInspectData {
+    pub id: String,
+    pub name: String,
+    pub format: String,
+    pub node_count: usize,
+    /// 清洗前原始文本
+    pub raw_content: String,
+    /// 清洗解析后的出站节点列表
+    pub parsed_nodes: Vec<crate::core::parser::ParsedOutbound>,
+    /// 该订阅生效后的 sing-box 完整运行时配置 JSON
+    pub final_config_json: String,
+}
+
+/// 检查订阅详情：包含清洗前原始数据、清洗后节点与最终配置预览（支持全平台查看）
+#[tauri::command]
+pub async fn subscription_inspect(
+    app_handle: AppHandle,
+    id: String,
+) -> Result<ApiResponse<SubscriptionInspectData>, AppError> {
+    let all_subs = load_subscriptions();
+    let sub = match all_subs.iter().find(|s| s.id == id) {
+        Some(s) => s.clone(),
+        None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
+    };
+
+    let raw_content = load_raw_subscription(&id).unwrap_or_else(|| {
+        if sub.source_type == "remote" {
+            format!("# 暂无本地原始数据缓存\n# 订阅 URL: {}", sub.url)
+        } else {
+            "# 本地/剪贴板导入数据".to_string()
+        }
+    });
+
+    let (_, outbounds) = parse_subscription_content(&raw_content).unwrap_or((SubscriptionFormat::Unknown, Vec::new()));
+    let filtered_outbounds = apply_filter_rules(outbounds, sub.filter_rule.as_ref());
+    let node_count = filtered_outbounds.len();
+
+    let settings = crate::commands::settings::settings_get_internal(&app_handle);
+    let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(&app_handle);
+    let config_builder = ConfigBuilder::new(filtered_outbounds.clone())
+        .with_ports(mixed_port, clash_api_port)
+        .with_allow_lan(settings.allow_lan);
+    let final_config = config_builder.build().unwrap_or_default();
+    let final_config_json = serde_json::to_string_pretty(&final_config).unwrap_or_default();
+
+    Ok(ApiResponse::ok(SubscriptionInspectData {
+        id: sub.id,
+        name: sub.name,
+        format: sub.format,
+        node_count,
+        raw_content,
+        parsed_nodes: filtered_outbounds,
+        final_config_json,
+    }))
 }
 
 /// 修改订阅基础属性（别名、URL、自定义 UA、自动更新周期）
