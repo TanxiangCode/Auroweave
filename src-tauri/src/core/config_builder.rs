@@ -259,59 +259,6 @@ impl ConfigBuilder {
         let has_geoip = self.geoip_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
 
         let mut rule_set_config = Vec::new();
-        let mut route_rules = json!([
-            { "action": "sniff" },
-            { "protocol": "dns", "action": "hijack-dns" },
-            { "ip_is_private": true, "outbound": "direct" }
-        ]);
-
-        // 注入 App-Matrix 应用分流规则 (优先级高于通用域名分流)
-        let app_rules = crate::commands::routing::load_app_rules_internal();
-        if let Some(rules) = route_rules.as_array_mut() {
-            for (proc_name, outbound) in app_rules {
-                if !proc_name.is_empty() && !outbound.is_empty() {
-                    rules.push(json!({
-                        "process_name": [proc_name],
-                        "outbound": outbound
-                    }));
-                }
-            }
-        }
-
-        // 注入自定义域名 / IP 分流规则 (仅注入 enabled == true)
-        let custom_rules = crate::commands::routing::load_custom_rules_internal();
-        if let Some(rules) = route_rules.as_array_mut() {
-            for cr in custom_rules {
-                if !cr.enabled || cr.payload.trim().is_empty() || cr.outbound_tag.trim().is_empty() {
-                    continue;
-                }
-                let payload = cr.payload.trim().to_string();
-                let outbound = cr.outbound_tag.trim().to_string();
-
-                match cr.rule_type.as_str() {
-                    "domain" => {
-                        rules.push(json!({ "domain": [payload], "outbound": outbound }));
-                    }
-                    "domain_suffix" => {
-                        rules.push(json!({ "domain_suffix": [payload], "outbound": outbound }));
-                    }
-                    "domain_keyword" => {
-                        rules.push(json!({ "domain_keyword": [payload], "outbound": outbound }));
-                    }
-                    "domain_regex" => {
-                        rules.push(json!({ "domain_regex": [payload], "outbound": outbound }));
-                    }
-                    "ip_cidr" => {
-                        rules.push(json!({ "ip_cidr": [payload], "outbound": outbound }));
-                    }
-                    _ => {
-                        rules.push(json!({ "domain_suffix": [payload], "outbound": outbound }));
-                    }
-                }
-            }
-        }
-
-
         if has_geosite {
             rule_set_config.push(json!({
                 "tag": "geosite-cn",
@@ -319,10 +266,6 @@ impl ConfigBuilder {
                 "format": "binary",
                 "path": self.geosite_cn_path.as_ref().unwrap()
             }));
-            // 添加 geosite-cn 直连规则
-            if let Some(rules) = route_rules.as_array_mut() {
-                rules.push(json!({ "rule_set": ["geosite-cn"], "outbound": "direct" }));
-            }
             if has_geoip {
                 rule_set_config.push(json!({
                     "tag": "geoip-cn",
@@ -330,16 +273,12 @@ impl ConfigBuilder {
                     "format": "binary",
                     "path": self.geoip_cn_path.as_ref().unwrap()
                 }));
-                // 合并 geosite-cn + geoip-cn 直连规则
-                if let Some(rules) = route_rules.as_array_mut() {
-                    let _ = rules.pop().unwrap();
-                    // 替换为合并规则
-                    rules.push(json!({ "rule_set": ["geosite-cn", "geoip-cn"], "outbound": "direct" }));
-                }
             }
         } else {
             log::warn!("[config] geosite-cn.srs 本地文件不存在，跳过国内域名直连规则，所有流量走代理");
         }
+
+        let route_rules = build_full_route_rules(has_geosite, has_geoip);
 
         let route = if rule_set_config.is_empty() {
             json!({
@@ -443,3 +382,99 @@ fn tokenize_tag(s: &str) -> Vec<&str> {
         .filter(|s| !s.is_empty())
         .collect()
 }
+
+/// 构建完整的 route.rules 规则列表（公共函数，供 ConfigBuilder 和 rebuild_config_from_settings 统一调用）
+///
+/// 规则匹配顺序：
+/// 1. 基础嗅探与 DNS 劫持
+/// 2. 私有内网 IP 直连
+/// 3. App-Matrix 应用进程分流规则
+/// 4. Custom Rules 自定义域名/IP分流规则
+/// 5. 国内域名与 IP 规则集直连（标记 clash_mode: "rule"，确保 Global 模式下自动避让并走代理出站）
+pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> {
+    let mut rules = vec![
+        json!({ "action": "sniff" }),
+        json!({ "protocol": "dns", "action": "hijack-dns" }),
+        json!({ "ip_is_private": true, "outbound": "direct" }),
+    ];
+
+    // 注入 App-Matrix 应用分流规则 (优先级高于通用域名分流)
+    let app_rules = crate::commands::routing::load_app_rules_internal();
+    for (proc_name, outbound) in app_rules {
+        if !proc_name.is_empty() && !outbound.is_empty() {
+            rules.push(json!({
+                "process_name": [proc_name],
+                "outbound": outbound
+            }));
+        }
+    }
+
+    // 注入自定义域名 / IP 分流规则 (仅注入 enabled == true)
+    let custom_rules = crate::commands::routing::load_custom_rules_internal();
+    for cr in custom_rules {
+        if !cr.enabled || cr.payload.trim().is_empty() || cr.outbound_tag.trim().is_empty() {
+            continue;
+        }
+        let payload = cr.payload.trim().to_string();
+        let outbound = cr.outbound_tag.trim().to_string();
+
+        match cr.rule_type.as_str() {
+            "domain" => {
+                rules.push(json!({ "domain": [payload], "outbound": outbound }));
+            }
+            "domain_suffix" => {
+                rules.push(json!({ "domain_suffix": [payload], "outbound": outbound }));
+            }
+            "domain_keyword" => {
+                rules.push(json!({ "domain_keyword": [payload], "outbound": outbound }));
+            }
+            "domain_regex" => {
+                rules.push(json!({ "domain_regex": [payload], "outbound": outbound }));
+            }
+            "ip_cidr" => {
+                rules.push(json!({ "ip_cidr": [payload], "outbound": outbound }));
+            }
+            _ => {
+                rules.push(json!({ "domain_suffix": [payload], "outbound": outbound }));
+            }
+        }
+    }
+
+    // 注入国内规则集直连规则 (带 clash_mode: "rule"，确保 Global 模式下避让直连规则走全局代理)
+    if has_geosite {
+        if has_geoip {
+            rules.push(json!({
+                "clash_mode": "rule",
+                "rule_set": ["geosite-cn", "geoip-cn"],
+                "outbound": "direct"
+            }));
+        } else {
+            rules.push(json!({
+                "clash_mode": "rule",
+                "rule_set": ["geosite-cn"],
+                "outbound": "direct"
+            }));
+        }
+    }
+
+    rules
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_full_route_rules_clash_mode() {
+        let rules = build_full_route_rules(true, true);
+        assert!(!rules.is_empty());
+        let geosite_rule = rules.iter().find(|r| {
+            r.get("rule_set").is_some()
+        });
+        assert!(geosite_rule.is_some());
+        let obj = geosite_rule.unwrap();
+        assert_eq!(obj.get("clash_mode").and_then(|m| m.as_str()), Some("rule"));
+        assert_eq!(obj.get("outbound").and_then(|o| o.as_str()), Some("direct"));
+    }
+}
+

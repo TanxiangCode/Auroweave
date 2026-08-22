@@ -26,7 +26,8 @@ impl ClashApiClient {
         let port = get_clash_api_port();
         let base = base_url.unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
         let client = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .no_proxy()
+            .timeout(Duration::from_secs(10))
             .pool_idle_timeout(Duration::from_secs(90))
             .pool_max_idle_per_host(50)
             .build()

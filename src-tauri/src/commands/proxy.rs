@@ -160,63 +160,30 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
     let running_res = crate::commands::settings::core_query_running(app_handle.clone()).await;
     let is_running = running_res.data.unwrap_or(false);
 
-    // 若进程在运行中
+    // 若进程在运行中：无论是 TUN 模式还是非 TUN 模式，通过 Clash API 运行时热切换 mode
+    // 无需重启 sing-box 进程，无需重建 TUN 网卡，实现零弹窗、毫秒级平滑切换
     if is_running {
-        if settings.tun_enabled {
-            // TUN 模式下 reload_config 会导致 TUN 接口异常
-            // （sing-box 热重载无法正确重建 TUN inbound，ClashAPI 会报 tun:null）
-            // 必须完全停止旧进程并重新提权启动
-            log::info!("[proxy] TUN 模式下切换代理模式，需重启 sing-box 进程...");
+        let client = ClashApiClient::default();
+        let clash_mode = match mode.as_str() {
+            "global" => "Global",
+            "direct" => "Direct",
+            _ => "Rule",
+        };
+        if let Err(e) = client.patch_configs(serde_json::json!({ "mode": clash_mode })).await {
+            log::warn!("[proxy] 通过 ClashAPI 热切换 mode 失败: {}，尝试 reload_config", e);
             let config_dir = crate::get_config_dir();
             let config_path = config_dir.join("config.json");
             let config_path_str = config_path.to_string_lossy().to_string();
-            let sm = app_handle.state::<std::sync::Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
-
-            // macOS：通过 restart_privileged 合并 kill+start 为单次密码框
-            #[cfg(target_os = "macos")]
-            {
-                match sm.restart_privileged(&config_path_str).await {
-                    Ok(_) => {
-                        // TUN 模式下系统代理关闭（流量走 TUN 接管）
-                        let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-                        log::info!("[proxy] TUN 模式 sing-box 重启成功，代理模式已切换为 {}", mode);
-                        ApiResponse::ok(())
-                    }
-                    Err(e) => {
-                        log::error!("[proxy] TUN 模式重启失败: {}，回退为系统代理模式", e);
-                        // 重启失败：回退为非 TUN 的系统代理模式
-                        let patch = serde_json::json!({ "tun_enabled": false });
-                        let _ = crate::commands::settings::update_settings_internal(&app_handle, patch);
-                        let _ = sm.start(&config_path_str).await;
-                        let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                        ApiResponse::err(format!("TUN 重启失败，已回退为系统代理: {}", e), 500)
-                    }
-                }
-            }
-
-            // Windows/Linux：通过 apply_core_mode_with_fallback 停止+重新启动
-            #[cfg(not(target_os = "macos"))]
-            {
-                match crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
-                    Ok(_) => ApiResponse::ok(()),
-                    Err(e) => ApiResponse::err(e, 500),
-                }
-            }
-        } else {
-            // 非 TUN 模式：reload_config 热重载即可（不涉及 TUN 接口重建）
-            let config_dir = crate::get_config_dir();
-            let config_path = config_dir.join("config.json");
-            let config_path_str = config_path.to_string_lossy().to_string();
-            let client = ClashApiClient::default();
-            match client.reload_config(&config_path_str).await {
-                Ok(_) => {
-                    // 所有模式（包括 direct）都保持系统代理指向 sing-box
-                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-                    ApiResponse::ok(())
-                }
-                Err(e) => ApiResponse::err(e, 500),
-            }
+            let _ = client.reload_config(&config_path_str).await;
         }
+
+        if settings.tun_enabled {
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+        } else {
+            let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+        }
+        log::info!("[proxy] 代理模式已热切换为: {}", mode);
+        return ApiResponse::ok(());
     } else {
         // 核心未运行
         if mode == "rule" || mode == "global" {

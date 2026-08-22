@@ -183,8 +183,12 @@ mod mac_sysproxy {
             return Ok(());
         }
 
-        // 合并为一条 shell 命令，用 ; 连接
-        let combined = commands.join(" ; ");
+        // 合并为并发执行的 shell 命令：每个命令后台运行，最后 wait 等待全部完成
+        let combined = if commands.len() > 1 {
+            format!("{} & wait", commands.join(" & "))
+        } else {
+            commands.join(" ; ")
+        };
 
         // 1. 先尝试直接执行（无 root 权限）
         let direct_result = Command::new("sh")
@@ -297,6 +301,63 @@ mod mac_sysproxy {
 }
 
 // ===========================================================================
+// Linux 系统代理实现 (使用 gsettings 命令对接 GNOME/GTK 桌面环境)
+// ===========================================================================
+#[cfg(target_os = "linux")]
+mod linux_sysproxy {
+    use std::process::Command;
+
+    pub fn set_proxy(enabled: bool, port: u16) -> Result<(), String> {
+        // 检查系统是否有 gsettings 工具
+        let has_gsettings = Command::new("which")
+            .arg("gsettings")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !has_gsettings {
+            log::warn!("[sysproxy] Linux 环境未检测到 gsettings 命令，跳过系统代理配置");
+            return Ok(());
+        }
+
+        if enabled {
+            log::info!("[sysproxy] Linux 设置 GNOME 系统代理模式为 manual, 端口: {}", port);
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy", "mode", "'manual'"])
+                .status();
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.http", "host", "'127.0.0.1'"])
+                .status();
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.http", "port", &port.to_string()])
+                .status();
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.https", "host", "'127.0.0.1'"])
+                .status();
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.https", "port", &port.to_string()])
+                .status();
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.socks", "host", "'127.0.0.1'"])
+                .status();
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy.socks", "port", &port.to_string()])
+                .status();
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy", "ignore-hosts", "['localhost', '127.0.0.0/8', '::1']"])
+                .status();
+        } else {
+            log::info!("[sysproxy] Linux 设置 GNOME 系统代理模式为 none");
+            let _ = Command::new("gsettings")
+                .args(["set", "org.gnome.system.proxy", "mode", "'none'"])
+                .status();
+        }
+
+        Ok(())
+    }
+}
+
+// ===========================================================================
 // 公共 API — 各平台统一接口
 // ===========================================================================
 
@@ -313,11 +374,16 @@ pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
     mac_sysproxy::set_proxy(enabled, port, true)
 }
 
+#[cfg(target_os = "linux")]
+pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
+    linux_sysproxy::set_proxy(enabled, port)
+}
+
 /// 静默设置系统代理 (不弹出提权密码框)
 ///
 /// 用于应用退出、启动清理等场景，避免阻塞或打扰用户。
 /// 在 macOS 上仅尝试直接执行 networksetup (无 root 时可能失败)；
-/// 在 Windows 上与 set_system_proxy 行为一致 (不需要提权)。
+/// 在 Windows/Linux 上与 set_system_proxy 行为一致 (不需要交互提权)。
 pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -327,14 +393,18 @@ pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
     {
         mac_sysproxy::set_proxy(enabled, port, false)
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        set_system_proxy(enabled, port)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         let _ = (enabled, port);
         Ok(())
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 pub fn set_system_proxy(_enabled: bool, _port: u16) -> Result<(), String> {
     Ok(())
 }

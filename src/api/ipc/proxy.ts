@@ -51,3 +51,9 @@ export async function closeAllConnections(): Promise<ApiResponse<void>> {
   return invokeWithTimeout<ApiResponse<void>>("proxy_close_all_connections");
 }
 
+/** 获取当前使用的 sing-box 版本号 */
+export async function getSingboxVersion(): Promise<ApiResponse<string>> {
+  return invokeWithTimeout<ApiResponse<string>>("proxy_get_singbox_version");
+}
+
+

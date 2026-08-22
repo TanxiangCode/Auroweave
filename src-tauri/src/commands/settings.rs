@@ -166,14 +166,14 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
 
     let mut modified = false;
 
-    // 1. 同步 Inbounds (包括端口 mixed_port 与开关 tun_enabled)
+    // 1. 同步 Inbounds (包括端口 mixed_port、allow_lan 监听与开关 tun_enabled)
     if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|i| i.as_array_mut()) {
         inbounds.clear();
         // 混合代理入口
         inbounds.push(serde_json::json!({
             "type": "mixed",
             "tag": "mixed-in",
-            "listen": "127.0.0.1",
+            "listen": if settings.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
             "listen_port": settings.mixed_port
         }));
         
@@ -230,7 +230,7 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         }
     }
 
-    // 3. 同步代理模式与 App-Matrix 应用分流规则到 route
+    // 3. 同步代理模式与完整的路由规则（App-Matrix、Custom Rules、Rule-Set）到 route
     // sing-box 通过 route.final 决定最终出站：
     //   direct 模式 → route.final = "direct" (所有流量直连)
     //   rule/global 模式 → route.final = "proxy" (流量走代理出站)
@@ -241,27 +241,34 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         };
         route.insert("final".to_string(), serde_json::json!(final_outbound));
 
-        // 同步 App-Matrix 应用分流规则到 route.rules
-        let app_rules = crate::commands::routing::load_app_rules_internal();
-        if let Some(rules_arr) = route.get_mut("rules").and_then(|r| r.as_array_mut()) {
-            // 先移除原有的 process_name 分流规则（避免重复累加）
-            rules_arr.retain(|rule| !rule.as_object().map(|obj| obj.contains_key("process_name")).unwrap_or(false));
+        // 检测 geosite-cn 和 geoip-cn 本地规则集文件是否存在
+        let geosite_exists = config_dir.join("geosite-cn.srs").exists();
+        let geoip_exists = config_dir.join("geoip-cn.srs").exists();
 
-            // 在基础规则（sniff, hijack-dns, ip_is_private）之后插入应用分流规则
-            // 找到合适插入点（在 geosite/geoip 直连规则之前）
-            let insert_pos = rules_arr.iter().position(|rule| {
-                rule.get("rule_set").is_some() || rule.get("domain").is_some()
-            }).unwrap_or(rules_arr.len());
+        // 统一通过 build_full_route_rules 构建并覆盖完整的路由规则
+        let full_rules = crate::core::config_builder::build_full_route_rules(geosite_exists, geoip_exists);
+        route.insert("rules".to_string(), serde_json::json!(full_rules));
 
-            for (proc_name, outbound) in app_rules {
-                if !proc_name.is_empty() && !outbound.is_empty() {
-                    rules_arr.insert(insert_pos, serde_json::json!({
-                        "process_name": [proc_name],
-                        "outbound": outbound
-                    }));
-                }
+        // 同步 rule_set 配置
+        if geosite_exists {
+            let mut rule_sets = Vec::new();
+            rule_sets.push(serde_json::json!({
+                "tag": "geosite-cn",
+                "type": "local",
+                "format": "binary",
+                "path": config_dir.join("geosite-cn.srs").to_string_lossy().to_string()
+            }));
+            if geoip_exists {
+                rule_sets.push(serde_json::json!({
+                    "tag": "geoip-cn",
+                    "type": "local",
+                    "format": "binary",
+                    "path": config_dir.join("geoip-cn.srs").to_string_lossy().to_string()
+                }));
             }
+            route.insert("rule_set".to_string(), serde_json::json!(rule_sets));
         }
+
         modified = true;
     }
 
@@ -357,7 +364,7 @@ pub async fn sync_config_to_service(_app_handle: &tauri::AppHandle) -> Result<()
 
 /// 保存设置
 ///
-/// 性能优化：仅当内核相关字段（mixed_port, clash_api_port, proxy_mode,
+/// 性能优化：仅当内核相关字段（mixed_port, clash_api_port, allow_lan, proxy_mode,
 /// tun_enabled, run_mode）发生变化时才触发 apply_core_mode_with_fallback 重启内核，
 /// 避免修改主题、性能模式等无关设置时产生不必要的内核重启。
 #[tauri::command]
@@ -377,6 +384,7 @@ pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Valu
     // 判断内核相关字段是否变化
     let core_changed = old_settings.mixed_port != new_settings.mixed_port
         || old_settings.clash_api_port != new_settings.clash_api_port
+        || old_settings.allow_lan != new_settings.allow_lan
         || old_settings.proxy_mode != new_settings.proxy_mode
         || old_settings.tun_enabled != new_settings.tun_enabled
         || old_settings.core.run_mode != new_settings.core.run_mode;
