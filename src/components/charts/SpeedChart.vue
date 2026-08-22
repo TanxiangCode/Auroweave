@@ -3,22 +3,22 @@
     <div class="chart-header">
       <div class="chart-title">
         <span class="pulse-dot"></span>
-        实时网络流量趋势
+        <span>实时双向流量监控</span>
       </div>
       <div class="speed-indicators">
         <div class="indicator download">
-          <span class="arrow">↓</span>
+          <span class="dot-badge cyan"></span>
           <span class="label">下载</span>
           <span class="val">{{ connectionStore.formatSpeed(connectionStore.rawDownloadSpeed) }}</span>
         </div>
         <div class="indicator upload">
-          <span class="arrow">↑</span>
+          <span class="dot-badge red"></span>
           <span class="label">上传</span>
           <span class="val">{{ connectionStore.formatSpeed(connectionStore.rawUploadSpeed) }}</span>
         </div>
       </div>
     </div>
-    <div class="canvas-wrapper" :style="{ height: compact ? '80px' : '140px' }" ref="wrapperRef">
+    <div class="canvas-wrapper" :class="{ 'compact-height': compact }" ref="wrapperRef">
       <canvas ref="canvasRef"></canvas>
     </div>
   </div>
@@ -43,10 +43,9 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 
 let animationFrameId: number | null = null;
 
-const getCssVar = (name: string, fallback: string) => {
-  if (typeof window === "undefined") return fallback;
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-};
+// 平滑量程阻尼值
+let currentMaxDown = 1024 * 100;
+let currentMaxUp = 1024 * 50;
 
 const renderChart = () => {
   const canvas = canvasRef.value;
@@ -60,6 +59,8 @@ const renderChart = () => {
   const width = wrapper.clientWidth;
   const height = wrapper.clientHeight;
 
+  if (width === 0 || height === 0) return;
+
   canvas.width = width * dpr;
   canvas.height = height * dpr;
   canvas.style.width = `${width}px`;
@@ -68,110 +69,145 @@ const renderChart = () => {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, width, height);
 
-  const points = connectionStore.speedHistory;
-  if (points.length < 2) return;
+  // 获取并补齐 60 个采样点，确保折线平稳铺满画布
+  const rawPoints = connectionStore.speedHistory || [];
+  const TOTAL_POINTS = 60;
+  const points: { download: number; upload: number }[] = [];
 
-  // 计算 Y 轴最大值（至少 100 KB/s）
-  let maxSpeed = 1024 * 100;
+  const padCount = Math.max(0, TOTAL_POINTS - rawPoints.length);
+  for (let i = 0; i < padCount; i++) {
+    points.push({ download: 0, upload: 0 });
+  }
+  for (let i = Math.max(0, rawPoints.length - TOTAL_POINTS); i < rawPoints.length; i++) {
+    points.push({
+      download: rawPoints[i].download,
+      upload: rawPoints[i].upload,
+    });
+  }
+
+  // 1. 计算当前采样周期内的峰值
+  let targetMaxDown = 1024 * 50; // 默认下限 50 KB/s
+  let targetMaxUp = 1024 * 20;   // 默认下限 20 KB/s
   for (const p of points) {
-    if (p.download > maxSpeed) maxSpeed = p.download;
-    if (p.upload > maxSpeed) maxSpeed = p.upload;
+    if (p.download > targetMaxDown) targetMaxDown = p.download;
+    if (p.upload > targetMaxUp) targetMaxUp = p.upload;
   }
 
-  const stepX = width / (points.length - 1);
+  // 缓动平滑过度最大量程（避免突变跳跃）
+  currentMaxDown = currentMaxDown * 0.8 + targetMaxDown * 0.2;
+  currentMaxUp = currentMaxUp * 0.8 + targetMaxUp * 0.2;
 
-  // 绘制网格背景线
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
-  ctx.lineWidth = 1;
-  for (let i = 1; i <= 3; i++) {
-    const y = (height / 4) * i;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-  }
+  // 2. 几何布局：中轴线设定在 72% 高度处（上方 72% 下载，下方 28% 上传）
+  const baselineY = Math.round(height * 0.72);
+  const topGuideY = 10;
+  const stepX = width / (TOTAL_POINTS - 1);
 
-  const downloadColor = getCssVar("--accent-cyan-glow", "rgba(0, 242, 254, 0.8)");
-  const downloadFill = "rgba(0, 242, 254, 0.15)";
-  const uploadColor = getCssVar("--accent-purple", "#a855f7");
-  const uploadFill = "rgba(168, 85, 247, 0.12)";
-
-  // 绘制下载曲线 (Cyan)
-  drawCurve(
-    ctx,
-    points.map((p) => p.download),
-    maxSpeed,
-    width,
-    height,
-    stepX,
-    downloadColor,
-    downloadFill
-  );
-
-  // 绘制上传曲线 (Purple)
-  drawCurve(
-    ctx,
-    points.map((p) => p.upload),
-    maxSpeed,
-    width,
-    height,
-    stepX,
-    uploadColor,
-    uploadFill
-  );
-};
-
-const drawCurve = (
-  ctx: CanvasRenderingContext2D,
-  data: number[],
-  maxVal: number,
-  width: number,
-  height: number,
-  stepX: number,
-  lineColor: string,
-  fillColor: string
-) => {
-  if (data.length < 2) return;
-
+  // 3. 绘制顶部最大刻度参考线 (Top Reference Line)
   ctx.beginPath();
-  const getX = (i: number) => i * stepX;
-  const getY = (v: number) => height - (v / maxVal) * (height - 20) - 10;
-
-  ctx.moveTo(getX(0), getY(data[0]));
-
-  for (let i = 1; i < data.length; i++) {
-    const prevX = getX(i - 1);
-    const prevY = getY(data[i - 1]);
-    const currX = getX(i);
-    const currY = getY(data[i]);
-    const cpX = (prevX + currX) / 2;
-
-    ctx.bezierCurveTo(cpX, prevY, cpX, currY, currX, currY);
-  }
-
-  // 描边
-  ctx.strokeStyle = lineColor;
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+  ctx.lineWidth = 1;
+  ctx.moveTo(0, topGuideY);
+  ctx.lineTo(width, topGuideY);
   ctx.stroke();
 
-  // 渐变填充
-  ctx.lineTo(width, height);
-  ctx.lineTo(0, height);
+  // 4. 绘制下载流量折线与填充区 (上方波峰，亮青色)
+  ctx.beginPath();
+  ctx.moveTo(0, baselineY);
+
+  for (let i = 0; i < points.length; i++) {
+    const x = i * stepX;
+    const ratio = Math.min(1, points[i].download / Math.max(currentMaxDown, 1024));
+    const y = baselineY - ratio * (baselineY - topGuideY - 4);
+    ctx.lineTo(x, y);
+  }
+
+  // 闭合到中轴线
+  ctx.lineTo(width, baselineY);
+  ctx.lineTo(0, baselineY);
   ctx.closePath();
 
-  const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, fillColor);
-  gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
-  ctx.fillStyle = gradient;
+  // 下载填充渐变色（深邃科技感蓝绿）
+  const downFillGrad = ctx.createLinearGradient(0, topGuideY, 0, baselineY);
+  downFillGrad.addColorStop(0, "rgba(6, 182, 212, 0.65)");
+  downFillGrad.addColorStop(0.5, "rgba(8, 145, 178, 0.6)");
+  downFillGrad.addColorStop(1, "rgba(22, 78, 99, 0.75)");
+  ctx.fillStyle = downFillGrad;
   ctx.fill();
+
+  // 下载折线描边 (亮天青色 #22d3ee)
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const x = i * stepX;
+    const ratio = Math.min(1, points[i].download / Math.max(currentMaxDown, 1024));
+    const y = baselineY - ratio * (baselineY - topGuideY - 4);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = "#22d3ee";
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.stroke();
+
+  // 5. 绘制上传流量折线与填充区 (下方倒波峰，亮珊瑚红)
+  ctx.beginPath();
+  ctx.moveTo(0, baselineY);
+
+  for (let i = 0; i < points.length; i++) {
+    const x = i * stepX;
+    const ratio = Math.min(1, points[i].upload / Math.max(currentMaxUp, 1024));
+    const y = baselineY + ratio * (height - baselineY - 6);
+    ctx.lineTo(x, y);
+  }
+
+  // 闭合到中轴线
+  ctx.lineTo(width, baselineY);
+  ctx.lineTo(0, baselineY);
+  ctx.closePath();
+
+  // 上传填充渐变色（深邃酒红）
+  const upFillGrad = ctx.createLinearGradient(0, baselineY, 0, height);
+  upFillGrad.addColorStop(0, "rgba(159, 18, 57, 0.7)");
+  upFillGrad.addColorStop(0.6, "rgba(190, 18, 60, 0.55)");
+  upFillGrad.addColorStop(1, "rgba(136, 19, 55, 0.65)");
+  ctx.fillStyle = upFillGrad;
+  ctx.fill();
+
+  // 上传折线描边 (亮珊瑚红 #f43f5e)
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const x = i * stepX;
+    const ratio = Math.min(1, points[i].upload / Math.max(currentMaxUp, 1024));
+    const y = baselineY + ratio * (height - baselineY - 6);
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = "#f43f5e";
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.stroke();
+
+  // 6. 绘制中轴线 (Baseline Divider)
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+  ctx.lineWidth = 1;
+  ctx.moveTo(0, baselineY);
+  ctx.lineTo(width, baselineY);
+  ctx.stroke();
 };
 
 watch(
-  () => connectionStore.speedHistory,
+  () => [connectionStore.rawDownloadSpeed, connectionStore.rawUploadSpeed, connectionStore.speedHistory.length],
   () => {
     renderChart();
-  },
-  { deep: true }
+  }
 );
 
 onMounted(() => {
@@ -187,15 +223,17 @@ onUnmounted(() => {
 
 <style scoped>
 .speed-chart-card {
-  background: var(--layer-1);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-xl, 16px);
-  padding: 16px 20px;
+  background: #14161f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-xl, 18px);
+  padding: 14px 18px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   backdrop-filter: var(--blur-panel);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
 }
 
 .speed-chart-card.compact {
@@ -221,17 +259,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-secondary);
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--weight-semibold, 600);
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.3px;
 }
 
 .pulse-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--accent-cyan);
-  box-shadow: var(--shadow-glow-cyan);
+  background: #22d3ee;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.8);
   animation: pulse 2s infinite;
 }
 
@@ -250,32 +289,59 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs, 12px);
+  font-family: var(--font-mono, monospace);
 }
 
-.indicator.download .arrow,
+.dot-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.dot-badge.cyan {
+  background: #22d3ee;
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.7);
+}
+
+.dot-badge.red {
+  background: #f43f5e;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.7);
+}
+
 .indicator.download .val {
-  color: var(--accent-cyan);
-  font-weight: var(--weight-bold);
+  color: #22d3ee;
+  font-weight: var(--weight-bold, 700);
 }
 
-.indicator.upload .arrow,
 .indicator.upload .val {
-  color: var(--accent-purple, #a855f7);
-  font-weight: var(--weight-bold);
+  color: #f43f5e;
+  font-weight: var(--weight-bold, 700);
 }
 
 .indicator .label {
-  color: var(--text-tertiary);
-  font-size: var(--text-xs);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
 }
 
 .canvas-wrapper {
   width: 100%;
+  flex: 1;
+  min-height: 80px;
   position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #10121a;
+}
+
+.canvas-wrapper.compact-height {
+  flex: initial;
+  height: 90px;
 }
 
 canvas {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 </style>
