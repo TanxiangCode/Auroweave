@@ -149,6 +149,24 @@ export interface Subscription {
   };
 }
 
+export interface ParsedOutboundNode {
+  tag: string;
+  type: string;
+  server?: string;
+  server_port?: number;
+  raw_json: Record<string, any>;
+}
+
+export interface SubscriptionInspectData {
+  id: string;
+  name: string;
+  format: string;
+  node_count: number;
+  raw_content: string;
+  parsed_nodes: ParsedOutboundNode[];
+  final_config_json: string;
+}
+
 
 // ============================================================
 // 节点排序与自定义分组

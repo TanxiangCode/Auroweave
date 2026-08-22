@@ -16,7 +16,7 @@ import {
   activateSubscription,
 } from "@/api/ipc/subscription";
 import { useToast } from "@/composables/useToast";
-
+import { useProxyStore } from "@/stores/proxy.store";
 
 export const useSubscriptionStore = defineStore("subscription", () => {
   const toast = useToast();
@@ -51,6 +51,11 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     if (res.success && res.data) {
       // 导入成功后重新从后端拉取全量列表，确保数据一致
       await fetchAll();
+      try {
+        await useProxyStore().fetchGroups();
+      } catch (e) {
+        console.warn("联动刷新代理节点列表失败:", e);
+      }
     } else {
       importError.value = res.error ?? "导入失败";
     }
@@ -70,6 +75,11 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     const res = await importContentSubscription(name, content, sourceType, filePath, autoGroup);
     if (res.success && res.data) {
       await fetchAll();
+      try {
+        await useProxyStore().fetchGroups();
+      } catch (e) {
+        console.warn("联动刷新代理节点列表失败:", e);
+      }
     } else {
       importError.value = res.error ?? "解析导入失败";
     }
@@ -87,7 +97,6 @@ export const useSubscriptionStore = defineStore("subscription", () => {
       filterRule?: import("@/types").SubscriptionFilterRule;
     }
   ) {
-
     const res = await updateSubscriptionMeta(id, meta);
     if (res.success && res.data) {
       const idx = subscriptions.value.findIndex((s) => s.id === id);
@@ -118,6 +127,11 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     if (res.success && res.data) {
       const idx = subscriptions.value.findIndex((s) => s.id === id);
       if (idx !== -1) subscriptions.value[idx] = res.data;
+      try {
+        await useProxyStore().fetchGroups();
+      } catch (e) {
+        console.warn("联动刷新代理节点列表失败:", e);
+      }
     }
     return res;
   }
@@ -130,6 +144,11 @@ export const useSubscriptionStore = defineStore("subscription", () => {
         ...s,
         is_active: s.id === id,
       }));
+      try {
+        await useProxyStore().fetchGroups();
+      } catch (e) {
+        console.warn("联动刷新代理节点列表失败:", e);
+      }
     }
     return res;
   }

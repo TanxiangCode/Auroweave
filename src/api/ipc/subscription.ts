@@ -93,4 +93,12 @@ export async function updateSubscriptionMeta(
   );
 }
 
-
+/** 查看订阅完整配置（清洗前原始文本、清洗后节点列表、最终运行时配置） */
+export async function inspectSubscription(
+  id: string
+): Promise<ApiResponse<import("@/types").SubscriptionInspectData>> {
+  return invokeWithTimeout<ApiResponse<import("@/types").SubscriptionInspectData>>(
+    "subscription_inspect",
+    { id }
+  );
+}

@@ -57,6 +57,19 @@ import {
   Settings2,
   HelpCircle,
   Circle,
+  Code,
+  FileCode,
+  ChevronUp,
+  ChevronDown,
+  Minimize2,
+  Maximize2,
+  Eye,
+  EyeOff,
+  Terminal,
+  SlidersHorizontal,
+  Key,
+  Lock,
+  BookOpen,
 } from "lucide-vue-next";
 
 
@@ -130,6 +143,19 @@ const iconMap: Record<string, any> = {
   ClipboardList,
   Settings,
   Settings2,
+  Code,
+  FileCode,
+  ChevronUp,
+  ChevronDown,
+  Minimize2,
+  Maximize2,
+  Eye,
+  EyeOff,
+  Terminal,
+  SlidersHorizontal,
+  Key,
+  Lock,
+  BookOpen,
 };
 
 

@@ -17,6 +17,7 @@ import { useToast } from "@/composables/useToast";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import SubscriptionImportModal from "./components/SubscriptionImportModal.vue";
 import SubscriptionEditModal from "./components/SubscriptionEditModal.vue";
+import SubscriptionInspectModal from "./components/SubscriptionInspectModal.vue";
 import type { Subscription } from "@/types";
 
 const subStore = useSubscriptionStore();
@@ -28,7 +29,14 @@ const operatingId = ref<string | null>(null);
 const batchUpdating = ref(false);
 const showImportModal = ref(false);
 const showEditModal = ref(false);
+const showInspectModal = ref(false);
 const currentEditingSub = ref<Subscription | null>(null);
+const currentInspectSub = ref<Subscription | null>(null);
+
+function handleOpenInspect(sub: Subscription) {
+  currentInspectSub.value = sub;
+  showInspectModal.value = true;
+}
 
 onMounted(async () => {
   await subStore.fetchAll();
@@ -344,6 +352,15 @@ async function handleDelete(sub: Subscription) {
                 <BaseIcon name="RefreshCw" :size="13" :class="{ spin: operatingId === sub.id }" />
               </button>
 
+              <!-- 查看完整配置按钮 -->
+              <button
+                class="btn-card-action inspect"
+                @click="handleOpenInspect(sub)"
+                title="查看清洗前/后完整配置与节点详情"
+              >
+                <BaseIcon name="Code" :size="13" />
+              </button>
+
               <!-- 编辑按钮 -->
               <button
                 class="btn-card-action edit"
@@ -379,6 +396,12 @@ async function handleDelete(sub: Subscription) {
       v-model:visible="showEditModal"
       :subscription="currentEditingSub"
       @success="subStore.fetchAll"
+    />
+
+    <!-- 订阅配置深度查看器模态框 (全平台多端适配) -->
+    <SubscriptionInspectModal
+      v-model:visible="showInspectModal"
+      :subscription="currentInspectSub"
     />
   </div>
 </template>
