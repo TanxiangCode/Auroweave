@@ -52,7 +52,22 @@ fn run_service() -> Result<(), Box<dyn std::error::Error>> {
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
-            _ => ServiceControlHandlerResult::NoError,
+            ServiceControl::Shutdown => {
+                // Shutdown 事件（系统关机）当前与 Stop 走相同的退出路径，
+                // 至少记录日志留痕，便于排查"服务为何退出"
+                info!("收到系统 Shutdown 事件（系统正在关机），执行与 Stop 相同的退出路径...");
+                if let Ok(mut guard) = tx_clone.lock() {
+                    if let Some(tx) = guard.take() {
+                        let _ = tx.send(());
+                    }
+                }
+                ServiceControlHandlerResult::NoError
+            }
+            other => {
+                // 其余控制事件（含低级别硬件事件）不处理，记录日志后忽略
+                info!("收到未处理的系统服务控制事件: {:?}", other);
+                ServiceControlHandlerResult::NoError
+            }
         }
     })?;
 

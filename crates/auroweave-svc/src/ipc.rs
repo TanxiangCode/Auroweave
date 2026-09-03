@@ -7,21 +7,33 @@
 ///
 /// IPC 服务流程：
 /// 1. **管道创建**：使用 SDDL 安全描述符创建管道，允许 SYSTEM/Administrators 完全控制，
-///    Authenticated Users 读写访问
+///    Authenticated Users 读写访问；单管道实例上限 4 个，防止恶意客户端耗尽句柄
 /// 2. **连接等待**：循环创建管道实例并等待客户端连接
 /// 3. **请求处理**：每个客户端连接 spawn 独立任务处理，支持并发请求
-/// 4. **Token 校验**：验证请求中的 Token 与安装时生成的加密 Token 是否匹配
+/// 4. **Token 校验**：以常数时间比较验证请求中的 Token 与安装时生成的明文 Token 是否匹配
 /// 5. **指令分发**：根据 action 字段分发到 CoreManager 的对应方法
+///
+/// **分帧协议（长度前缀）**：
+/// 请求不再是一次性单次 read（旧实现对超过 64KB 的大配置会截断），改为：
+/// - 客户端先发送 8 字节 little-endian u64 长度头（JSON 体长度），随后紧跟 JSON 体
+/// - 服务端先循环 read 读满 8 字节长度头，再按长度分配 Vec 循环 read 读满
+/// - 长度上限 16MB（MAX_FRAME_LEN），超出视为滥用直接断开
+/// - 主程序 ipc_client.rs 已同步实现该分帧协议（协调标记）
 ///
 /// 支持的指令：
 /// - `GET_STATUS`：查询内核运行状态和 PID
-/// - `RELOAD_CONFIG`：重载配置并重启内核（config 可为文件路径或配置文本）
+/// - `RELOAD_CONFIG`：重载配置并重启内核（config 仅接受内嵌配置文本）
 /// - `SHUTDOWN_CORE`：停止内核进程
 ///
 /// 安全设计：
 /// - 管道使用 SDDL 限制访问权限，仅允许已认证用户连接
 /// - 每个请求必须携带正确的 Token，防止未授权进程发送指令
-/// - Token 使用 AES-256-GCM 加密存储，密钥硬编码在二进制中
+/// - Token 为明文随机 UUID v4，存储于仅 SYSTEM/Admin 可访问的文件中
+///   （依赖文件 ACL 保护，不再使用硬编码共享密钥加密——加密无意义）
+/// - Token 比较使用常数时间比较，避免时序侧信道泄漏匹配前缀长度
+/// - Token 校验失败与参数错误统一返回"身份验证失败"，不区分细节，避免信息泄漏
+/// - RELOAD_CONFIG 的 config 参数一律作为配置文本处理，绝不作为文件路径读取
+///   （历史版本曾支持路径自适应读取，构成 SYSTEM 权限任意文件读取原语，已删除）
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::NamedPipeServer;
@@ -30,13 +42,20 @@ use crate::core_manager::{CoreManager, CoreStatus};
 
 const PIPE_NAME: &str = r"\\.\pipe\Auroweave.Core.Control";
 
+/// 单个请求帧（JSON 体）的最大允许长度，超出视为滥用直接断开
+const MAX_FRAME_LEN: u64 = 16 * 1024 * 1024;
+
+/// 管道实例上限：限制单机可同时创建的管道实例数量，防止恶意客户端
+/// 反复连接耗尽服务端句柄/内存（原实现为 PIPE_UNLIMITED_INSTANCES）
+const MAX_PIPE_INSTANCES: u32 = 4;
+
 #[derive(Debug, serde::Deserialize)]
 pub struct IpcRequest {
     /// 操作指令: "GET_STATUS" | "RELOAD_CONFIG" | "SHUTDOWN_CORE"
     pub action: String,
-    /// 安全令牌（AES-256-GCM 解密后的明文，用于身份验证）
+    /// 安全令牌（明文，用于身份验证，常数时间比较）
     pub token: String,
-    /// 可选的配置内容或配置文件路径（仅 RELOAD_CONFIG 使用）
+    /// 可选的配置内容（仅 RELOAD_CONFIG 使用；一律作为配置文本处理，绝不作为文件路径）
     pub config: Option<String>,
 }
 
@@ -55,14 +74,27 @@ pub struct IpcServer {
 
 impl IpcServer {
     pub fn new(core_manager: Arc<CoreManager>) -> Self {
-        let token = Self::load_token().unwrap_or_default();
+        let token = match Self::load_token() {
+            Ok(t) if !t.is_empty() => t,
+            Ok(_) => {
+                // Token 文件存在但为空——视为无效，拒绝所有请求并留痕
+                error!("IPC Token 文件内容为空，服务将以拒绝所有请求模式运行");
+                String::new()
+            }
+            Err(e) => {
+                // Token 加载失败不静默：记录错误日志后继续启动（空 Token 会使
+                // 后续所有请求校验必然失败），保证攻击行为至少在日志中留痕
+                error!("IPC Token 加载失败: {}，服务将以拒绝所有请求模式运行", e);
+                String::new()
+            }
+        };
         Self { core_manager, token }
     }
 
     /// 启动 IPC 服务端并阻塞运行，直到收到关闭信号
     ///
     /// 运行流程：
-    /// 1. 循环创建安全具名管道实例
+    /// 1. 循环创建安全具名管道实例（上限 MAX_PIPE_INSTANCES）
     /// 2. 使用 `tokio::select!` 同时等待客户端连接和关闭信号
     /// 3. 客户端连接后 spawn 独立任务处理请求
     /// 4. 收到关闭信号时退出循环
@@ -107,46 +139,42 @@ impl IpcServer {
     /// 处理单个客户端连接
     ///
     /// 处理流程：
-    /// 1. 读取请求数据并反序列化为 `IpcRequest`
-    /// 2. 校验 Token（空或不匹配则拒绝）
+    /// 1. 按长度前缀分帧协议读取请求数据（8 字节 LE u64 长度头 + JSON 体）
+    /// 2. 校验 Token（空或不匹配则拒绝，常数时间比较）
     /// 3. 根据 action 分发指令到 CoreManager
     /// 4. 序列化响应并写回管道
     async fn handle_client(&self, mut server: NamedPipeServer) -> Result<(), String> {
-        // ---- 步骤1: 读取并解析请求数据 ----
-        let mut buffer = vec![0u8; 65536];
-        let n = server.read(&mut buffer).await.map_err(|e| e.to_string())?;
-        if n == 0 {
-            return Ok(());
-        }
-
-        let request: IpcRequest = match serde_json::from_slice(&buffer[..n]) {
+        // ---- 步骤1: 按分帧协议读取请求 ----
+        let request: IpcRequest = match self.read_framed_request(&mut server).await {
             Ok(req) => req,
             Err(e) => {
                 let resp = IpcResponse {
                     success: false,
                     status: "error".to_string(),
-                    error: Some(format!("JSON 解析失败: {}", e)),
+                    error: Some("身份验证失败".to_string()),
                     pid: None,
                 };
-                let _ = server.write_all(&serde_json::to_vec(&resp).unwrap()).await;
-                error!("解析请求 JSON 失败: {}", e);
-                return Err(format!("解析请求 JSON 失败: {}", e));
+                let _ = server.write_all(&serde_json::to_vec(&resp).unwrap_or_default()).await;
+                // 协议层错误（超长帧/连接中断）仅记服务端日志，不给客户端区分细节
+                error!("读取/解析 IPC 请求失败: {}", e);
+                return Err(e);
             }
         };
 
         info!("收到客户端 IPC 请求: action={}", request.action);
 
         // ---- 步骤2: 校验安全 Token ----
-        // Token 为空或不匹配则拒绝请求，防止未授权进程控制内核
-        if request.token.is_empty() || request.token != self.token {
+        // Token 为空或不匹配则拒绝请求，防止未授权进程控制内核；
+        // 常数时间比较避免时序侧信道泄漏匹配前缀长度
+        if self.token.is_empty() || !constant_time_eq(request.token.as_bytes(), self.token.as_bytes()) {
             let resp = IpcResponse {
                 success: false,
                 status: "error".to_string(),
-                error: Some("身份验证失败，Token 不匹配".to_string()),
+                error: Some("身份验证失败".to_string()),
                 pid: None,
             };
-            let _ = server.write_all(&serde_json::to_vec(&resp).unwrap()).await;
-            error!("客户端安全 Token 校验失败，Token 不匹配！");
+            let _ = server.write_all(&serde_json::to_vec(&resp).unwrap_or_default()).await;
+            error!("客户端安全 Token 校验失败！");
             return Err("客户端 Token 校验未通过".to_string());
         }
 
@@ -167,51 +195,33 @@ impl IpcServer {
             }
             "RELOAD_CONFIG" => {
                 // 重载配置并重启内核
-                // 自适应判断：config 参数可能是文件路径或配置文本内容
-                // 若为文件路径则服务端直接读取，避开 IPC 管道 64KB 缓冲区的大文件截断问题
-                if let Some(config_param) = request.config {
-                    // 自适应判断：如果参数是一个物理文件路径则读取其内容，避开 IPC 管道大文件分包截断
-                    let config_content = if std::path::Path::new(&config_param).exists() {
-                        info!("检测到物理配置文件路径: {:?}", config_param);
-                        match std::fs::read_to_string(&config_param) {
-                            Ok(content) => {
-                                info!("成功读取配置文件内容，长度: {}", content.len());
-                                content
+                // config 参数一律作为内嵌配置文本处理（分帧协议已支持大配置传输）。
+                // 安全说明：历史版本曾支持"若为存在路径则由 SYSTEM 服务直接读取该文件"，
+                // 构成任意文件读取原语，该分支已删除。
+                match request.config {
+                    Some(config_content) if !config_content.is_empty() => {
+                        info!("以文本形式接收配置参数，长度: {}", config_content.len());
+                        match self.core_manager.start(&config_content).await {
+                            Ok(_) => {
+                                let (status, pid) = self.core_manager.get_status().await;
+                                response.status = status_to_str(status);
+                                response.pid = pid;
+                                info!("重载内核配置并成功拉起，当前状态: {}, PID: {:?}", response.status, response.pid);
                             }
                             Err(e) => {
-                                error!("系统服务读取配置文件失败: {}", e);
+                                error!("启动 sing-box 失败: {}", e);
                                 response.success = false;
                                 response.status = "error".to_string();
-                                response.error = Some(format!("系统服务读取配置文件失败: {}", e));
-                                let resp_bytes = serde_json::to_vec(&response).unwrap();
-                                let _ = server.write_all(&resp_bytes).await;
-                                return Err(format!("系统服务读取配置文件失败: {}", e));
+                                response.error = Some(e);
                             }
                         }
-                    } else {
-                        info!("直接以文本形式接收配置参数，长度: {}", config_param.len());
-                        config_param
-                    };
-
-                    match self.core_manager.start(&config_content).await {
-                        Ok(_) => {
-                            let (status, pid) = self.core_manager.get_status().await;
-                            response.status = status_to_str(status);
-                            response.pid = pid;
-                            info!("重载内核配置并成功拉起，当前状态: {}, PID: {:?}", response.status, response.pid);
-                        }
-                        Err(e) => {
-                            error!("启动 sing-box 失败: {}", e);
-                            response.success = false;
-                            response.status = "error".to_string();
-                            response.error = Some(e);
-                        }
                     }
-                } else {
-                    error!("重载配置失败，参数为空");
-                    response.success = false;
-                    response.status = "error".to_string();
-                    response.error = Some("配置内容或路径不能为空".to_string());
+                    _ => {
+                        error!("重载配置失败，参数为空");
+                        response.success = false;
+                        response.status = "error".to_string();
+                        response.error = Some("配置内容不能为空".to_string());
+                    }
                 }
             }
             "SHUTDOWN_CORE" => {
@@ -230,7 +240,7 @@ impl IpcServer {
                 error!("未知指令 action: {}", request.action);
                 response.success = false;
                 response.status = "error".to_string();
-                response.error = Some(format!("未知的操作指令: {}", request.action));
+                response.error = Some("未知的操作指令".to_string());
             }
         }
 
@@ -241,43 +251,81 @@ impl IpcServer {
         Ok(())
     }
 
-    /// 加载并解密 IPC 安全令牌
+    /// 按长度前缀分帧协议读取并解析一条 IPC 请求
     ///
-    /// 解密流程：
-    /// 1. 读取 `%ProgramData%\Auroweave\data\ipc_token.bin` 加密文件
-    /// 2. 前 12 字节为 AES-GCM Nonce，剩余部分为密文
-    /// 3. 使用硬编码的 AES-256 密钥解密，得到明文 Token
+    /// 协议：8 字节 little-endian u64 长度头 + JSON 体。
+    /// - 长度头需循环 read 读满 8 字节（管道是字节流，单次 read 不保证读满）
+    /// - JSON 体按长度分配 Vec 后循环 read 读满
+    /// - 长度超过 MAX_FRAME_LEN（16MB）视为滥用，拒绝处理
+    async fn read_framed_request(&self, server: &mut NamedPipeServer) -> Result<IpcRequest, String> {
+        // 读满 8 字节长度头
+        let mut len_buf = [0u8; 8];
+        read_exact_or_eof(server, &mut len_buf).await?;
+        let frame_len = u64::from_le_bytes(len_buf);
+
+        if frame_len > MAX_FRAME_LEN {
+            return Err(format!("请求帧长度超限 ({} > {})", frame_len, MAX_FRAME_LEN));
+        }
+        if frame_len == 0 {
+            return Err("请求帧长度为 0".to_string());
+        }
+
+        // 按长度读满 JSON 体
+        let mut body = vec![0u8; frame_len as usize];
+        read_exact_or_eof(server, &mut body).await?;
+
+        serde_json::from_slice(&body).map_err(|e| format!("JSON 解析失败: {}", e))
+    }
+
+    /// 加载 IPC 安全令牌（明文）
+    ///
+    /// 流程：
+    /// 1. 读取 `%ProgramData%\Auroweave\data\ipc_token.bin`
+    /// 2. 内容为明文 token 字符串（依赖文件 ACL 保护，仅 SYSTEM/Admin 可访问；
+    ///    不再使用硬编码共享密钥的 AES-GCM 解密——该密钥同时编译进多个二进制，
+    ///    加密不提供任何真实安全性）
+    /// 3. 返回 trim 后的 token 字符串
     fn load_token() -> Result<String, String> {
         let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
         let token_path = std::path::PathBuf::from(program_data).join("Auroweave").join("data").join("ipc_token.bin");
         if !token_path.exists() {
             return Err("Token 文件不存在".to_string());
         }
-        let content = std::fs::read(token_path).map_err(|e| e.to_string())?;
-        
-        use aes_gcm::{
-            aead::{Aead, KeyInit},
-            Aes256Gcm, Nonce,
-        };
-        const TOKEN_KEY: &[u8; 32] = b"AuroweaveIPCSecretKey2026_Secure";
-        
-        if content.len() < 12 {
-            return Err("Token 文件已损坏".to_string());
-        }
-        
-        let key: &aes_gcm::Key<Aes256Gcm> = TOKEN_KEY.into();
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Nonce::try_from(&content[..12]).unwrap();
-        let ciphertext = &content[12..];
-        
-        let plaintext = cipher.decrypt(&nonce, ciphertext)
-            .map_err(|_| "Token 解密失败".to_string())?;
-            
-        let token_str = String::from_utf8(plaintext)
-            .map_err(|_| "Token UTF-8 解析失败".to_string())?;
-            
+        let content = std::fs::read(&token_path).map_err(|e| e.to_string())?;
+        let token_str = String::from_utf8(content).map_err(|_| "Token UTF-8 解析失败".to_string())?;
         Ok(token_str.trim().to_string())
     }
+}
+
+/// 循环 read 直到读满 buf 或对端关闭（读到 0 字节且一无所获即 EOF）
+///
+/// 字节流管道上单次 `read` 可能返回少于缓冲区长度的数据，
+/// 长度头和 JSON 体都必须循环读取直至凑满。
+async fn read_exact_or_eof(server: &mut NamedPipeServer, buf: &mut [u8]) -> Result<(), String> {
+    let mut filled = 0usize;
+    while filled < buf.len() {
+        let n = server.read(&mut buf[filled..]).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("管道在读取完成前被客户端关闭".to_string());
+        }
+        filled += n;
+    }
+    Ok(())
+}
+
+/// 常数时间字节比较（避免短路比较带来的时序侧信道）
+///
+/// 逐字节 XOR 后 OR 累积差异，长度差异直接判为不等；
+/// 整体耗时与数据长度相关、与匹配前缀长度无关，不泄漏信息。
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for i in 0..a.len() {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
 }
 
 /// 将 CoreStatus 枚举转换为字符串状态码
@@ -300,8 +348,9 @@ fn status_to_str(status: CoreStatus) -> String {
 /// - Authenticated Users (AU): 读写访问
 ///
 /// 管道模式: 双工 + 字节流 + OVERLAPPED 异步 I/O
+/// 实例上限: MAX_PIPE_INSTANCES（4），防止单机句柄/内存耗尽
 fn create_secure_named_pipe(pipe_name: &str) -> Result<NamedPipeServer, String> {
-    use windows_sys::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_READMODE_BYTE, PIPE_WAIT, PIPE_UNLIMITED_INSTANCES};
+    use windows_sys::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_READMODE_BYTE, PIPE_WAIT};
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED;
     use windows_sys::Win32::Security::{SECURITY_ATTRIBUTES, PSECURITY_DESCRIPTOR};
     use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
@@ -340,7 +389,8 @@ fn create_secure_named_pipe(pipe_name: &str) -> Result<NamedPipeServer, String> 
             pipe_name_w.as_ptr(),
             open_mode,
             pipe_mode,
-            PIPE_UNLIMITED_INSTANCES,
+            // 实例数上限 4：不再使用 PIPE_UNLIMITED_INSTANCES，防句柄耗尽
+            MAX_PIPE_INSTANCES,
             65536,
             65536,
             0,

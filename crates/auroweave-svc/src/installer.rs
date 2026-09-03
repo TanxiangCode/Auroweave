@@ -15,9 +15,10 @@
 ///    - 适用于本地运行模式，仅需 TUN 静默提权而不需要常驻服务
 ///
 /// 安装流程（两种模式共同）：
-/// 1. 复制二进制文件到 `%ProgramData%\Auroweave\bin`（AuroDaemon.exe + sing-box.exe）
-/// 2. 对 bin 目录进行安全加锁（SDDL: SYSTEM/Admin 完全控制，Users 只读执行）
-/// 3. 生成 IPC 安全 Token（AES-256-GCM 加密存储）
+/// 1. 创建并安全锁定 bin 目录（受保护 DACL，先于任何文件写入）
+/// 2. 复制二进制文件到 `%ProgramData%\Auroweave\bin`（AuroDaemon.exe + sing-box.exe）
+///    并对每个文件显式设置文件级 SDDL + 复验 SHA-256 与源文件一致
+/// 3. 生成 IPC 安全 Token（随机 UUID v4 明文存储，依赖文件 ACL 保护）
 /// 4. 创建计划任务 XML（最高权限 + 隐藏 + 免 UAC 触发）
 ///
 /// 卸载流程 (`uninstall`)：
@@ -47,30 +48,43 @@ extern "system" {
 const SERVICE_NAME: &str = "AuroweaveCoreService";
 const DISPLAY_NAME: &str = "Auroweave Core Service";
 
+/// 对单个文件应用 SDDL 安全描述符（文件级，无继承标志——文件没有子对象）
+///
+/// 文件 SDDL: SYSTEM (SY) 与 Administrators (BA) 完全控制 (FA)，
+/// Authenticated Users (AU) 读取和执行 (FRGX)，禁止普通用户写入篡改。
+fn secure_bin_file(file_path: &std::path::Path) -> Result<(), String> {
+    apply_sddl_to_path(
+        file_path,
+        "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRGX;;;AU)",
+    )
+}
+
 /// 复制二进制文件到 `%ProgramData%\Auroweave\bin`
 ///
+/// 前置条件：调用方必须已通过 `secure_bin_dir` 锁定 bin 目录。
+///
 /// 复制流程：
-/// 1. 创建 bin 目录
-/// 2. 复制自身 (AuroDaemon.exe) 到目标位置（覆盖旧文件）
-/// 3. 复制 sing-box.exe：
+/// 1. 复制自身 (AuroDaemon.exe) 到目标位置（覆盖旧文件）
+/// 2. 复制 sing-box.exe：
 ///    - 若传入 singbox_src_path 则从指定路径复制
 ///    - 否则在同级目录下搜索 sing-box*.exe 并选择最新版本
+/// 3. 每个文件复制完成后：
+///    - 显式设置文件级 SDDL（不依赖目录继承，确保 ACL 无论如何正确）
+///    - 复验目标文件 SHA-256 与源文件一致，防止复制中途被替换（TOCTOU）
 /// 4. 返回 AuroDaemon.exe 的目标路径
 fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
-    std::fs::create_dir_all(&bin_dir).map_err(|e| format!("创建服务二进制目录失败: {}", e))?;
+
+    // 安全顺序要求：bin 目录必须已由调用方在复制任何文件之前创建并锁定
+    if !bin_dir.is_dir() {
+        return Err("bin 目录不存在，安装顺序错误：必须先调用 secure_and_create_bin_dir".to_string());
+    }
 
     // 1. 复制自身 (AuroDaemon.exe) 到目标位置
     let current_exe = std::env::current_exe().map_err(|e| format!("获取自身路径失败: {}", e))?;
     let target_svc_path = bin_dir.join("AuroDaemon.exe");
-    
-    if target_svc_path.exists() {
-        let _ = std::fs::remove_file(&target_svc_path);
-    }
-    std::fs::copy(&current_exe, &target_svc_path)
-        .map_err(|e| format!("复制 AuroDaemon.exe 失败: {}", e))?;
-    info!("已复制 AuroDaemon.exe 至 {:?}", target_svc_path);
+    copy_and_verify(&current_exe, &target_svc_path, "AuroDaemon.exe")?;
 
     // 2. 复制 sing-box.exe
     // 优先使用传入的路径，未传入时在同级目录搜索最新版本
@@ -78,12 +92,7 @@ fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
         let src_path = PathBuf::from(src_path_str);
         if src_path.exists() {
             let target_sb_path = bin_dir.join("sing-box.exe");
-            if target_sb_path.exists() {
-                let _ = std::fs::remove_file(&target_sb_path);
-            }
-            std::fs::copy(&src_path, &target_sb_path)
-                .map_err(|e| format!("复制 sing-box.exe 失败: {}", e))?;
-            info!("已复制 sing-box.exe 至 {:?}", target_sb_path);
+            copy_and_verify(&src_path, &target_sb_path, "sing-box.exe")?;
         } else {
             return Err(format!("传入的 sing-box 路径不存在: {:?}", src_path));
         }
@@ -111,16 +120,13 @@ fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
                 }
             }
 
-            if let Some(p) = latest_path {
-                let target_sb_path = bin_dir.join("sing-box.exe");
-                if target_sb_path.exists() {
-                    let _ = std::fs::remove_file(&target_sb_path);
+            match latest_path {
+                Some(p) => {
+                    let target_sb_path = bin_dir.join("sing-box.exe");
+                    copy_and_verify(&p, &target_sb_path, "sing-box.exe")?;
+                    info!("在同级目录下找到并复制 {:?} 至 {:?}", p, target_sb_path);
                 }
-                std::fs::copy(&p, &target_sb_path)
-                    .map_err(|e| format!("复制 sing-box.exe 失败: {}", e))?;
-                info!("在同级目录下找到并复制 {:?} 至 {:?}", p, target_sb_path);
-            } else {
-                return Err("未指定 singbox 路径且无法在当前目录下找到任何 sing-box*.exe".to_string());
+                None => return Err("未指定 singbox 路径且无法在当前目录下找到任何 sing-box*.exe".to_string()),
             }
         }
     }
@@ -128,23 +134,70 @@ fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
     Ok(target_svc_path)
 }
 
-/// 锁定二进制目录的安全权限
+/// 复制单个文件并执行安全后处理（文件级 SDDL + SHA-256 复验）
+///
+/// 步骤：
+/// 1. 计算源文件哈希（作为完整性基准）
+/// 2. 删除旧目标文件后复制
+/// 3. 对目标文件设置文件级 SDDL
+/// 4. 复验目标文件哈希 == 源文件哈希，不一致视为复制被篡改/损坏，报错回滚
+fn copy_and_verify(src: &std::path::Path, dst: &std::path::Path, name: &str) -> Result<(), String> {
+    let src_hash = crate::utils::compute_sha256(src)
+        .ok_or_else(|| format!("计算源文件 {} 哈希失败: {:?}", name, src))?;
+
+    if dst.exists() {
+        let _ = std::fs::remove_file(dst);
+    }
+    std::fs::copy(src, dst).map_err(|e| format!("复制 {} 失败: {}", name, e))?;
+    info!("已复制 {} 至 {:?}", name, dst);
+
+    // 显式设置文件级 SDDL——不依赖目录继承，确保文件 ACL 无论如何正确
+    secure_bin_file(dst).map_err(|e| format!("锁定 {} 安全属性失败: {}", name, e))?;
+
+    // 复验目标文件哈希与源文件一致（防复制中途被替换）
+    let dst_hash = crate::utils::compute_sha256(dst)
+        .ok_or_else(|| format!("计算目标文件 {} 哈希失败: {:?}", name, dst))?;
+    if !constant_time_eq(src_hash.as_bytes(), dst_hash.as_bytes()) {
+        let _ = std::fs::remove_file(dst);
+        return Err(format!("{} 复制后哈希校验不一致，疑似中途被篡改，已删除目标文件", name));
+    }
+    info!("{} 完整性校验通过 (SHA-256: {})", name, src_hash);
+
+    Ok(())
+}
+
+/// 创建并锁定二进制目录（必须在任何文件复制之前调用）
 ///
 /// 使用 SDDL 安全描述符设置 bin 目录权限：
-/// - SYSTEM (SY): 完全控制 (FA)
-/// - Administrators (BA): 完全控制 (FA)
-/// - Authenticated Users (AU): 读取和执行 (FRGX)，禁止写入和篡改
+/// - `D:PAI`：Protected DACL + Auto-Inherit。Protected 表示删除从父目录
+///   （`%ProgramData%`，默认 Users 可写）继承来的宽松 ACE；AI 表示将可继承
+///   ACE 标记为自动继承传播给子对象
+/// - `(A;OICI;FA;;;SY)`：SYSTEM 完全控制，对象继承 (OI) + 容器继承 (CI)
+/// - `(A;OICI;FA;;;BA)`：Administrators 完全控制，OICI 继承到子文件
+/// - `(A;OICI;FRGX;;;AU)`：Authenticated Users 只读 + 执行，禁止写入和篡改
 ///
-/// 防止普通用户修改或替换提权组件二进制文件，避免提权漏洞。
+/// 由于目录 DACL 是 Protected 的且在复制前应用，后续创建的文件将强制
+/// 继承上述受限 ACE，防止普通用户替换提权组件二进制文件。
 fn secure_bin_dir(bin_dir: &std::path::Path) -> Result<(), String> {
-    // SYSTEM(SY) 和 Administrators(BA) 拥有完全控制，Authenticated Users(AU) 拥有读取和执行权限
-    let file_sddl = "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRGX;;;AU)";
-    let file_sddl_w: Vec<u16> = file_sddl.encode_utf16().chain(std::iter::once(0)).collect();
-    
+    std::fs::create_dir_all(bin_dir).map_err(|e| format!("创建服务二进制目录失败: {}", e))?;
+    apply_sddl_to_path(
+        bin_dir,
+        // D:PAI = protected + auto-inherit；ACE 带 OICI 继承到子文件
+        "D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FRGX;;;AU)",
+    )
+}
+
+/// 对指定路径（文件或目录）应用 SDDL 安全描述符
+///
+/// 内部封装 `ConvertStringSecurityDescriptorToSecurityDescriptorW` +
+/// `SetFileSecurityW`，失败时释放安全描述符内存并返回 OS 错误信息。
+fn apply_sddl_to_path(path: &std::path::Path, sddl: &str) -> Result<(), String> {
+    let sddl_w: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+
     unsafe {
         let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
         if ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            file_sddl_w.as_ptr(),
+            sddl_w.as_ptr(),
             1, // SDDL_REVISION_1
             &mut sd,
             std::ptr::null_mut(),
@@ -153,25 +206,40 @@ fn secure_bin_dir(bin_dir: &std::path::Path) -> Result<(), String> {
             return Err(format!("转换安全描述符失败: {}", err));
         }
 
-        let bin_dir_str = bin_dir.to_string_lossy().to_string();
-        let bin_dir_w: Vec<u16> = bin_dir_str.encode_utf16().chain(std::iter::once(0)).collect();
-        let res = SetFileSecurityW(bin_dir_w.as_ptr(), DACL_SECURITY_INFORMATION, sd);
+        let path_str = path.to_string_lossy().to_string();
+        let path_w: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
+        let res = SetFileSecurityW(path_w.as_ptr(), DACL_SECURITY_INFORMATION, sd);
         LocalFree(sd);
 
         if res == 0 {
             let err = std::io::Error::last_os_error();
-            return Err(format!("应用二进制目录安全属性失败: {}", err));
+            return Err(format!("应用安全属性失败 (路径 {:?}): {}", path, err));
         }
     }
     Ok(())
+}
+
+/// 常数时间字节比较（避免短路比较带来的时序侧信道）
+///
+/// 逐字节 OR 累积差异，长度差异也计入，最后统一判断，保证耗时
+/// 不因匹配前缀长度而泄漏信息。
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for i in 0..a.len() {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
 }
 
 /// 注册 Windows 系统服务 + 计划任务（服务运行模式）
 ///
 /// 完整安装流程：
 /// 1. 停止并删除已存在的同名服务（确保覆盖安装干净性）
-/// 2. 复制二进制文件到 `%ProgramData%\Auroweave\bin`
-/// 3. 对 bin 目录进行安全加锁
+/// 2. 创建并锁定 bin 目录（受保护 DACL，先于任何文件写入）
+/// 3. 复制二进制文件到 `%ProgramData%\Auroweave\bin`（含文件级 SDDL + 哈希复验）
 /// 4. 通过 SCM 创建服务项（手动启动 + OWN_PROCESS）
 /// 5. 设置服务安全描述符（允许 Users 免 UAC 启停）
 /// 6. 生成 IPC 安全 Token
@@ -197,13 +265,14 @@ pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
         }
     }
 
-    // 步骤2-3: 复制二进制文件 + 对 bin 目录进行安全加锁
+    // 步骤2-3: 先创建并锁定 bin 目录（受保护 DACL），再复制文件
+    // 安全顺序：目录在无保护状态下复制文件，会给攻击者留下替换文件的窗口，
+    // 因此必须先应用 D:PAI 受保护 DACL，后续复制的文件强制继承受限 ACE。
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
+    secure_bin_dir(&bin_dir)?;
+
     let svc_path = copy_binaries(singbox_src_path)?;
-    
-    // 对 bin 目录进行加锁
-    if let Some(parent) = svc_path.parent() {
-        secure_bin_dir(parent)?;
-    }
 
     // 步骤4-5: 通过 SCM 创建服务项并设置安全描述符
     let binary_path_str = format!("\"{}\" run", svc_path.to_string_lossy());
@@ -288,20 +357,20 @@ pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
 /// 仅注册计划任务（本地运行模式）
 ///
 /// 安装流程：
-/// 1. 复制二进制文件到 `%ProgramData%\Auroweave\bin`
-/// 2. 对 bin 目录进行安全加锁
+/// 1. 创建并锁定 bin 目录（受保护 DACL，先于任何文件写入）
+/// 2. 复制二进制文件到 `%ProgramData%\Auroweave\bin`（含文件级 SDDL + 哈希复验）
 /// 3. 生成 IPC 安全 Token
 /// 4. 创建计划任务 `AuroweaveDirectTunTask`
 pub fn install_task(singbox_src_path: Option<&str>) -> Result<(), String> {
     info!("开始以计划任务模式安装提权组件...");
 
-    // 步骤1-2: 复制二进制文件 + 对 bin 目录进行安全加锁
+    // 步骤1: 先创建并锁定 bin 目录，再复制文件（安全顺序与 install_service 一致）
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
+    secure_bin_dir(&bin_dir)?;
+
+    // 步骤2: 复制二进制文件（文件级 SDDL + SHA-256 复验由 copy_binaries 内部完成）
     let svc_path = copy_binaries(singbox_src_path)?;
-    
-    // 对 bin 目录进行加锁
-    if let Some(parent) = svc_path.parent() {
-        secure_bin_dir(parent)?;
-    }
 
     // 步骤3: 生成 IPC 安全 Token
     info!("配置 Token...");
@@ -362,75 +431,39 @@ pub fn uninstall() -> Result<(), String> {
     Ok(())
 }
 
-/// 生成并加密存储 IPC 安全 Token
+/// 生成并存储 IPC 安全 Token
 ///
 /// 流程：
 /// 1. 创建数据目录 `%ProgramData%\Auroweave\data`
 /// 2. 若 Token 文件不存在则生成新 Token：
-///    - 生成 UUID v4 作为 Token 明文
-///    - 生成随机 Nonce（UUID 前 12 字节）
-///    - 使用 AES-256-GCM 加密，拼接 Nonce + 密文写入文件
-/// 3. 对 Token 文件设置安全描述符（SYSTEM/Admin 完全控制，Users 只读）
+///    - 使用 `uuid::Uuid::new_v4()` 生成 128 bit 熵的随机 Token
+///    - **明文写入** token 文件（不再用共享密钥加密——密钥硬编码在三个二进制中，
+///      加密无意义且提供虚假安全感；本机 IPC 场景依赖文件 ACL 作为唯一保护边界）
+/// 3. 对 Token 文件设置安全描述符：仅 SYSTEM/Admin 可读写，
+///    普通用户完全不可见（SDDL 不含 AU 条目），防止低权限进程窃取 Token
+///
+/// 注意：token 文件路径与格式需与主程序 `src-tauri/src/core/ipc_client.rs` 保持兼容
+/// （路径 `%ProgramData%\Auroweave\data\ipc_token.bin`，内容为明文 token 字符串）。
 fn setup_token() -> Result<(), String> {
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     let data_dir = PathBuf::from(program_data).join("Auroweave").join("data");
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("创建数据目录失败: {}", e))?;
 
     let token_path = data_dir.join("ipc_token.bin");
-    
+
     if !token_path.exists() {
-        use aes_gcm::{
-            aead::{Aead, KeyInit},
-            Aes256Gcm, Nonce,
-        };
-        const TOKEN_KEY: &[u8; 32] = b"AuroweaveIPCSecretKey2026_Secure";
-        
+        // 随机 UUID v4（128 bit 熵，对本机 IPC 场景足够）
         let token = uuid::Uuid::new_v4().to_string();
-        
-        let key: &aes_gcm::Key<Aes256Gcm> = TOKEN_KEY.into();
-        let cipher = Aes256Gcm::new(key);
-        
-        let nonce_uuid = uuid::Uuid::new_v4();
-        let nonce_bytes: [u8; 12] = nonce_uuid.as_bytes()[0..12].try_into().unwrap();
-        let nonce = Nonce::try_from(&nonce_bytes[..]).unwrap();
-        
-        let ciphertext = cipher.encrypt(&nonce, token.as_bytes())
-            .map_err(|e| format!("加密 Token 失败: {:?}", e))?;
-            
-        let mut encrypted_data = nonce.to_vec();
-        encrypted_data.extend_from_slice(&ciphertext);
-        
-        std::fs::write(&token_path, &encrypted_data).map_err(|e| format!("写入 Token 失败: {}", e))?;
-        info!("生成新 Token 成功。");
+        // 明文 token，依赖文件 ACL 保护（见函数级注释）
+        std::fs::write(&token_path, token.as_bytes()).map_err(|e| format!("写入 Token 失败: {}", e))?;
+        info!("生成新 Token 成功（明文存储，依赖文件 ACL 保护）。");
     }
 
-    let file_sddl = "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;AU)";
-    let file_sddl_w: Vec<u16> = file_sddl.encode_utf16().chain(std::iter::once(0)).collect();
-    
-    unsafe {
-        let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            file_sddl_w.as_ptr(),
-            1,
-            &mut sd,
-            std::ptr::null_mut(),
-        ) == 0 {
-            let err = std::io::Error::last_os_error();
-            return Err(format!("转换文件安全描述符失败: {}", err));
-        }
+    // 仅 SYSTEM(SY) 和 Administrators(BA) 完全控制，不含 AU——
+    // 普通用户对该文件无任何访问权，无法读取或篡改 Token
+    apply_sddl_to_path(&token_path, "D:(A;;FA;;;SY)(A;;FA;;;BA)")?;
 
-        let token_path_str = token_path.to_string_lossy().to_string();
-        let token_path_w: Vec<u16> = token_path_str.encode_utf16().chain(std::iter::once(0)).collect();
-        let res = SetFileSecurityW(token_path_w.as_ptr(), DACL_SECURITY_INFORMATION, sd);
-        LocalFree(sd);
-
-        if res == 0 {
-            let err = std::io::Error::last_os_error();
-            return Err(format!("应用 Token 文件安全属性失败: {}", err));
-        }
-    }
-
-    info!("已成功对 Token 文件进行安全锁定。");
+    info!("已成功对 Token 文件进行安全锁定（仅 SYSTEM/Admin 可访问）。");
     Ok(())
 }
 
@@ -537,7 +570,7 @@ r#"<?xml version="1.0" encoding="UTF-16"?>
         
     let out_str = String::from_utf8_lossy(&import_output.stdout);
     let err_str = String::from_utf8_lossy(&import_output.stderr);
-    let _ = std::fs::write("C:\\Users\\Xiang\\Desktop\\schtasks_create.log", format!("STDOUT:\n{}\nSTDERR:\n{}", out_str, err_str));
+    info!("schtasks 导入任务输出: STDOUT: {} STDERR: {}", out_str, err_str);
 
     let _ = std::fs::remove_file(&temp_xml_path);
 
