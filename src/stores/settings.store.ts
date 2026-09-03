@@ -6,6 +6,7 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import type { AppSettings } from "@/types";
 import { getSettings, saveSettings } from "@/api/ipc/settings";
+import { useToast } from "@/composables/useToast";
 
 import { DEFAULT_SPEED_TEST_URLS } from "@/constants";
 
@@ -57,22 +58,42 @@ export const useSettingsStore = defineStore("settings", () => {
 
   // ---- 动作 ----
   async function fetchSettings() {
-    const res = await getSettings();
-    if (res.success && res.data) {
-      settings.value = { ...DEFAULT_SETTINGS, ...res.data };
+    try {
+      const res = await getSettings();
+      if (res.success && res.data) {
+        settings.value = { ...DEFAULT_SETTINGS, ...res.data };
+      } else {
+        useToast().error("读取设置失败", res.error ?? "已回退到默认设置。");
+      }
+    } catch (e) {
+      // IPC 异常（超时等）：loaded 仍需置位，避免界面永久卡在加载态
+      console.error("读取设置异常:", e);
+      useToast().error("读取设置失败", "与后端通信异常，已回退到默认设置。");
+    } finally {
+      loaded.value = true;
+      applyTheme(settings.value.theme);
+      applyPerformanceMode(settings.value.performance_mode);
     }
-    loaded.value = true;
-    applyTheme(settings.value.theme);
-    applyPerformanceMode(settings.value.performance_mode);
   }
 
+  /**
+   * 更新设置（部分更新语义）
+   *
+   * 后端 settings_save 为逐字段合并补丁（非整体覆盖），因此：
+   * 1. 只提交本次修改的字段（patch 浅拷贝），绝不携带全量 settings —— 后端是
+   *    read-modify-write 合并，全量提交会用本地可能过期的值覆盖其他写入口
+   *    （托盘/调度器）刚写入的字段，造成丢失更新；
+   * 2. 保存成功后再 Object.assign 合并到本地，保证 UI 即时生效。
+   */
   async function updateSettings(patch: Partial<AppSettings>) {
-    const res = await saveSettings(patch);
+    const res = await saveSettings({ ...patch });
     if (res.success) {
       Object.assign(settings.value, patch);
       if (patch.theme !== undefined) applyTheme(patch.theme);
       if (patch.performance_mode !== undefined)
         applyPerformanceMode(patch.performance_mode);
+    } else {
+      useToast().error("保存设置失败", res.error ?? "请检查后端服务是否正常运行。");
     }
     return res;
   }

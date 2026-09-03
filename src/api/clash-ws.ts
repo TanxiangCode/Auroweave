@@ -99,7 +99,10 @@ class WsClient<T> {
   disconnect(): void {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    if (this.resetTimer) clearInterval(this.resetTimer);
+    if (this.resetTimer) {
+      clearInterval(this.resetTimer);
+      this.resetTimer = null; // 必须置空，resume() 依据此字段重建定时器，否则永久失活
+    }
     // 移除事件处理器后关闭，防止异步 onclose 在 stopped 被重置后触发多余重连
     if (this.ws) {
       this.ws.onopen = null;
@@ -156,17 +159,61 @@ class WsClient<T> {
 }
 
 // ------------------------------------------------------------
+// ClashAPI secret 管理（sing-box WS 通过 ?token= 查询参数鉴权，
+// 浏览器 WebSocket 无法设置 Authorization Header）
+// ------------------------------------------------------------
+import { invoke } from "@tauri-apps/api/core";
+
+let cachedSecret: string | null = null;
+let secretPromise: Promise<string> | null = null;
+
+/** 获取 ClashAPI secret（带内存缓存，并发调用共享同一 Promise） */
+export function ensureClashSecret(): Promise<string> {
+  if (cachedSecret !== null) return Promise.resolve(cachedSecret);
+  if (!secretPromise) {
+    secretPromise = invoke<{ success: boolean; data?: string; error?: string }>(
+      "core_get_clash_secret"
+    )
+      .then((res) => {
+        const secret = res?.success && res.data ? res.data : "";
+        cachedSecret = secret;
+        return secret;
+      })
+      .catch(() => {
+        // 后端未就绪或 IPC 失败：降级为无 token，本次不缓存，下次连接再试
+        cachedSecret = "";
+        return "";
+      })
+      .finally(() => {
+        secretPromise = null;
+      });
+  }
+  return secretPromise;
+}
+
+// 模块加载时 fire-and-forget 预热缓存，确保首个 WS 连接大概率已带 token
+if (typeof window !== "undefined") {
+  void ensureClashSecret();
+}
+
+// ------------------------------------------------------------
 // 动态获取最新的 WebSocket URL，以在设置端口变化时生效
+// token 参数：clash_api 启用 secret 后浏览器 WS 只能靠 ?token= 鉴权
+// secret 未就绪时退化为无 token 连接（依赖模块加载时的预热尽快补齐）
 // ------------------------------------------------------------
 function getDynamicWsUrl(path: string): string {
-  try {
-    const store = useSettingsStore();
-    const port = store.settings.clash_api_port || 9090;
-    return `ws://127.0.0.1:${port}${path}`;
-  } catch {
-    // 降级兜底
-    return `ws://127.0.0.1:9090${path}`;
-  }
+  const baseUrl = (() => {
+    try {
+      const store = useSettingsStore();
+      const port = store.settings.clash_api_port || 9090;
+      return `ws://127.0.0.1:${port}`;
+    } catch {
+      // 降级兜底
+      return "ws://127.0.0.1:9090";
+    }
+  })();
+  if (!cachedSecret) return `${baseUrl}${path}`;
+  return `${baseUrl}${path}?token=${encodeURIComponent(cachedSecret)}`;
 }
 
 // ------------------------------------------------------------
@@ -184,9 +231,9 @@ let trafficClient: WsClient<any> | null = null;
 let connectionsClient: WsClient<{ connections: Connection[] }> | null = null;
 let logClient: WsClient<{ type: string; payload: string }> | null = null;
 
-import { invoke } from "@tauri-apps/api/core";
-
-let isProxyActive = true;
+// 初始为 false：应用启动时代理核心尚未确认激活，避免页面可见性恢复触发无谓重连；
+// 只有 setProxyActiveStatus(true) 之后再启用 visibilitychange 自动恢复
+let isProxyActive = false;
 
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
@@ -219,6 +266,33 @@ export function setProxyActiveStatus(active: boolean) {
 export function subscribeTraffic(cb: TrafficCallback): () => void {
   trafficCallbacks.push(cb);
   if (!trafficClient) {
+    // 托盘推送节流：traffic 事件每秒一次，托盘刷新 3 秒一次足够
+    const TRAY_THROTTLE_MS = 3000;
+    let lastTrayPushAt = 0;
+    // 连续失败计数：托盘 IPC 连续失败 3 次后停推，避免每秒吞错刷日志
+    const TRAY_MAX_CONSECUTIVE_FAILURES = 3;
+    let trayFailures = 0;
+    let trayPushPending = false;
+
+    const pushToTray = (up: number, down: number, active: boolean) => {
+      const now = Date.now();
+      if (now - lastTrayPushAt < TRAY_THROTTLE_MS && !trayPushPending) return;
+      if (trayPushPending) return;
+      trayPushPending = true;
+      lastTrayPushAt = now;
+      invoke("tray_update_traffic", { up, down, active })
+        .then(() => {
+          // 成功即恢复推送资格
+          trayFailures = 0;
+        })
+        .catch(() => {
+          trayFailures++;
+        })
+        .finally(() => {
+          trayPushPending = false;
+        });
+    };
+
     trafficClient = new WsClient<any>({
       url: () => getDynamicWsUrl("/traffic"),
       onMessage: (raw) => {
@@ -233,11 +307,13 @@ export function subscribeTraffic(cb: TrafficCallback): () => void {
         trafficCallbacks.forEach((fn) => fn(snapshot));
 
         // 同步通知 Rust 系统托盘 / 菜单栏实时网速 (代理未激活时自动不显示)
-        invoke("tray_update_traffic", {
-          up: snapshot.upload_speed,
-          down: snapshot.download_speed,
-          active: isProxyActive,
-        }).catch(() => {});
+        // 连续失败达到上限后跳过推送，直到下一条有效流量数据到来时重置计数再重试
+        if (trayFailures < TRAY_MAX_CONSECUTIVE_FAILURES) {
+          pushToTray(snapshot.upload_speed, snapshot.download_speed, isProxyActive);
+        } else {
+          // 数据流仍在到达（说明 WS 已恢复），给推送重置计数的机会
+          trayFailures = 0;
+        }
       },
     });
     trafficClient.connect();

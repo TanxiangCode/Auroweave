@@ -2,10 +2,16 @@ import type { ApiResponse, Subscription } from "@/types";
 import { SUBSCRIPTION_FETCH_TIMEOUT_MS } from "@/constants";
 import { invokeWithTimeout } from "./client";
 
-/** 导入订阅（URL 方式）- 传入较长的拉取超时时间 */
+/**
+ * 导入订阅（URL 方式）- 传入较长的拉取超时时间
+ *
+ * 注意：Rust 端 `subscription_import` 的 `_auto_group` 参数当前仅保留占位、未实现，
+ * 传入值不会影响导入行为（节点自动分组由后端默认策略处理）。前端调用保持参数透传。
+ */
 export async function importSubscription(
   name: string,
   url: string,
+  /** 后端当前忽略此参数（Rust 侧 `_auto_group` 未实现） */
   autoGroup: boolean = true
 ): Promise<ApiResponse<Subscription>> {
   return invokeWithTimeout<ApiResponse<Subscription>>(
@@ -60,6 +66,7 @@ export async function importContentSubscription(
   content: string,
   sourceType: string,
   filePath?: string,
+  /** 后端当前忽略此参数（Rust 侧 `_auto_group` 未实现） */
   autoGroup: boolean = true
 ): Promise<ApiResponse<Subscription>> {
   return invokeWithTimeout<ApiResponse<Subscription>>(
@@ -69,7 +76,13 @@ export async function importContentSubscription(
   );
 }
 
-/** 更新订阅元数据 */
+/**
+ * 更新订阅元数据（部分更新语义）
+ *
+ * 仅提交需要修改的字段：undefined 字段会被 Tauri invoke 序列化时忽略
+ * （JSON.stringify 与 invoke args 均跳过 undefined），后端已修复为
+ * 逐字段合并、undefined 不再覆盖已有值。传全量对象反而可能用过期值覆盖。
+ */
 export async function updateSubscriptionMeta(
   id: string,
   meta: {

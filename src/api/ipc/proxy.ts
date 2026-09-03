@@ -56,4 +56,24 @@ export async function getSingboxVersion(): Promise<ApiResponse<string>> {
   return invokeWithTimeout<ApiResponse<string>>("proxy_get_singbox_version");
 }
 
+// === 分组配置持久化（P0 修复新增）===
+
+/** 分组测速配置项 */
+export interface GroupConfigPayload {
+  interval?: number;
+  tolerance?: number;
+  url?: string;
+}
+
+/** 更新分组测速配置（interval / tolerance / url），持久化并在下次配置重建时生效 */
+export async function updateGroupConfig(
+  groupTag: string,
+  config: GroupConfigPayload
+): Promise<ApiResponse<boolean>> {
+  return invokeWithTimeout<ApiResponse<boolean>>("group_update_config", {
+    groupTag,
+    config: JSON.stringify(config),
+  });
+}
+
 

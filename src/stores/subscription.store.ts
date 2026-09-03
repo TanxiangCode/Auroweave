@@ -47,20 +47,23 @@ export const useSubscriptionStore = defineStore("subscription", () => {
   async function importSub(name: string, url: string, autoGroup = true) {
     importing.value = true;
     importError.value = null;
-    const res = await importSubscription(name, url, autoGroup);
-    if (res.success && res.data) {
-      // 导入成功后重新从后端拉取全量列表，确保数据一致
-      await fetchAll();
-      try {
-        await useProxyStore().fetchGroups();
-      } catch (e) {
-        console.warn("联动刷新代理节点列表失败:", e);
+    try {
+      const res = await importSubscription(name, url, autoGroup);
+      if (res.success && res.data) {
+        // 导入成功后重新从后端拉取全量列表，确保数据一致
+        await fetchAll();
+        try {
+          await useProxyStore().fetchGroups();
+        } catch (e) {
+          console.warn("联动刷新代理节点列表失败:", e);
+        }
+      } else {
+        importError.value = res.error ?? "导入失败";
       }
-    } else {
-      importError.value = res.error ?? "导入失败";
+      return res;
+    } finally {
+      importing.value = false;
     }
-    importing.value = false;
-    return res;
   }
 
   async function importContentSub(
@@ -72,19 +75,22 @@ export const useSubscriptionStore = defineStore("subscription", () => {
   ) {
     importing.value = true;
     importError.value = null;
-    const res = await importContentSubscription(name, content, sourceType, filePath, autoGroup);
-    if (res.success && res.data) {
-      await fetchAll();
-      try {
-        await useProxyStore().fetchGroups();
-      } catch (e) {
-        console.warn("联动刷新代理节点列表失败:", e);
+    try {
+      const res = await importContentSubscription(name, content, sourceType, filePath, autoGroup);
+      if (res.success && res.data) {
+        await fetchAll();
+        try {
+          await useProxyStore().fetchGroups();
+        } catch (e) {
+          console.warn("联动刷新代理节点列表失败:", e);
+        }
+      } else {
+        importError.value = res.error ?? "解析导入失败";
       }
-    } else {
-      importError.value = res.error ?? "解析导入失败";
+      return res;
+    } finally {
+      importing.value = false;
     }
-    importing.value = false;
-    return res;
   }
 
   async function updateSubMeta(

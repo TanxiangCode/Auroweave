@@ -9,22 +9,9 @@
 // Sing-box 配置
 // ============================================================
 
-/** 锁定的 sing-box 版本（与 Cargo.toml 保持同步） */
-export const SINGBOX_VERSION = "1.14.0";
-
-/** sing-box ClashAPI 监听地址 */
+/** sing-box ClashAPI 监听地址（WebSocket 动态 URL 拼接基准） */
 export const SINGBOX_API_HOST = "127.0.0.1";
 export const SINGBOX_API_PORT = 9090;
-export const SINGBOX_API_BASE = `http://${SINGBOX_API_HOST}:${SINGBOX_API_PORT}`;
-export const SINGBOX_WS_BASE = `ws://${SINGBOX_API_HOST}:${SINGBOX_API_PORT}`;
-
-// ============================================================
-// WebSocket 主题路径
-// ============================================================
-
-export const WS_PATH_TRAFFIC = `${SINGBOX_WS_BASE}/traffic`;
-export const WS_PATH_CONNECTIONS = `${SINGBOX_WS_BASE}/connections`;
-export const WS_PATH_LOGS = `${SINGBOX_WS_BASE}/logs`;
 
 // ============================================================
 // 测速服务器（默认列表，可在设置页覆盖）
@@ -62,12 +49,18 @@ export const SUBSCRIPTION_FETCH_TIMEOUT_MS = 30_000; // 订阅拉取超时
 export const LATENCY_TEST_TIMEOUT_MS = 5_000; // 单次延迟测试超时
 
 // ============================================================
+// 累计流量持久化
+// ============================================================
+
+/** 累计流量写 localStorage 的节流间隔（traffic 事件约每秒一条） */
+export const TRAFFIC_PERSIST_INTERVAL_MS = 30_000;
+
+// ============================================================
 // WebSocket 重连策略
 // ============================================================
 
 export const WS_RECONNECT_DELAY_MS = 1_000;   // 初始重连间隔
 export const WS_RECONNECT_MAX_DELAY_MS = 10_000;
-export const WS_RECONNECT_MAX_RETRIES = 50;
 export const WS_MAX_CONSECUTIVE_FAILURES = 15;
 
 // ============================================================

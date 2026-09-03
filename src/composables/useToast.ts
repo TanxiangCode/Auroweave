@@ -14,6 +14,9 @@ export interface ToastMessage {
 
 const toasts = ref<ToastMessage[]>([]);
 
+/** 同屏 Toast 堆叠上限：超出时移除最老的一条，防止错误风暴刷屏 */
+const TOAST_MAX_VISIBLE = 5;
+
 export function useToast() {
   const show = (toast: Omit<ToastMessage, "id">) => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -23,6 +26,12 @@ export function useToast() {
       ...toast,
     };
     toasts.value.push(newToast);
+
+    // 超过上限时用 splice 移除最老的（保持数组引用不变，保留既有过渡动画语义）
+    const overflow = toasts.value.length - TOAST_MAX_VISIBLE;
+    if (overflow > 0) {
+      toasts.value.splice(0, overflow);
+    }
 
     if (newToast.duration && newToast.duration > 0) {
       setTimeout(() => {

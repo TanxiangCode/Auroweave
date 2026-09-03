@@ -186,11 +186,15 @@ export function parseProcessInfo(
     }
   }
 
-  const checkStr = `${cleanName} ${raw} ${rawPath}`.toLowerCase();
+  // 知名应用匹配只针对进程名精确值（cleanName）：
+  // 旧实现把完整安装路径拼进匹配串，导致路径中偶含 "tor"/"line"/"arc" 等
+  // 子串的无关进程被误识别成知名应用（误报）。
+  // 路径信息仅用于下方兜底启发式分类（桌面应用/CLI/守护进程）。
+  const cleanNameLower = cleanName.toLowerCase();
 
   // 2. 匹配知名应用特征库
   for (const sig of APP_SIGNATURES) {
-    if (sig.pattern.test(checkStr)) {
+    if (sig.pattern.test(cleanNameLower)) {
       return {
         rawName: raw || cleanName || "未知进程",
         displayName: sig.displayName,

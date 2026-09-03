@@ -4,8 +4,9 @@
  */
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import type { ProxyGroup, ProxyNode, NodeSortConfig, CustomGroupRule } from "@/types";
-import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode, getProxyMode } from "@/api/ipc/proxy";
+import type { ProxyGroup, ProxyNode, CustomGroupRule } from "@/types";
+import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode, getProxyMode, updateGroupConfig as updateGroupConfigApi } from "@/api/ipc/proxy";
+import { RECENT_GROUPS_MAX } from "@/constants";
 import { useToast } from "@/composables/useToast";
 
 export const useProxyStore = defineStore("proxy", () => {
@@ -17,12 +18,6 @@ export const useProxyStore = defineStore("proxy", () => {
   const proxyMode = ref<"global" | "rule" | "direct">("rule");
   const loading = ref(false);
   const error = ref<string | null>(null);
-
-  // ---- 排序配置 ----
-  const sortConfig = ref<NodeSortConfig>({ key: "default", order: "asc" });
-
-  // ---- 代理节点延迟缓存，用于按延迟排序 ----
-  const latencyMap = ref<Map<string, number>>(new Map());
 
   // ---- 自定义分组规则（从 localStorage 持久化） ----
   const customGroupRules = ref<CustomGroupRule[]>([]);
@@ -118,52 +113,25 @@ export const useProxyStore = defineStore("proxy", () => {
     return result;
   }
 
-  /** 对节点列表进行排序 */
-  function sortNodes(nodes: ProxyNode[]): ProxyNode[] {
-    if (sortConfig.value.key === "default") return nodes;
-
-    const sorted = [...nodes];
-    const { key, order } = sortConfig.value;
-    const multiplier = order === "asc" ? 1 : -1;
-
-    sorted.sort((a, b) => {
-      if (key === "name") {
-        return a.tag.localeCompare(b.tag, "zh-CN") * multiplier;
-      } else if (key === "protocol") {
-        return a.type.localeCompare(b.type) * multiplier;
-      } else if (key === "latency") {
-        const a_raw = latencyMap.value.get(a.tag);
-        const b_raw = latencyMap.value.get(b.tag);
-        const getWeight = (lat?: number) => {
-          if (lat === undefined) return 999999;
-          if (lat <= 0) return 999990;
-          return lat;
-        };
-        const a_lat = getWeight(a_raw);
-        const b_lat = getWeight(b_raw);
-        if (a_lat !== b_lat) {
-          return (a_lat - b_lat) * multiplier;
-        }
-        return a.tag.localeCompare(b.tag, "zh-CN");
-      }
-      return 0;
-    });
-
-    return sorted;
-  }
-
   // 从 localStorage 获取使用计数，格式为 Record<string, number>
+  // 带容错：存储损坏时回退空对象，避免 JSON.parse 抛错导致 store 初始化失败
   const groupUsage = ref<Record<string, number>>(
-    JSON.parse(localStorage.getItem("auroweave_group_usage") || "{}")
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem("auroweave_group_usage") || "{}");
+      } catch {
+        return {};
+      }
+    })()
   );
 
-  // 常用分组列表通过计算属性得出：按使用次数从大到小排序，且只包含使用次数 > 1 的分组，限制长度为 4
+  // 常用分组列表：按使用次数从大到小排序，只取使用次数 > 1 的分组，上限 RECENT_GROUPS_MAX
   const recentGroups = computed(() => {
     return Object.entries(groupUsage.value)
       .filter(([_, count]) => count > 1)
       .sort((a, b) => b[1] - a[1])
       .map(([tag]) => tag)
-      .slice(0, 4);
+      .slice(0, RECENT_GROUPS_MAX);
   });
 
   // 增加使用次数的方法
@@ -208,7 +176,8 @@ export const useProxyStore = defineStore("proxy", () => {
         : path[0] === "auto"
         ? "自动选择"
         : path[0];
-      const leafName = currentTag ? currentTag : "测速中...";
+      // 追溯到链路末端仍无节点名：说明该组尚未选出节点，如实显示"未知节点"
+      const leafName = currentTag ? currentTag : "未知节点";
       return `${groupLabel} (${leafName})`;
     }
 
@@ -229,40 +198,43 @@ export const useProxyStore = defineStore("proxy", () => {
     await syncProxyMode();
     loading.value = true;
     error.value = null;
-    const res = await getProxyGroups();
-    if (res.success && res.data) {
-      // 置顶排序逻辑：将 proxy、auto、balance 置顶，其他按字母表排序
-      const topTags = ["proxy", "auto", "balance"];
-      const sorted = [...res.data].sort((a, b) => {
-        const indexA = topTags.indexOf(a.tag);
-        const indexB = topTags.indexOf(b.tag);
-        if (indexA !== -1 && indexB !== -1) {
-          return indexA - indexB;
-        }
-        if (indexA !== -1) return -1;
-        if (indexB !== -1) return 1;
-        return a.tag.localeCompare(b.tag, "zh-CN");
-      });
-      groups.value = sorted;
+    try {
+      const res = await getProxyGroups();
+      if (res.success && res.data) {
+        // 置顶排序逻辑：将 proxy、auto、balance 置顶，其他按字母表排序
+        const topTags = ["proxy", "auto", "balance"];
+        const sorted = [...res.data].sort((a, b) => {
+          const indexA = topTags.indexOf(a.tag);
+          const indexB = topTags.indexOf(b.tag);
+          if (indexA !== -1 && indexB !== -1) {
+            return indexA - indexB;
+          }
+          if (indexA !== -1) return -1;
+          if (indexB !== -1) return 1;
+          return a.tag.localeCompare(b.tag, "zh-CN");
+        });
+        groups.value = sorted;
 
-      // 清除过期的 nodeMap 缓存（订阅切换后节点会变化）
-      const currentTags = new Set(sorted.map(g => g.tag));
-      for (const tag of nodeMap.value.keys()) {
-        if (!currentTags.has(tag)) {
-          nodeMap.value.delete(tag);
+        // 清除过期的 nodeMap 缓存（订阅切换后节点会变化）
+        const currentTags = new Set(sorted.map(g => g.tag));
+        for (const tag of nodeMap.value.keys()) {
+          if (!currentTags.has(tag)) {
+            nodeMap.value.delete(tag);
+          }
         }
-      }
 
-      // 默认将初始活跃分组载入最近列表作为兜底展示
-      const primary = sorted.find((g) => g.type === "selector");
-      if (primary && Object.keys(groupUsage.value).length === 0) {
-        groupUsage.value[primary.tag] = 2; // 兜底：主策略组初始有 2 次，算作常用
-        localStorage.setItem("auroweave_group_usage", JSON.stringify(groupUsage.value));
+        // 默认将初始活跃分组载入最近列表作为兜底展示
+        const primary = sorted.find((g) => g.type === "selector");
+        if (primary && Object.keys(groupUsage.value).length === 0) {
+          groupUsage.value[primary.tag] = 2; // 兜底：主策略组初始有 2 次，算作常用
+          localStorage.setItem("auroweave_group_usage", JSON.stringify(groupUsage.value));
+        }
+      } else {
+        error.value = res.error ?? "获取分组失败";
       }
-    } else {
-      error.value = res.error ?? "获取分组失败";
+    } finally {
+      loading.value = false;
     }
-    loading.value = false;
   }
 
   async function fetchGroupNodes(groupTag: string) {
@@ -325,7 +297,6 @@ export const useProxyStore = defineStore("proxy", () => {
   function clearCache() {
     groups.value = [];
     nodeMap.value.clear();
-    latencyMap.value.clear();
   }
 
   async function selectNode(groupTag: string, nodeTag: string) {
@@ -371,6 +342,42 @@ export const useProxyStore = defineStore("proxy", () => {
     return res;
   }
 
+  // === 分组配置持久化（P0 修复新增）===
+  // 调用 group_update_config IPC，将分组测速配置（interval/tolerance/url）持久化到后端。
+  // interval 支持两种形式：字符串时长（"3m"）或秒数；tolerance 单位为毫秒。
+
+  /** 将字符串时长（如 "3m"、"30s"、"1h"）解析为秒数 */
+  function parseIntervalToSeconds(input: string): number | undefined {
+    const m = input.trim().match(/^(\d+)\s*(s|m|h)?$/i);
+    if (!m) return undefined;
+    const val = parseInt(m[1], 10);
+    const unit = (m[2] || "s").toLowerCase();
+    if (unit === "m") return val * 60;
+    if (unit === "h") return val * 3600;
+    return val;
+  }
+
+  /** 更新分组测速配置（纯新增：编辑弹窗保存） */
+  async function updateGroupConfig(
+    groupTag: string,
+    config: { interval?: number | string; tolerance?: number; url?: string }
+  ) {
+    const normalized: { interval?: number; tolerance?: number; url?: string } = {};
+    if (config.interval !== undefined && config.interval !== "") {
+      normalized.interval =
+        typeof config.interval === "number"
+          ? config.interval
+          : parseIntervalToSeconds(String(config.interval));
+    }
+    if (config.tolerance !== undefined && config.tolerance !== null) {
+      normalized.tolerance = Number(config.tolerance);
+    }
+    if (config.url !== undefined && config.url !== null) {
+      normalized.url = String(config.url).trim();
+    }
+    return updateGroupConfigApi(groupTag, normalized);
+  }
+
   return {
     groups,
     nodeMap,
@@ -380,9 +387,7 @@ export const useProxyStore = defineStore("proxy", () => {
     activeGroup,
     workingNodeName,
     recentGroups,
-    sortConfig,
     customGroupRules,
-    latencyMap,
     fetchGroups,
     fetchGroupNodes,
     refreshGroups,
@@ -395,6 +400,7 @@ export const useProxyStore = defineStore("proxy", () => {
     updateCustomGroupRule,
     deleteCustomGroupRule,
     applyCustomGroups,
-    sortNodes,
+    // 分组配置持久化（P0 修复新增）
+    updateGroupConfig,
   };
 });
