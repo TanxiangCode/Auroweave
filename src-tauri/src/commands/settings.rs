@@ -290,15 +290,14 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
     }
 
     // 3. 同步代理模式与完整的路由规则（App-Matrix、Custom Rules、Rule-Set）到 route
-    // sing-box 通过 route.final 决定最终出站：
-    //   direct 模式 → route.final = "direct" (所有流量直连)
-    //   rule/global 模式 → route.final = "proxy" (流量走代理出站)
+    // 模式切换统一走 clash_mode 单一真相源：
+    //   - route.final 恒为 "proxy"（不做模式相关改写）
+    //   - direct 模式由 rules 中前置的 {"clash_mode":"direct","outbound":"direct"} 全量直连
+    //   - 运行时 PATCH /configs {"mode":...} 与重启后配置文件行为完全一致
+    //   （旧实现热切换只改内存 mode、重启改写 final，两条链路行为不一致且
+    //     direct 模式下测速/分流全错）
     if let Some(route) = config_val.get_mut("route").and_then(|r| r.as_object_mut()) {
-        let final_outbound = match settings.proxy_mode.as_str() {
-            "direct" => "direct",
-            _ => "proxy",
-        };
-        route.insert("final".to_string(), serde_json::json!(final_outbound));
+        route.insert("final".to_string(), serde_json::json!("proxy"));
 
         // 检测 geosite-cn 和 geoip-cn 本地规则集文件是否存在
         let geosite_exists = config_dir.join("geosite-cn.srs").exists();
@@ -308,24 +307,43 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         let full_rules = crate::core::config_builder::build_full_route_rules(geosite_exists, geoip_exists);
         route.insert("rules".to_string(), serde_json::json!(full_rules));
 
-        // 同步 rule_set 配置
+        // 同步 rule_set 注册：geosite 与 geoip 各自独立判断（与 build_full_route_rules
+        // 的独立布尔语义对齐；旧实现 geoip 被 geosite 门控，geosite 丢失而 geoip
+        // 存在时会引用未注册的 rule-set 导致内核拒载）
+        let mut rule_sets = Vec::new();
         if geosite_exists {
-            let mut rule_sets = Vec::new();
             rule_sets.push(serde_json::json!({
                 "tag": "geosite-cn",
                 "type": "local",
                 "format": "binary",
                 "path": config_dir.join("geosite-cn.srs").to_string_lossy().to_string()
             }));
-            if geoip_exists {
-                rule_sets.push(serde_json::json!({
-                    "tag": "geoip-cn",
-                    "type": "local",
-                    "format": "binary",
-                    "path": config_dir.join("geoip-cn.srs").to_string_lossy().to_string()
-                }));
-            }
+        }
+        if geoip_exists {
+            rule_sets.push(serde_json::json!({
+                "tag": "geoip-cn",
+                "type": "local",
+                "format": "binary",
+                "path": config_dir.join("geoip-cn.srs").to_string_lossy().to_string()
+            }));
+        }
+        if !rule_sets.is_empty() {
             route.insert("rule_set".to_string(), serde_json::json!(rule_sets));
+        } else {
+            route.remove("rule_set");
+        }
+
+        // 同步 experimental.clash_api.default_mode 与 proxy_mode，
+        // 保证冷启动（cache 未恢复 mode 时）的 clash_mode 匹配初值与用户设置一致
+        if let Some(experimental) = config_val.get_mut("experimental").and_then(|e| e.as_object_mut()) {
+            if let Some(clash_api) = experimental.get_mut("clash_api").and_then(|c| c.as_object_mut()) {
+                let default_mode = match settings.proxy_mode.as_str() {
+                    "global" => "Global",
+                    "direct" => "Direct",
+                    _ => "Rule",
+                };
+                clash_api.insert("default_mode".to_string(), serde_json::json!(default_mode));
+            }
         }
 
         modified = true;
@@ -386,16 +404,15 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         }
     }
 
-    // 6. 确保 mixed inbounds 开启了流量嗅探 (sniff)
+    // 6. 清理 mixed inbound 上的 legacy 嗅探字段（迁移兜底）
+    // sniff/sniff_override_destination 在 sing-box 1.13 已移除、1.14 拒载整份配置；
+    // 旧版本生成的 config.json 可能残留，此处主动剔除（嗅探由 route.rules 的
+    // {"action":"sniff"} 规则承担）
     if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|i| i.as_array_mut()) {
         for inb in inbounds.iter_mut() {
-            if inb.get("type").and_then(|t| t.as_str()) == Some("mixed") {
-                if inb.get("sniff").is_none() || inb.get("sniff_override_destination").is_none() {
-                    if let Some(obj) = inb.as_object_mut() {
-                        obj.insert("sniff".to_string(), serde_json::json!(true));
-                        obj.insert("sniff_override_destination".to_string(), serde_json::json!(true));
-                        modified = true;
-                    }
+            if let Some(obj) = inb.as_object_mut() {
+                if obj.remove("sniff").is_some() | obj.remove("sniff_override_destination").is_some() {
+                    modified = true;
                 }
             }
         }
@@ -483,10 +500,15 @@ pub async fn sync_config_to_service(_app_handle: &tauri::AppHandle) -> Result<()
         return Err("config.json 配置文件不存在，请先导入订阅".to_string());
     }
 
-    let config_path_str = config_path.to_string_lossy().to_string();
-    log::info!("[settings] 向系统服务同步配置，路径: {}", config_path_str);
-    
-    let resp = crate::core::ipc_client::send_ipc_request("RELOAD_CONFIG", Some(&config_path_str)).await?;
+    // IPC 协议约定：RELOAD_CONFIG 的 config 参数一律为内嵌配置文本
+    // （服务端会将其写入自己的 config.json 再拉起内核）。
+    // 历史缺陷：曾把文件路径字符串当内容发送，服务端把路径本身写进
+    // config.json，sing-box 拿到非 JSON 内容必然启动失败。
+    let config_content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取 config.json 失败: {}", e))?;
+    log::info!("[settings] 向系统服务同步配置，内容长度: {} 字节", config_content.len());
+
+    let resp = crate::core::ipc_client::send_ipc_request("RELOAD_CONFIG", Some(&config_content)).await?;
     if !resp.success {
         return Err(resp.error.unwrap_or_else(|| "服务内部处理配置重载异常".to_string()));
     }

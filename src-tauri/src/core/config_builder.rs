@@ -69,7 +69,8 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
             "rules": [
                 { "action": "sniff" },
                 { "protocol": "dns", "action": "hijack-dns" },
-                { "ip_is_private": true, "outbound": "direct" }
+                { "clash_mode": "direct", "action": "route", "outbound": "direct" },
+                { "ip_is_private": true, "action": "route", "outbound": "direct" }
             ],
             "final": "direct",
             "auto_detect_interface": true
@@ -322,7 +323,7 @@ impl ConfigBuilder {
 
         let mut dns_rules = Vec::new();
         if !server_domains.is_empty() {
-            dns_rules.push(json!({ "domain": server_domains, "server": "local" }));
+            dns_rules.push(json!({ "domain": server_domains, "action": "route", "server": "local" }));
         }
 
         // ---- 阶段4: 组装路由 ----
@@ -334,10 +335,11 @@ impl ConfigBuilder {
 
         // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则：国内域名由 local DNS 权威解析
         if has_geosite {
-            dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
+            dns_rules.push(json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
         }
 
         let mut rule_set_config = Vec::new();
+        // geosite 与 geoip 各自独立注册（与 build_full_route_rules 的独立布尔语义对齐）
         if has_geosite {
             rule_set_config.push(json!({
                 "tag": "geosite-cn",
@@ -345,16 +347,17 @@ impl ConfigBuilder {
                 "format": "binary",
                 "path": self.geosite_cn_path.as_ref().unwrap()
             }));
-            if has_geoip {
-                rule_set_config.push(json!({
-                    "tag": "geoip-cn",
-                    "type": "local",
-                    "format": "binary",
-                    "path": self.geoip_cn_path.as_ref().unwrap()
-                }));
-            }
-        } else {
-            log::warn!("[config] geosite-cn.srs 本地文件不存在，跳过国内域名直连规则，所有流量走代理");
+        }
+        if has_geoip {
+            rule_set_config.push(json!({
+                "tag": "geoip-cn",
+                "type": "local",
+                "format": "binary",
+                "path": self.geoip_cn_path.as_ref().unwrap()
+            }));
+        }
+        if rule_set_config.is_empty() {
+            log::warn!("[config] geosite-cn.srs / geoip-cn.srs 本地文件均不存在，跳过国内直连规则，所有流量走代理");
         }
 
         let route_rules = build_full_route_rules(has_geosite, has_geoip);
@@ -404,9 +407,10 @@ impl ConfigBuilder {
                     "type": "mixed",
                     "tag": "mixed-in",
                     "listen": if self.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
-                    "listen_port": self.mixed_port,
-                    "sniff": true,
-                    "sniff_override_destination": true
+                    "listen_port": self.mixed_port
+                    // 注意：严禁在此添加 sniff/sniff_override_destination ——
+                    // 这两个入站字段在 sing-box 1.13 已移除，1.14 直接拒载整份配置；
+                    // 嗅探由 route.rules 首条 {"action":"sniff"} 承担
                 }
             ],
             "outbounds": final_outbounds,
@@ -477,6 +481,9 @@ pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> 
     let mut rules = vec![
         json!({ "action": "sniff" }),
         json!({ "protocol": "dns", "action": "hijack-dns" }),
+        // Direct 模式全量直连（clash_mode 单一真相源：运行时 PATCH mode 与
+        // 重启后 default_mode 行为一致；此规则须在所有分流规则之前）
+        json!({ "clash_mode": "direct", "action": "route", "outbound": "direct" }),
     ];
 
     // 1. 注入 App-Matrix 应用分流规则 (优先级高于通用域名分流)
