@@ -1,5 +1,5 @@
 /// V2Ray / Base64 / URI 列表解析器
-/// 支持: vmess://, vless://, ss://, trojan://, hysteria2://, hy2://, anytls://
+/// 支持: vmess://, vless://, ss://, trojan://, hysteria2://, hy2://, anytls://, tuic://
 /// 作者: TanXiang
 use super::ParsedOutbound;
 use crate::error::AppError;
@@ -96,6 +96,8 @@ fn parse_single_uri(uri: &str) -> Option<ParsedOutbound> {
         parse_hysteria2_uri(uri)
     } else if uri.starts_with("anytls://") {
         parse_anytls_uri(uri)
+    } else if uri.starts_with("tuic://") {
+        parse_tuic_uri(uri)
     } else {
         None
     }
@@ -537,12 +539,21 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     let mut insecure = false;
     let mut obfs_type = None;
     let mut obfs_pass = None;
+    // 端口跳跃：mport=2080:3000 或 mport=2080,3001（Hysteria2 官方 URI 生态惯例）
+    // sing-box 对应字段为 server_ports 列表，与 server_port 互斥（outbound/hysteria2.md）
+    let mut mport: Option<Vec<String>> = None;
 
     for (k, v) in parsed_url.query_pairs() {
         match k.as_ref() {
             "sni" => sni = Some(v.to_string()),
             "insecure" => insecure = v == "1" || v == "true",
             "obfs" => obfs_type = Some(v.to_string()),
+            "mport" => {
+                let list: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                if !list.is_empty() {
+                    mport = Some(list);
+                }
+            }
             "obfs-password" => {
                 obfs_pass = Some(
                     urlencoding::decode(&v)
@@ -561,6 +572,11 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
         "server_port": port,
         "password": password
     });
+    // 端口跳跃生效时移除 server_port（两者互斥，同时存在会拒载）
+    if let Some(ports) = mport {
+        raw_json["server_ports"] = json!(ports);
+        raw_json.as_object_mut().unwrap().remove("server_port");
+    }
 
     // hy2 始终基于 TLS：无条件启用 tls 块，sni 缺省回退 server 地址
     let sni_name = sni.clone().unwrap_or_else(|| server.clone());
@@ -646,6 +662,102 @@ fn parse_anytls_uri(uri: &str) -> Option<ParsedOutbound> {
     })
 }
 
+/// TUIC 链接解析器 (sing-box 原生支持 type: "tuic")
+/// URI 形如 tuic://uuid:password@host:port?sni=...&alpn=h3&congestion_control=bbr#tag
+/// 对应 docs/sing-box_docs/outbound/tuic.md：uuid/password 必填、tls 必填
+fn parse_tuic_uri(uri: &str) -> Option<ParsedOutbound> {
+    let parsed_url = Url::parse(uri).ok()?;
+    let tag = extract_tag(&parsed_url, "TUIC");
+    let server = parsed_url.host_str()?.to_string();
+    let port = parsed_url.port()?;
+
+    // tuic://uuid:password@ 形式：username 是 uuid，password 是密码
+    let uuid = urlencoding::decode(parsed_url.username())
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| parsed_url.username().to_string());
+    if uuid.is_empty() {
+        return None;
+    }
+    let password = parsed_url
+        .password()
+        .map(|p| urlencoding::decode(p).map(|c| c.into_owned()).unwrap_or_else(|_| p.to_string()))
+        .unwrap_or_default();
+
+    let mut sni = None;
+    let mut alpn: Option<Vec<String>> = None;
+    let mut congestion_control = None;
+    let mut udp_relay_mode = None;
+    let mut allow_insecure = false;
+
+    for (k, v) in parsed_url.query_pairs() {
+        match k.as_ref() {
+            "sni" | "peer" | "serverName" => sni = Some(v.to_string()),
+            "alpn" => {
+                let list: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                if !list.is_empty() {
+                    alpn = Some(list);
+                }
+            }
+            "congestion_control" => congestion_control = Some(v.to_string()),
+            "udp_relay_mode" => udp_relay_mode = Some(v.to_string()),
+            "allow_insecure" | "allowInsecure" | "insecure" => allow_insecure = v == "1" || v == "true",
+            _ => {}
+        }
+    }
+
+    // congestion_control 白名单（outbound/tuic.md：cubic/new_reno/bbr），非法值丢弃用内核默认
+    const TUIC_CC: &[&str] = &["cubic", "new_reno", "bbr"];
+    if let Some(cc) = congestion_control.as_deref() {
+        if !TUIC_CC.contains(&cc) {
+            log::warn!("[parser] TUIC 节点 [{}] 的非法拥塞控制算法 {} 已丢弃", tag, cc);
+            congestion_control = None;
+        }
+    }
+
+    // TUIC 始终基于 QUIC+TLS：无条件启用 tls 块，缺省 alpn 为 h3（QUIC 场景标准）
+    let mut tls = json!({
+        "enabled": true,
+        "alpn": alpn.unwrap_or_else(|| vec!["h3".to_string()])
+    });
+    if let Some(s) = sni {
+        tls["server_name"] = json!(s);
+    } else {
+        tls["server_name"] = json!(server);
+    }
+    if allow_insecure {
+        tls["insecure"] = json!(true);
+    }
+
+    let mut raw_json = json!({
+        "type": "tuic",
+        "tag": tag,
+        "server": server,
+        "server_port": port,
+        "uuid": uuid,
+        "tls": tls
+    });
+    if !password.is_empty() {
+        raw_json["password"] = json!(password);
+    }
+    if let Some(cc) = congestion_control {
+        raw_json["congestion_control"] = json!(cc);
+    }
+    if let Some(mode) = udp_relay_mode {
+        // udp_relay_mode 白名单（native/quic），非法值丢弃
+        if mode == "native" || mode == "quic" {
+            raw_json["udp_relay_mode"] = json!(mode);
+        }
+    }
+
+    Some(ParsedOutbound {
+        tag,
+        r#type: "tuic".to_string(),
+        server: Some(server),
+        server_port: Some(port),
+        raw_json,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -709,6 +821,31 @@ mod tests {
         let uri = "anytls://pw@zf-tw2.9999231.xyz:1023/#%E8%8A%82%E7%82%B9";
         let parsed = parse_anytls_uri(uri).expect("anytls 应该解析成功");
         assert_eq!(parsed.raw_json["tls"]["insecure"], false);
+    }
+
+    #[test]
+    fn test_parse_tuic_uri() {
+        let uri = "tuic://2DD61D93-75D8-4DA4-AC0E-6AECE7EAC365:hello@1.2.3.4:443?congestion_control=bbr&alpn=h3&sni=example.com&udp_relay_mode=native#%F0%9F%87%B8%F0%9F%87%AC%20TUIC-001";
+        let parsed = parse_tuic_uri(uri).expect("tuic 应该解析成功");
+        assert_eq!(parsed.tag, "🇸🇬 TUIC-001");
+        assert_eq!(parsed.r#type, "tuic");
+        assert_eq!(parsed.server_port, Some(443));
+        assert_eq!(parsed.raw_json["uuid"], "2DD61D93-75D8-4DA4-AC0E-6AECE7EAC365");
+        assert_eq!(parsed.raw_json["password"], "hello");
+        assert_eq!(parsed.raw_json["congestion_control"], "bbr");
+        assert_eq!(parsed.raw_json["udp_relay_mode"], "native");
+        assert_eq!(parsed.raw_json["tls"]["server_name"], "example.com");
+        assert_eq!(parsed.raw_json["tls"]["alpn"][0], "h3");
+    }
+
+    #[test]
+    fn test_parse_tuic_invalid_congestion_control_dropped() {
+        // 非法拥塞控制算法不应透传给内核（会拒载），须被白名单过滤
+        let uri = "tuic://uuid@1.2.3.4:443?congestion_control=bogus#t";
+        let parsed = parse_tuic_uri(uri).expect("tuic 应该解析成功");
+        assert!(parsed.raw_json.get("congestion_control").is_none());
+        // 无 password 字段时不生成空串
+        assert!(parsed.raw_json.get("password").is_none());
     }
 
     #[test]

@@ -118,6 +118,36 @@ fn build_clash_transport(net: &str, proxy: &YamlValue) -> Option<serde_json::Val
     }
 }
 
+/// 构建 Clash YAML 的 multiplex JSON（vmess/vless/trojan 等共用）。
+/// smux 编码（Mihomo 生态）→ sing-box protocol；max-connections/min-streams/max-streams 透传。
+/// 对应 docs/sing-box_docs/shared/multiplex.md：max_connections/min_streams 与 max_streams 互斥。
+fn build_clash_multiplex(proxy: &YamlValue) -> Option<serde_json::Value> {
+    let smux = proxy.get("smux")?;
+    if smux.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let protocol = match smux.get("protocol").and_then(|v| v.as_str()).unwrap_or("smux") {
+            "yamux" => "yamux",
+            "h2mux" => "h2mux",
+            _ => "smux",
+        };
+        let mut m = json!({ "enabled": true, "protocol": protocol });
+        if let Some(n) = smux.get("max-connections").and_then(|v| v.as_u64()) {
+            m["max_connections"] = json!(n);
+        }
+        if let Some(n) = smux.get("min-streams").and_then(|v| v.as_u64()) {
+            m["min_streams"] = json!(n);
+        }
+        if let Some(n) = smux.get("max-streams").and_then(|v| v.as_u64()) {
+            m["max_streams"] = json!(n);
+        }
+        if smux.get("padding").and_then(|v| v.as_bool()).unwrap_or(false) {
+            m["padding"] = json!(true);
+        }
+        Some(m)
+    } else {
+        None
+    }
+}
+
 fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
     let name = proxy.get("name")?.as_str()?.to_string();
     let proxy_type = proxy.get("type")?.as_str()?.to_lowercase();
@@ -176,6 +206,9 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                     obj["transport"] = transport;
                 }
             }
+            if let Some(multiplex) = build_clash_multiplex(proxy) {
+                obj["multiplex"] = multiplex;
+            }
             ("vmess".to_string(), obj)
         }
         "vless" => {
@@ -198,6 +231,9 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 if let Some(transport) = build_clash_transport(net, proxy) {
                     obj["transport"] = transport;
                 }
+            }
+            if let Some(multiplex) = build_clash_multiplex(proxy) {
+                obj["multiplex"] = multiplex;
             }
             if let Some(reality_opts) = proxy.get("reality-opts") {
                 let public_key = reality_opts.get("public-key").and_then(|v| v.as_str()).unwrap_or("");
@@ -257,6 +293,9 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                     obj["transport"] = transport;
                 }
             }
+            if let Some(multiplex) = build_clash_multiplex(proxy) {
+                obj["multiplex"] = multiplex;
+            }
             ("trojan".to_string(), obj)
         }
         "hysteria2" | "hy2" => {
@@ -277,6 +316,25 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
             if let Some(obfs) = proxy.get("obfs").and_then(|v| v.as_str()) {
                 let obfs_pass = proxy.get("obfs-password").and_then(|v| v.as_str()).unwrap_or("");
                 obj["obfs"] = json!({ "type": obfs, "password": obfs_pass });
+            }
+            // 端口跳跃（outbound/hysteria2.md：server_ports 列表与 server_port 互斥）：
+            // Mihomo 的 ports 形如 "2080:3000" 字符串或 ["2080:3000","3001"] 列表；
+            // 设置后移除 server_port
+            let ports_raw = proxy.get("ports");
+            let ports_seq: Option<Vec<String>> = match ports_raw {
+                Some(YamlValue::Sequence(seq)) => Some(
+                    seq.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect(),
+                ),
+                Some(YamlValue::String(s)) if !s.trim().is_empty() => {
+                    Some(vec![s.trim().to_string()])
+                }
+                _ => None,
+            };
+            if let Some(ports) = ports_seq {
+                if !ports.is_empty() {
+                    obj["server_ports"] = json!(ports);
+                    obj.as_object_mut().unwrap().remove("server_port");
+                }
             }
             ("hysteria2".to_string(), obj)
         }
@@ -316,6 +374,122 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 "password": password,
                 "tls": tls_obj
             }))
+        }
+        "tuic" => {
+            let uuid = proxy.get("uuid")?.as_str()?.to_string();
+            let password = proxy.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            // 拥塞控制白名单（outbound/tuic.md：cubic/new_reno/bbr），非法值回退 cubic
+            const TUIC_CC: &[&str] = &["cubic", "new_reno", "bbr"];
+            let cc = proxy
+                .get("congestion-controller")
+                .or_else(|| proxy.get("congestion_control"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("cubic");
+            let cc = if TUIC_CC.contains(&cc) { cc } else {
+                log::warn!("[parser] Clash tuic 节点 [{}] 的非法拥塞控制 {} 回退为 cubic", name, cc);
+                "cubic"
+            };
+            // udp_relay_mode 白名单（native/quic）
+            let udp_mode = proxy
+                .get("udp-relay-mode")
+                .or_else(|| proxy.get("udp_relay_mode"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("native");
+            let udp_mode = if udp_mode == "native" || udp_mode == "quic" { udp_mode } else { "native" };
+
+            // TUIC 始终基于 QUIC+TLS：缺省 sni 回退 server，缺省 alpn h3
+            let sni = proxy.get("sni").or_else(|| proxy.get("servername")).and_then(|v| v.as_str());
+            let insecure = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
+            let alpn = proxy
+                .get("alpn")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| seq.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<String>>())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| vec!["h3".to_string()]);
+
+            let mut tls_obj = json!({
+                "enabled": true,
+                "alpn": alpn,
+                "insecure": insecure
+            });
+            tls_obj["server_name"] = json!(sni.unwrap_or(&server));
+
+            let mut obj = json!({
+                "type": "tuic",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "uuid": uuid,
+                "congestion_control": cc,
+                "udp_relay_mode": udp_mode,
+                "tls": tls_obj
+            });
+            if !password.is_empty() { obj["password"] = json!(password); }
+            if let Some(ip_prefer) = proxy.get("ip-version") {
+                // Mihomo ip-version 映射到 sing-box network 并不语义等价，忽略即可
+                let _ = ip_prefer;
+            }
+            ("tuic".to_string(), obj)
+        }
+        "snell" => {
+            // sing-box 1.14.0 新增原生 snell 支持（此前全部拒载）
+            let psk = proxy.get("psk").and_then(|v| v.as_str()).unwrap_or("");
+            if psk.is_empty() {
+                log::warn!("[parser] Clash snell 节点 [{}] 缺少 psk，跳过", name);
+                return None;
+            }
+            // 版本必填且白名单 4/6（obfs 仅 v4 支持；v5 QUIC 模式官方明确不支持）
+            let version = proxy.get("version").and_then(|v| v.as_u64()).unwrap_or(0);
+            if version != 4 && version != 6 {
+                log::warn!("[parser] Clash snell 节点 [{}] 版本 {} 不受支持（仅 4/6），跳过", name, version);
+                return None;
+            }
+            let mut obj = json!({
+                "type": "snell",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "version": version,
+                "psk": psk
+            });
+            if version == 4 {
+                // v4 支持 HTTP 混淆：obfs-mode http/none，obfs-host 缺省 bing.com
+                let obfs_mode = proxy.get("obfs-mode").and_then(|v| v.as_str()).unwrap_or("none");
+                if obfs_mode == "http" {
+                    let obfs_host = proxy.get("obfs-host").and_then(|v| v.as_str()).unwrap_or("bing.com");
+                    obj["obfs_mode"] = json!("http");
+                    obj["obfs_host"] = json!(obfs_host);
+                }
+            }
+            ("snell".to_string(), obj)
+        }
+        "hysteria" => {
+            // hysteria v1（QUIC）：up/down 带宽必填（服务端 Brutal 限速依赖），auth_str 认证
+            let auth_str = proxy.get("auth_str").or_else(|| proxy.get("auth-str")).and_then(|v| v.as_str()).unwrap_or("");
+            let up = proxy.get("up").and_then(|v| v.as_str());
+            let down = proxy.get("down").and_then(|v| v.as_str());
+            let sni = proxy.get("sni").and_then(|v| v.as_str()).unwrap_or(&server);
+            let insecure = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut tls_obj = json!({ "enabled": true, "server_name": sni });
+            if insecure { tls_obj["insecure"] = json!(true); }
+            let alpn = proxy.get("alpn").and_then(|v| v.as_sequence())
+                .map(|seq| seq.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<String>>());
+            if let Some(a) = alpn { tls_obj["alpn"] = json!(a); }
+
+            let mut obj = json!({
+                "type": "hysteria",
+                "tag": name,
+                "server": server,
+                "server_port": port,
+                "tls": tls_obj
+            });
+            if !auth_str.is_empty() { obj["auth_str"] = json!(auth_str); }
+            if let Some(u) = up { obj["up"] = json!(u); }
+            if let Some(d) = down { obj["down"] = json!(d); }
+            if let Some(obfs) = proxy.get("obfs").and_then(|v| v.as_str()) {
+                if !obfs.is_empty() { obj["obfs"] = json!(obfs); }
+            }
+            ("hysteria".to_string(), obj)
         }
         "http" => {
             let username = proxy.get("username").and_then(|v| v.as_str()).unwrap_or("");
@@ -423,5 +597,95 @@ proxies:
         let outbounds = parse_clash_yaml(yaml).unwrap();
         assert_eq!(outbounds[0].raw_json["tls"]["insecure"], true);
         assert_eq!(outbounds[1].raw_json["tls"]["insecure"], true);
+    }
+
+    #[test]
+    fn test_parse_clash_tuic() {
+        let yaml = r#"
+proxies:
+  - { name: 'tuic-1', type: tuic, server: t.example.com, port: 443, uuid: 2DD61D93-75D8-4DA4-AC0E-6AECE7EAC365, password: hello, sni: t.example.com, congestion-controller: bbr, udp-relay-mode: native, alpn: [h3] }
+  - { name: 'tuic-非法cc', type: tuic, server: t2.example.com, port: 443, uuid: uuid-x, congestion-controller: bogus }
+"#;
+        let outbounds = parse_clash_yaml(yaml).unwrap();
+        assert_eq!(outbounds.len(), 2);
+        let n = &outbounds[0];
+        assert_eq!(n.r#type, "tuic");
+        assert_eq!(n.raw_json["uuid"], "2DD61D93-75D8-4DA4-AC0E-6AECE7EAC365");
+        assert_eq!(n.raw_json["password"], "hello");
+        assert_eq!(n.raw_json["congestion_control"], "bbr");
+        assert_eq!(n.raw_json["udp_relay_mode"], "native");
+        assert_eq!(n.raw_json["tls"]["alpn"][0], "h3");
+        // 非法拥塞控制回退 cubic（不能透传坏值拒载整份配置）
+        assert_eq!(outbounds[1].raw_json["congestion_control"], "cubic");
+    }
+
+    #[test]
+    fn test_parse_clash_snell() {
+        let yaml = r#"
+proxies:
+  - { name: 'snell-4', type: snell, server: s.example.com, port: 443, psk: psk123, version: 4, obfs-mode: http, obfs-host: bing.com }
+  - { name: 'snell-6', type: snell, server: s6.example.com, port: 443, psk: psk456, version: 6 }
+  - { name: 'snell-无psk', type: snell, server: s.example.com, port: 443, version: 4 }
+  - { name: 'snell-v5', type: snell, server: s.example.com, port: 443, psk: psk, version: 5 }
+"#;
+        let outbounds = parse_clash_yaml(yaml).unwrap();
+        // 缺 psk 与 v5 都被跳过，仅保留 v4/v6
+        assert_eq!(outbounds.len(), 2);
+        assert_eq!(outbounds[0].r#type, "snell");
+        assert_eq!(outbounds[0].raw_json["version"], 4);
+        assert_eq!(outbounds[0].raw_json["psk"], "psk123");
+        assert_eq!(outbounds[0].raw_json["obfs_mode"], "http");
+        assert_eq!(outbounds[0].raw_json["obfs_host"], "bing.com");
+        assert_eq!(outbounds[1].raw_json["version"], 6);
+    }
+
+    #[test]
+    fn test_parse_clash_hysteria_v1() {
+        let yaml = r#"
+proxies:
+  - { name: 'hy1-1', type: hysteria, server: h.example.com, port: 443, auth_str: authtoken, up: '100 Mbps', down: '200 Mbps', sni: h.example.com, skip-cert-verify: true, obfs: obfskey }
+"#;
+        let outbounds = parse_clash_yaml(yaml).unwrap();
+        let n = &outbounds[0];
+        assert_eq!(n.r#type, "hysteria");
+        assert_eq!(n.raw_json["auth_str"], "authtoken");
+        assert_eq!(n.raw_json["up"], "100 Mbps");
+        assert_eq!(n.raw_json["down"], "200 Mbps");
+        assert_eq!(n.raw_json["obfs"], "obfskey");
+        assert_eq!(n.raw_json["tls"]["insecure"], true);
+        assert_eq!(n.raw_json["tls"]["server_name"], "h.example.com");
+    }
+
+    #[test]
+    fn test_parse_clash_hy2_ports_hopping() {
+        // ports 字段（Mihomo 端口跳跃）→ server_ports，并移除互斥的 server_port
+        let yaml = r#"
+proxies:
+  - { name: 'hy2-hop', type: hysteria2, server: h2.example.com, port: 443, password: pw, ports: '2080:3000', sni: h2.example.com }
+"#;
+        let outbounds = parse_clash_yaml(yaml).unwrap();
+        let raw = &outbounds[0].raw_json;
+        assert_eq!(raw["server_ports"][0], "2080:3000");
+        assert!(raw.get("server_port").is_none(), "server_port 与 server_ports 互斥，必须移除");
+    }
+
+    #[test]
+    fn test_parse_clash_smux_multiplex() {
+        let yaml = r#"
+proxies:
+  - { name: 'vmess-smux', type: vmess, server: v.example.com, port: 443, uuid: uuid-x, alterId: 0, cipher: auto, smux: { enabled: true, protocol: smux, max-connections: 4, min-streams: 4 } }
+  - { name: 'trojan-yamux', type: trojan, server: t.example.com, port: 443, password: pw, smux: { enabled: true, protocol: yamux, padding: true } }
+  - { name: 'vmess-无smux', type: vmess, server: v2.example.com, port: 443, uuid: uuid-y, alterId: 0, cipher: auto }
+"#;
+        let outbounds = parse_clash_yaml(yaml).unwrap();
+        let m1 = &outbounds[0].raw_json["multiplex"];
+        assert_eq!(m1["enabled"], true);
+        assert_eq!(m1["protocol"], "smux");
+        assert_eq!(m1["max_connections"], 4);
+        assert_eq!(m1["min_streams"], 4);
+        assert_eq!(outbounds[1].raw_json["multiplex"]["protocol"], "yamux");
+        assert_eq!(outbounds[1].raw_json["multiplex"]["padding"], true);
+        // 未启用 smux 的节点不应生成 multiplex 块
+        assert!(outbounds[2].raw_json.get("multiplex").is_none());
     }
 }
