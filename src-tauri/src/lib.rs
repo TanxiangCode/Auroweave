@@ -3,6 +3,7 @@
 pub mod error;
 pub mod commands;
 pub mod core;
+pub mod fs_utils;
 pub mod speedtest;
 pub mod system;
 
@@ -139,9 +140,13 @@ pub fn run() {
             commands::stats::get_app_traffic_stats,
             commands::stats::stats_clear_all,
             commands::settings::settings_restore_backup,
+            // 分组测速配置更新（GroupEditModal 保存）
+            commands::settings::group_update_config,
             // sing-box 内核版本检测与在线更新
             commands::singbox_update::core_check_singbox_update,
             commands::singbox_update::core_upgrade_singbox,
+            // ClashAPI 访问令牌（供前端 WebSocket 鉴权）
+            core::clash_api::core_get_clash_secret,
             // 托盘实时网速同步
             system::tray::tray_update_traffic,
         ])
