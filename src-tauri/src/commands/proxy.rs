@@ -125,11 +125,9 @@ pub async fn proxy_get_mode() -> ApiResponse<String> {
 /// 完整流程:
 /// 1. 校验模式合法性 (global / rule / direct)
 /// 2. 通过 update_settings_internal 统一保存 proxy_mode 到 settings.json
-/// 3. 重建 config.json（route.final 随之更新）
-/// 4. 若内核已运行:
-///    - TUN 模式：reload_config 会破坏 TUN 接口，需通过 restart_privileged
-///      完全停止旧进程并重新提权启动（macOS 单次密码框）
-///    - 非 TUN 模式：reload_config 热重载即可
+/// 3. 重建 config.json（clash_api.default_mode 随之更新，rules 内置 direct 全量直连规则）
+/// 4. 若内核已运行: PATCH /configs 运行时切换 clash mode（TUN/非 TUN 通用，
+///    不重启进程、不重建 TUN 网卡，零弹窗平滑切换；PATCH 失败走核心自愈重启）
 /// 5. 若内核未运行:
 ///    - rule/global → apply_core_mode_with_fallback 拉起进程
 ///    - direct + TUN → apply_core_mode_with_fallback 拉起 TUN 进程
@@ -161,7 +159,10 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
     let is_running = running_res.data.unwrap_or(false);
 
     // 若进程在运行中：无论是 TUN 模式还是非 TUN 模式，通过 Clash API 运行时热切换 mode
-    // 无需重启 sing-box 进程，无需重建 TUN 网卡，实现零弹窗、毫秒级平滑切换
+    // 无需重启 sing-box 进程，无需重建 TUN 网卡，实现零弹窗、毫秒级平滑切换。
+    // 注意：PATCH /configs 的 mode 是唯一热切换真相源——route 规则以 clash_mode 条件
+    // 联动（direct 时由 clash_mode:direct 规则全量直连），rebuild 不改写 route.final，
+    // 保证"热切换"与"重启后"两种路径行为一致。
     if is_running {
         let client = ClashApiClient::default();
         let clash_mode = match mode.as_str() {
@@ -170,11 +171,12 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
             _ => "Rule",
         };
         if let Err(e) = client.patch_configs(serde_json::json!({ "mode": clash_mode })).await {
-            log::warn!("[proxy] 通过 ClashAPI 热切换 mode 失败: {}，尝试 reload_config", e);
-            let config_dir = crate::get_config_dir();
-            let config_path = config_dir.join("config.json");
-            let config_path_str = config_path.to_string_lossy().to_string();
-            let _ = client.reload_config(&config_path_str).await;
+            // sing-box 不存在配置热重载 API（PUT /configs 恒 204 空实现），
+            // PATCH 失败说明内核异常（刚重启 API 未就绪/已崩溃）——走统一自愈重启
+            log::warn!("[proxy] 通过 ClashAPI 热切换 mode 失败: {}，通过核心自愈流程恢复...", e);
+            if let Err(re_err) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
+                return ApiResponse::err(format!("切换模式失败且核心恢复失败: {} / {}", e, re_err), 500);
+            }
         }
 
         if settings.tun_enabled {

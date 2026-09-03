@@ -402,7 +402,6 @@ async fn build_and_apply_config(
 
 
     let config_path = config_dir.join("config.json");
-    let config_path_str = config_path.to_string_lossy().to_string();
     let backup_path = config_dir.join("config.backup.json");
 
     // 备份当前配置文件
@@ -419,28 +418,21 @@ async fn build_and_apply_config(
     // 应用 TUN / 端口等设置覆写
     let _ = crate::commands::settings::rebuild_config_from_settings(app_handle);
 
-    // 热重载或拉起 sing-box
+    // 让新 config.json 生效：sing-box 的 PUT /configs 在全部版本（含 1.14）都是
+    // 恒返回 204 的空实现（不执行任何重载），不存在运行时配置重载 API——
+    // 因此这里不再调用 reload_config（它会假成功并跳过自愈），
+    // 统一走 apply_core_mode_with_fallback 让内核按新配置重启/拉起。
     let clash_client = ClashApiClient::default();
-    let reload_result = clash_client.reload_config(&config_path_str).await;
-    let reload_success = reload_result.is_ok();
-
-    if !reload_success {
-        let err_msg = reload_result.err().map(|e| e.to_string()).unwrap_or_default();
-        log::info!("[subscription] ClashAPI 热重载未生效 ({})，通过统一核心自愈恢复流程拉起内核...", err_msg);
-        
-        if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(app_handle).await {
-            log::error!("[subscription] 拉起 sing-box 失败 ({})，尝试自动回滚备份...", e);
-            if backup_path.exists() {
-                let _ = fs::copy(&backup_path, &config_path);
-                let _ = crate::system::startup::apply_core_mode_with_fallback(app_handle).await;
-            }
-            return Err(AppError::Sidecar(format!(
-                "启动核心失败，已自动回滚备份: {}",
-                e
-            )));
+    if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(app_handle).await {
+        log::error!("[subscription] 拉起 sing-box 失败 ({})，尝试自动回滚备份...", e);
+        if backup_path.exists() {
+            let _ = fs::copy(&backup_path, &config_path);
+            let _ = crate::system::startup::apply_core_mode_with_fallback(app_handle).await;
         }
-    } else {
-        log::info!("[subscription] sing-box 已成功通过 ClashAPI 热重载配置");
+        return Err(AppError::Sidecar(format!(
+            "启动核心失败，已自动回滚备份: {}",
+            e
+        )));
     }
 
     // 等待 ClashAPI 完全就绪（热重载后需要短暂时间让新配置生效）

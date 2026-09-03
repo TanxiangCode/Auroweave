@@ -118,7 +118,48 @@ pub async fn speedtest_run_single(
     }
     info!("开始对节点 [{}] 运行单体吞吐量测速...", node_tag);
     let port = crate::speedtest::get_mixed_port(&app_handle);
-    match run_single_throughput_test(&node_tag, 5, port).await {
+
+    // 吞吐测速经本地 mixed 端口发起，流量走 selector 当前选中节点。
+    // 单节点测速必须先把所在 selector 组切换到目标节点，否则测的是
+    // 用户当前选中的其他节点（历史缺陷：测速结果张冠李戴）。
+    // 通过 /proxies 找到包含该节点的 selector 组并切换，测速后还原原选中节点。
+    let client = ClashApiClient::default();
+    let mut restored: Option<(String, String)> = None; // (group_tag, original_now)
+    if let Ok(proxies) = client.get_proxies().await {
+        if let Some(proxies) = proxies.get("proxies").and_then(|p| p.as_object()) {
+            let group = proxies.iter().find(|(_, v)| {
+                v.get("type").and_then(|t| t.as_str()) == Some("Selector")
+                    && v.get("all").and_then(|a| a.as_array())
+                        .map(|a| a.iter().any(|t| t.as_str() == Some(node_tag.as_str())))
+                        .unwrap_or(false)
+            });
+            if let Some((g_tag, g_val)) = group {
+                let original_now = g_val.get("now").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                if original_now != node_tag {
+                    if let Err(e) = client.select_node(g_tag, &node_tag).await {
+                        return Ok(ApiResponse::err(format!("无法切换到目标节点进行测速: {}", e), 500));
+                    }
+                    restored = Some((g_tag.clone(), original_now));
+                    info!("单节点测速: [{}] 临时切换 selector [{}]（结束后还原）", node_tag, g_tag);
+                }
+            } else {
+                log::warn!("[speedtest] 节点 [{}] 不在任何 Selector 组中，按当前出站测速", node_tag);
+            }
+        }
+    }
+
+    let result = run_single_throughput_test(&node_tag, 5, port).await;
+
+    // 还原用户原选中节点
+    if let Some((g_tag, original_now)) = restored {
+        if !original_now.is_empty() {
+            if let Err(e) = client.select_node(&g_tag, &original_now).await {
+                log::warn!("[speedtest] 还原节点选择失败: {}", e);
+            }
+        }
+    }
+
+    match result {
         Ok(res) => Ok(ApiResponse::ok(res)),
         Err(e) => Ok(ApiResponse::err(format!("单节点测速失败: {}", e), 500)),
     }

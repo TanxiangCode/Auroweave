@@ -80,17 +80,23 @@ impl ClashApiClient {
     pub async fn get_proxies(&self) -> Result<Value, AppError> {
         let url = format!("{}/proxies", self.base_url);
         let resp = self.client.get(&url)
-            .timeout(Duration::from_secs(10))
             .send().await
             .map_err(|e| AppError::Network(format!("ClashAPI 请求失败: {}", e)))?;
 
-        let val: Value = resp.json().await
+        let status = resp.status();
+        let body = resp.text().await
+            .map_err(|e| AppError::Network(format!("ClashAPI 读取响应失败: {}", e)))?;
+        if !status.is_success() {
+            return Err(AppError::Network(format!("ClashAPI 请求失败: HTTP {} {}", status, body)));
+        }
+        let val: Value = serde_json::from_str(&body)
             .map_err(|e| AppError::Network(format!("ClashAPI 解析 JSON 失败: {}", e)))?;
-
         Ok(val)
     }
 
-    /// 获取单节点延迟
+    /// 获取单节点延迟。
+    /// sing-box 失败路径：504 超时 / 503 不可达 / 404 tag 不存在（body 携带 message），
+    /// 先检查状态码再把服务端真实错误带回上层。
     pub async fn get_node_delay(&self, node_tag: &str, test_url: &str, timeout_ms: u64) -> Result<u16, AppError> {
         let encoded_tag = urlencoding::encode(node_tag);
         let encoded_url = urlencoding::encode(test_url);
@@ -105,7 +111,18 @@ impl ClashApiClient {
             .await
             .map_err(|e| AppError::Network(format!("延迟测试请求失败: {}", e)))?;
 
-        let val: Value = resp.json().await
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if status.as_u16() == 404 {
+            return Err(AppError::Network(format!("节点 [{}] 不存在（tag 编码错误或配置未加载）", node_tag)));
+        }
+        if !status.is_success() {
+            let msg = serde_json::from_str::<Value>(&body).ok()
+                .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(|s| s.to_string()))
+                .unwrap_or(body.clone());
+            return Err(AppError::Network(format!("延迟测试失败: HTTP {} {}", status, msg)));
+        }
+        let val: Value = serde_json::from_str(&body)
             .map_err(|e| AppError::Network(format!("解析延迟测试 JSON 失败: {}", e)))?;
 
         if let Some(delay) = val.get("delay").and_then(|d| d.as_u64()) {
@@ -115,9 +132,11 @@ impl ClashApiClient {
         }
     }
 
-    /// 触发 URLTest 组的延迟测试（自动选择最优节点）
-    /// 返回选择的节点延迟（用于验证测试是否成功）
-    pub async fn trigger_urltest_group_delay(&self, group_tag: &str, test_url: &str, timeout_ms: u64) -> Result<u16, AppError> {
+    /// 触发 URLTest 组的延迟测试。
+    /// sing-box 的组测速端点返回 {map[tag]delay}（全部子节点的延迟映射，非单一 delay 值），
+    /// 这里仅以 HTTP 状态判定触发是否成功（组已执行测速并自动重选），
+    /// 子节点延迟由调用方另行通过 get_proxies / 缓存观察。
+    pub async fn trigger_urltest_group_delay(&self, group_tag: &str, test_url: &str, timeout_ms: u64) -> Result<(), AppError> {
         let encoded_tag = urlencoding::encode(group_tag);
         let encoded_url = urlencoding::encode(test_url);
         let url = format!(
@@ -131,14 +150,18 @@ impl ClashApiClient {
             .await
             .map_err(|e| AppError::Network(format!("URLTest 组延迟测试请求失败: {}", e)))?;
 
-        let val: Value = resp.json().await
-            .map_err(|e| AppError::Network(format!("解析 URLTest 组延迟测试 JSON 失败: {}", e)))?;
-
-        if let Some(delay) = val.get("delay").and_then(|d| d.as_u64()) {
-            Ok(delay as u16)
-        } else {
-            Err(AppError::Network("URLTest 组测速超时或不可达".to_string()))
+        let status = resp.status();
+        if status.as_u16() == 404 {
+            return Err(AppError::Network(format!("分组 [{}] 不存在（配置可能未按预期加载）", group_tag)));
         }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let msg = serde_json::from_str::<Value>(&body).ok()
+                .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(|s| s.to_string()))
+                .unwrap_or(body.clone());
+            return Err(AppError::Network(format!("URLTest 组测速失败: HTTP {} {}", status, msg)));
+        }
+        Ok(())
     }
 
 
@@ -157,22 +180,11 @@ impl ClashApiClient {
         Ok(())
     }
 
-    /// 热重载配置
-    pub async fn reload_config(&self, config_path: &str) -> Result<(), AppError> {
-        let url = format!("{}/configs?force=true", self.base_url);
-        let body = serde_json::json!({
-            "path": config_path
-        });
-
-        let resp = self.client.put(&url).json(&body).send().await
-            .map_err(|e| AppError::Network(format!("热重载请求失败: {}", e)))?;
-
-        if !resp.status().is_success() {
-            return Err(AppError::Network(format!("热重载返回错误状态: {}", resp.status())));
-        }
-
-        Ok(())
-    }
+    // 注意：不存在"配置热重载"能力——sing-box 的 PUT /configs 在全部版本（含 1.14）
+    // 都是恒返回 204 的空实现，不会执行任何重载。让新 config.json 生效必须通过
+    // 进程重启（本地：SidecarManager 重启；服务模式：RELOAD_CONFIG IPC 触发服务端
+    // 停旧进程+起新进程）。原 reload_config 方法已删除，防止误用其"假成功"。
+    // PATCH /configs 仅支持运行时字段（mode 等），用于模式热切换。
 
     /// 获取当前配置
     pub async fn get_configs(&self) -> Result<serde_json::Value, AppError> {

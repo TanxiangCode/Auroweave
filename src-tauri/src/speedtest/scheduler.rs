@@ -44,6 +44,12 @@ impl SpeedTestScheduler {
             let total = node_tags.len();
             info!("开始对 [{}] 展开批量串行测速 (共 {} 个节点)...", group_tag, total);
 
+            // 记录用户原选中节点，测速结束后还原（批量测速会逐节点切换 selector，
+            // 不还原会停留到最后一个测试节点，且测速期间用户流量跟着轮换）
+            let original_now: Option<String> = clash_client.get_proxies().await.ok()
+                .and_then(|json| json.get("proxies")?.get(&group_tag)?.get("now")?.as_str().map(|s| s.to_string()));
+            let original_now = original_now.filter(|s| !s.is_empty());
+
             for (index, node_tag) in node_tags.iter().enumerate() {
                 // 检查取消信号
                 if rx.try_recv().is_ok() {
@@ -116,6 +122,13 @@ impl SpeedTestScheduler {
                     result: None,
                 },
             );
+
+            // 还原用户原选中节点
+            if let Some(orig) = original_now {
+                if let Err(e) = clash_client.select_node(&group_tag, &orig).await {
+                    warn!("批量测速后还原节点选择失败: {}", e);
+                }
+            }
 
             info!("批量测速流程结束");
         });

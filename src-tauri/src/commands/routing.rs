@@ -157,14 +157,14 @@ pub async fn routing_save_app_rule(
         log::error!("[routing] 重建 config.json 失败（应用分流规则可能未生效）: {}", e);
     }
 
-    // 若内核正在运行，触发配置热重载
+    // 若内核正在运行，通过统一自愈流程让新 config.json 生效
+    // （sing-box 无运行时配置热重载 API：PUT /configs 恒 204 空实现）
     let running_res = crate::commands::settings::core_query_running(app_handle.clone()).await;
     if running_res.data.unwrap_or(false) {
-        let config_path = config_dir.join("config.json");
-        let config_path_str = config_path.to_string_lossy().to_string();
-        let client = crate::core::clash_api::ClashApiClient::default();
-        let _ = client.reload_config(&config_path_str).await;
-        info!("应用分流规则已更新并热重载至 sing-box");
+        if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
+            log::error!("[routing] 规则已保存但内核重启失败（下次启动自动生效）: {}", e);
+        }
+        info!("应用分流规则已更新并同步至 sing-box");
     }
 
     Ok(ApiResponse::ok(()))
@@ -219,14 +219,14 @@ async fn save_custom_rules_internal(app_handle: &AppHandle, rules: &[CustomRuleI
         log::error!("[routing] 重建 config.json 失败（自定义规则可能未生效）: {}", e);
     }
 
-    // 若内核正在运行，触发配置热重载
+    // 若内核正在运行，通过统一自愈流程让新 config.json 生效
+    // （sing-box 无运行时配置热重载 API：PUT /configs 恒 204 空实现）
     let running_res = crate::commands::settings::core_query_running(app_handle.clone()).await;
     if running_res.data.unwrap_or(false) {
-        let config_path = config_dir.join("config.json");
-        let config_path_str = config_path.to_string_lossy().to_string();
-        let client = crate::core::clash_api::ClashApiClient::default();
-        let _ = client.reload_config(&config_path_str).await;
-        info!("自定义分流规则已更新并热重载至 sing-box");
+        if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
+            log::error!("[routing] 规则已保存但内核重启失败（下次启动自动生效）: {}", e);
+        }
+        info!("自定义分流规则已更新并同步至 sing-box");
     }
 
     Ok(())

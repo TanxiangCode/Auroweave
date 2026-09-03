@@ -39,9 +39,21 @@ pub fn start_monitor(app_handle: AppHandle) {
         // 追踪开关上一轮状态：重新开启后的首个周期只记录基线，不计算增量，
         // 避免把连接自建立以来的历史流量重复计入当前小时（双计数）
         let mut tracking_was_enabled = false;
-        // 无超时的客户端在内核 TCP 建立但不再响应时会永久挂起整个监控循环
+        // 无超时的客户端在内核 TCP 建立但不再响应时会永久挂起整个监控循环；
+        // 必须携带 Authorization Bearer 头（内核启用了随机 secret，裸请求恒 401，
+        // 会导致应用级流量统计整体失效）
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
+            .default_headers({
+                let mut h = reqwest::header::HeaderMap::new();
+                if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!(
+                    "Bearer {}",
+                    crate::core::clash_api::get_clash_api_secret()
+                )) {
+                    h.insert(reqwest::header::AUTHORIZATION, v);
+                }
+                h
+            })
             .build()
             .unwrap_or_default();
 

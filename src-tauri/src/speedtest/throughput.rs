@@ -91,9 +91,12 @@ async fn measure_upload(client: &reqwest::Client, duration_secs: u64) -> Result<
     let mut uploaded_bytes: u64 = 0;
 
     // 使用 1MB 的块进行循环上传。
-    // reqwest::Body 会夺取所有权，因此每轮通过 wrap 静态切片构造 Body，
-    // 避免旧实现每轮 payload.clone() 分配 1MB（高频批量测速下的无谓堆压力）。
-    let payload: &'static [u8] = Box::leak(vec![0u8; 1024 * 1024].into_boxed_slice());
+    // reqwest::Body 会夺取所有权，因此用全局静态切片构造，避免每轮 clone 分配 1MB，
+    // 也避免历史实现的 Box::leak 在批量测速（每节点一次调用）中累积泄漏。
+    static PAYLOAD: std::sync::OnceLock<&'static [u8]> = std::sync::OnceLock::new();
+    let payload: &'static [u8] = *PAYLOAD.get_or_init(|| {
+        Box::leak(vec![0u8; 1024 * 1024].into_boxed_slice())
+    });
 
     while start.elapsed() < duration {
         let res = client

@@ -410,6 +410,44 @@ impl SidecarManager {
             }
         }
 
+        // ---- 阶段6b: 进程退出监听 ----
+        // 历史缺陷：Running 状态置位后无人监控子进程，内核崩溃/被系统杀死时
+        // get_status 仍返回 Running，自愈体系（core_query_running 等）整体静默失效。
+        // 此处以低频轮询 try_wait 检测退出（不能移动 Child：stop 需要 kill 句柄），
+        // 退出时把状态回落 Stopped 并记录日志，供上层自愈逻辑感知。
+        {
+            let process = self.process.clone();
+            let status = self.status.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(800));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    interval.tick().await;
+                    let exited = {
+                        let mut guard = process.lock().await;
+                        match guard.as_mut() {
+                            Some(child) => matches!(child.try_wait(), Ok(Some(_))),
+                            // 槽位被 stop() 清空：正常停机，结束监听
+                            None => return,
+                        }
+                    };
+                    if exited {
+                        let cur = status.lock().await.clone();
+                        if matches!(cur, SidecarStatus::Running) {
+                            warn!("[sidecar] 检测到 sing-box 异常退出，状态回落 Stopped");
+                            *status.lock().await = SidecarStatus::Stopped;
+                            // last_known 缓存保持同步，避免 get_status 读到陈旧 Running
+                        }
+                        return;
+                    }
+                    let running = matches!(*status.lock().await, SidecarStatus::Running);
+                    if !running {
+                        return; // stop() 已正常处理，避免重复干预
+                    }
+                }
+            });
+        }
+
         // ---- 阶段7: 标记为 Running，启动完成 ----
         self.set_status(SidecarStatus::Running).await;
         info!("sing-box 子进程启动成功");

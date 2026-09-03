@@ -131,7 +131,14 @@ impl CoreManager {
         let config_path = cache_dir.join("config.json");
         let has_tun = config_content.contains("\"type\": \"tun\"") || config_content.contains("\"type\":\"tun\"");
         info!("正在写入服务缓存配置文件，总长度: {}, 是否携带 TUN inbound: {}", config_content.len(), has_tun);
-        if let Err(e) = std::fs::write(&config_path, config_content) {
+        // 原子写入（tmp + rename）：直接 write 中途失败会留下半截 config.json，
+        // 下次服务启动读到损坏文件即启动失败
+        if let Err(e) = (|| -> std::io::Result<()> {
+            let tmp_path = config_path.with_extension("json.tmp");
+            std::fs::write(&tmp_path, config_content)?;
+            std::fs::rename(&tmp_path, &config_path)?;
+            Ok(())
+        })() {
             let err_msg = format!("写入配置文件失败: {}", e);
             *self.status.lock().await = CoreStatus::Error(err_msg.clone());
             return Err(err_msg);
@@ -203,16 +210,22 @@ impl CoreManager {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        // stderr 额外缓存到 Vec，供早期退出检测时拼装错误信息
-        let stderr_lines_arc = Arc::new(Mutex::new(Vec::<String>::new()));
+        // stderr 额外缓存到固定容量环形缓冲（上限 200 行），供早期退出检测时
+        // 拼装错误信息；无上限 Vec 在内核长期运行狂刷日志时会无限增长
+        let stderr_lines_arc = Arc::new(Mutex::new(std::collections::VecDeque::<String>::new()));
         if let Some(stderr_stream) = stderr {
             use tokio::io::{AsyncBufReadExt, BufReader};
             let arc_clone = stderr_lines_arc.clone();
             tokio::spawn(async move {
+                const STDERR_RING_CAP: usize = 200;
                 let mut reader = BufReader::new(stderr_stream).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
                     error!("[sing-box error] {}", line);
-                    arc_clone.lock().await.push(line);
+                    let mut buf = arc_clone.lock().await;
+                    buf.push_back(line);
+                    if buf.len() > STDERR_RING_CAP {
+                        buf.pop_front();
+                    }
                 }
             });
         }
@@ -237,7 +250,7 @@ impl CoreManager {
                 let mut err_msg = format!("sing-box 启动后立即退出，退出码: {:?}", exit_status.code());
                 let lines = stderr_lines_arc.lock().await;
                 if !lines.is_empty() {
-                    err_msg = format!("{}\n详情: {}", err_msg, lines.join("\n"));
+                    err_msg = format!("{}\n详情: {}", err_msg, lines.iter().rev().take(30).rev().cloned().collect::<Vec<String>>().join("\n"));
                 }
                 Some(err_msg)
             }
