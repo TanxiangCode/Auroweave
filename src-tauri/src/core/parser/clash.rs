@@ -65,6 +65,59 @@ fn extract_port(proxy: &YamlValue) -> Option<u16> {
     }
 }
 
+/// 从 ws path 的 "?ed=2048" 后缀拆出 early data 参数（v2rayN 生态惯例）：
+/// `/ws?ed=2048` → path=`/ws` + max_early_data=2048 + early_data_header_name=Sec-WebSocket-Protocol
+/// （sing-box 早期数据默认走 path，与 Xray 服务端兼容必须指定 header 名，见 shared/v2ray-transport.md）
+fn split_ws_early_data(path: &str) -> (String, Option<u32>) {
+    match path.rsplit_once("?ed=") {
+        Some((pure, n)) => {
+            let max_early = n.parse::<u32>().unwrap_or(0);
+            if max_early > 0 {
+                (pure.to_string(), Some(max_early))
+            } else {
+                (path.to_string(), None)
+            }
+        }
+        None => (path.to_string(), None),
+    }
+}
+
+/// 构建 Clash YAML 的 ws/grpc 传输层 JSON（vmess/vless/trojan 共用）。
+/// 关键字段：ws-opts.headers.Host（CDN 回源必需，历史缺陷丢失导致节点不可用）。
+fn build_clash_transport(net: &str, proxy: &YamlValue) -> Option<serde_json::Value> {
+    match net {
+        "ws" => {
+            let ws_opts = proxy.get("ws-opts");
+            let raw_path = ws_opts.and_then(|v| v.get("path")).and_then(|v| v.as_str()).unwrap_or("/");
+            let (path, max_early) = split_ws_early_data(raw_path);
+            let mut t = json!({ "type": "ws", "path": path });
+            if let Some(host) = ws_opts
+                .and_then(|v| v.get("headers"))
+                .and_then(|h| h.get("Host").or_else(|| h.get("host")))
+                .and_then(|v| v.as_str())
+            {
+                if !host.is_empty() {
+                    t["headers"] = json!({ "Host": host });
+                }
+            }
+            if let Some(ed) = max_early {
+                t["max_early_data"] = json!(ed);
+                t["early_data_header_name"] = json!("Sec-WebSocket-Protocol");
+            }
+            Some(t)
+        }
+        "grpc" => {
+            let service_name = proxy
+                .get("grpc-opts")
+                .and_then(|v| v.get("grpc-service-name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            Some(json!({ "type": "grpc", "service_name": service_name }))
+        }
+        _ => None,
+    }
+}
+
 fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
     let name = proxy.get("name")?.as_str()?.to_string();
     let proxy_type = proxy.get("type")?.as_str()?.to_lowercase();
@@ -86,8 +139,19 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
         }
         "vmess" => {
             let uuid = proxy.get("uuid")?.as_str()?.to_string();
-            let alter_id = proxy.get("alterId").and_then(|v| v.as_u64()).unwrap_or(0);
-            let cipher = proxy.get("cipher").and_then(|v| v.as_str()).unwrap_or("auto");
+            // alterId 字符串形式（"64"）兼容：老订阅常见
+            let alter_id = match proxy.get("alterId") {
+                Some(serde_yaml::Value::Number(n)) => n.as_u64().unwrap_or(0),
+                Some(serde_yaml::Value::String(s)) => s.parse::<u64>().unwrap_or(0),
+                _ => 0,
+            };
+            let cipher_raw = proxy.get("cipher").and_then(|v| v.as_str()).unwrap_or("auto");
+            // vmess security 白名单（同 v2ray.rs，非法值回退 auto 防整配置拒载）
+            const VMESS_SECURITY: &[&str] = &["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305", "aes-128-ctr"];
+            let cipher = if VMESS_SECURITY.contains(&cipher_raw) { cipher_raw } else {
+                log::warn!("[parser] Clash vmess 节点 [{}] 的非法加密方式 {} 回退为 auto", name, cipher_raw);
+                "auto"
+            };
             let mut obj = json!({
                 "type": "vmess",
                 "tag": name,
@@ -108,12 +172,8 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 }
             }
             if let Some(net) = proxy.get("network").and_then(|v| v.as_str()) {
-                if net == "ws" {
-                    let path = proxy.get("ws-opts").and_then(|v| v.get("path")).and_then(|v| v.as_str()).unwrap_or("/");
-                    obj["transport"] = json!({ "type": "ws", "path": path });
-                } else if net == "grpc" {
-                    let service_name = proxy.get("grpc-opts").and_then(|v| v.get("grpc-service-name")).and_then(|v| v.as_str()).unwrap_or("");
-                    obj["transport"] = json!({ "type": "grpc", "service_name": service_name });
+                if let Some(transport) = build_clash_transport(net, proxy) {
+                    obj["transport"] = transport;
                 }
             }
             ("vmess".to_string(), obj)
@@ -128,15 +188,31 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 "uuid": uuid
             });
             if let Some(flow) = proxy.get("flow").and_then(|v| v.as_str()) {
-                if !flow.is_empty() { obj["flow"] = json!(flow); }
+                // vless flow 白名单：sing-box 1.14 仅支持 xtls-rprx-vision，
+                // 旧值（xtls-rprx-direct 等）会被服务端拒绝，直接丢弃
+                if flow == "xtls-rprx-vision" { obj["flow"] = json!(flow); }
+            }
+            // vless 同样支持 ws/grpc 传输（历史缺陷：vless 分支完全丢失 network 处理，
+            // 带 ws-opts 的 vless 节点转换后裸 TCP 直连，节点必坏）
+            if let Some(net) = proxy.get("network").and_then(|v| v.as_str()) {
+                if let Some(transport) = build_clash_transport(net, proxy) {
+                    obj["transport"] = transport;
+                }
             }
             if let Some(reality_opts) = proxy.get("reality-opts") {
                 let public_key = reality_opts.get("public-key").and_then(|v| v.as_str()).unwrap_or("");
                 let short_id = reality_opts.get("short-id").and_then(|v| v.as_str()).unwrap_or("");
+                // reality 的 public_key 是必填项（文档 shared/tls.md：Required），
+                // 空串握手必失败——与 v2ray URI 侧对齐，直接拒绝解析该节点
+                if public_key.is_empty() {
+                    log::warn!("[parser] Clash vless reality 节点 [{}] 缺少 public-key，跳过", name);
+                    return None;
+                }
                 let sni = proxy.get("servername").or_else(|| proxy.get("sni")).and_then(|v| v.as_str());
-                let skip_verify = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
+                let fingerprint = proxy.get("client-fingerprint").and_then(|v| v.as_str()).unwrap_or("chrome");
                 let mut reality = json!({
                     "enabled": true,
+                    "utls": { "enabled": true, "fingerprint": fingerprint },
                     "reality": {
                         "enabled": true,
                         "public_key": public_key,
@@ -144,12 +220,15 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                     }
                 });
                 if let Some(s) = sni { reality["server_name"] = json!(s); }
-                if skip_verify { reality["insecure"] = json!(true); }
                 obj["tls"] = reality;
             } else if proxy.get("tls").and_then(|v| v.as_bool()).unwrap_or(false) {
                 let sni = proxy.get("servername").or_else(|| proxy.get("sni")).and_then(|v| v.as_str());
                 let skip_verify = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
-                let mut tls_obj = json!({ "enabled": true });
+                let fingerprint = proxy.get("client-fingerprint").and_then(|v| v.as_str()).unwrap_or("chrome");
+                let mut tls_obj = json!({
+                    "enabled": true,
+                    "utls": { "enabled": true, "fingerprint": fingerprint }
+                });
                 if let Some(s) = sni { tls_obj["server_name"] = json!(s); }
                 if skip_verify { tls_obj["insecure"] = json!(true); }
                 obj["tls"] = tls_obj;
@@ -174,9 +253,8 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 "tls": tls_obj
             });
             if let Some(net) = proxy.get("network").and_then(|v| v.as_str()) {
-                if net == "ws" {
-                    let path = proxy.get("ws-opts").and_then(|v| v.get("path")).and_then(|v| v.as_str()).unwrap_or("/");
-                    obj["transport"] = json!({ "type": "ws", "path": path });
+                if let Some(transport) = build_clash_transport(net, proxy) {
+                    obj["transport"] = transport;
                 }
             }
             ("trojan".to_string(), obj)

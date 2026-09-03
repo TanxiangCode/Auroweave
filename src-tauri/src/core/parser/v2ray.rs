@@ -152,7 +152,15 @@ fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
         Some(serde_json::Value::String(s)) => s.parse::<u64>().unwrap_or(0),
         _ => 0,
     };
-    let security = v.get("scy").or_else(|| v.get("cipher")).and_then(|s| s.as_str()).unwrap_or("auto");
+    let security_raw = v.get("scy").or_else(|| v.get("cipher")).and_then(|s| s.as_str()).unwrap_or("auto");
+    // vmess security 白名单（sing-box outbound/vmess.md 全集）：
+    // 非法值（aes-128-cfb、chacha20、rc4 等存量生态常见值）会被内核在出站初始化
+    // 阶段拒载整份配置，而非仅该节点失败——统一回退 auto
+    const VMESS_SECURITY: &[&str] = &["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305", "aes-128-ctr"];
+    let security = if VMESS_SECURITY.contains(&security_raw) { security_raw } else {
+        log::warn!("[parser] vmess 节点 [{}] 的非法加密方式 {} 回退为 auto", name, security_raw);
+        "auto"
+    };
 
     let mut raw_json = json!({
         "type": "vmess",
@@ -179,14 +187,24 @@ fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
     }
 
     if net == "ws" {
-        let path = v.get("path").and_then(|s| s.as_str()).unwrap_or("/");
+        let raw_path = v.get("path").and_then(|s| s.as_str()).unwrap_or("/");
         let host = v.get("host").and_then(|s| s.as_str()).unwrap_or("");
+        // 拆出 "?ed=2048" 早期数据后缀（v2rayN 惯例，见 shared/v2ray-transport.md：
+        // 与 Xray 服务端兼容需指定 early_data_header_name 为 Sec-WebSocket-Protocol）
+        let (path, max_early) = match raw_path.rsplit_once("?ed=") {
+            Some((p, n)) => (p.to_string(), n.parse::<u32>().unwrap_or(0)),
+            None => (raw_path.to_string(), 0),
+        };
         let mut transport = json!({
             "type": "ws",
             "path": path
         });
         if !host.is_empty() {
             transport["headers"] = json!({ "Host": host });
+        }
+        if max_early > 0 {
+            transport["max_early_data"] = json!(max_early);
+            transport["early_data_header_name"] = json!("Sec-WebSocket-Protocol");
         }
         raw_json["transport"] = transport;
     } else if net == "grpc" {
@@ -285,13 +303,31 @@ fn parse_host_port(s: &str) -> Option<(String, u16)> {
     }
 }
 
+/// 从 URL 提取完整凭据并 percent-decode。
+/// `Url::username()/password()` 返回编码原文，密码含 %40 等编码字符时须还原；
+/// hy2/anytls 等协议的 `user:pass@` 形式按官方语义整体作为密码（见
+/// outbound/hysteria2.md：userpass 认证即 username:password 组合）。
+fn extract_credentials(parsed_url: &Url) -> String {
+    let mut cred = urlencoding::decode(parsed_url.username())
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| parsed_url.username().to_string());
+    if let Some(p) = parsed_url.password() {
+        let decoded_p = urlencoding::decode(p).map(|c| c.into_owned()).unwrap_or_else(|_| p.to_string());
+        cred.push(':');
+        cred.push_str(&decoded_p);
+    }
+    cred
+}
+
 /// VLESS 链接解析器
 fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
     let parsed_url = Url::parse(uri).ok()?;
     let tag = extract_tag(&parsed_url, "VLESS");
     let server = parsed_url.host_str()?.to_string();
     let port = parsed_url.port()?;
-    let uuid = parsed_url.username().to_string();
+    let uuid = urlencoding::decode(parsed_url.username())
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| parsed_url.username().to_string());
 
     let mut sni = None;
     let mut security = None;
@@ -379,15 +415,25 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
     // 处理 Transport
     if let Some(t) = net_type {
         if t == "ws" {
+            let raw_path = path.clone().unwrap_or_else(|| "/".to_string());
+            // 拆出 "?ed=2048" 早期数据后缀（与 vmess 侧一致，Xray 兼容）
+            let (pure_path, max_early) = match raw_path.rsplit_once("?ed=") {
+                Some((p, n)) => (p.to_string(), n.parse::<u32>().unwrap_or(0)),
+                None => (raw_path, 0),
+            };
             let mut transport = json!({
                 "type": "ws",
-                "path": path.clone().unwrap_or_else(|| "/".to_string())
+                "path": pure_path
             });
             // ws 传输的 host 参数写入 Host 头（CDN 场景下与 path 同样关键）
             if let Some(h) = host.as_deref() {
                 if !h.is_empty() {
                     transport["headers"] = json!({ "Host": h });
                 }
+            }
+            if max_early > 0 {
+                transport["max_early_data"] = json!(max_early);
+                transport["early_data_header_name"] = json!("Sec-WebSocket-Protocol");
             }
             raw_json["transport"] = transport;
         } else if t == "grpc" {
@@ -413,7 +459,8 @@ fn parse_trojan_uri(uri: &str) -> Option<ParsedOutbound> {
     let tag = extract_tag(&parsed_url, "Trojan");
     let server = parsed_url.host_str()?.to_string();
     let port = parsed_url.port()?;
-    let password = parsed_url.username().to_string();
+    // percent-decode 凭据；hy2 userpass（user:pass@）按官方语义整体作为密码
+    let password = extract_credentials(&parsed_url);
 
     let mut sni = None;
     let mut net_type = None;
@@ -483,7 +530,8 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     let tag = extract_tag(&parsed_url, "Hysteria2");
     let server = parsed_url.host_str()?.to_string();
     let port = parsed_url.port()?;
-    let password = parsed_url.username().to_string();
+    // percent-decode 凭据；hy2 userpass（user:pass@）按官方语义整体作为密码
+    let password = extract_credentials(&parsed_url);
 
     let mut sni = None;
     let mut insecure = false;
@@ -541,7 +589,8 @@ fn parse_anytls_uri(uri: &str) -> Option<ParsedOutbound> {
     let tag = extract_tag(&parsed_url, "AnyTLS");
     let server = parsed_url.host_str()?.to_string();
     let port = parsed_url.port()?;
-    let password = parsed_url.username().to_string();
+    // percent-decode 凭据；hy2 userpass（user:pass@）按官方语义整体作为密码
+    let password = extract_credentials(&parsed_url);
 
     let mut sni = None;
     let mut fp = "chrome".to_string();
