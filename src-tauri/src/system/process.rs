@@ -40,16 +40,51 @@ pub fn is_process_running(keyword: &str) -> bool {
 }
 
 /// 根据可执行文件名强制结束进程 (Windows Only)
+///
+/// 注意：taskkill /F /IM 按名称全局匹配，会杀掉系统内所有同名进程（包括其他用户
+/// 启动的无关实例）。仅应作为无法获取 PID 时的最后手段，优先使用 force_kill_by_pid。
 #[cfg(target_os = "windows")]
 pub fn force_kill_process(exe_name: &str) -> bool {
+    log::warn!("[process] 按名称全局强杀进程 {}（最后手段，建议优先按 PID 终止）", exe_name);
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    
+
     let mut cmd = std::process::Command::new("taskkill");
     cmd.args(["/F", "/IM", exe_name])
        .creation_flags(CREATE_NO_WINDOW);
-       
+
     cmd.status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// 按 PID 精确强制结束指定进程 (Windows Only)
+///
+/// 相比按名称强杀，PID 精确匹配不会误杀其他无关同名进程。
+/// 返回 false 表示进程可能已退出或 PID 无效。
+#[cfg(target_os = "windows")]
+pub fn force_kill_by_pid(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.args(["/F", "/PID", &pid.to_string()])
+       .creation_flags(CREATE_NO_WINDOW);
+
+    cmd.status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// 查找指定名称（不含 .exe 后缀，大小写不敏感）进程的 PID 列表
+///
+/// 用于把"按名强杀"升级为"按 PID 精确终止"。
+#[cfg(target_os = "windows")]
+pub fn find_pids_by_name(exe_name: &str) -> Vec<u32> {
+    let keyword = exe_name.trim_end_matches(".exe").to_lowercase();
+    let mut sys = System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+    sys.processes()
+        .iter()
+        .filter(|(_, p)| p.name().to_string_lossy().to_lowercase().contains(&keyword))
+        .map(|(pid, _)| pid.as_u32())
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

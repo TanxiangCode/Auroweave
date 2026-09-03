@@ -1,19 +1,17 @@
 /// IPC 命令 — 日志管理（读取 / 清理）
 /// 作者: TanXiang
+///
+/// 日志目录统一使用 crate::get_log_dir()（= get_data_root()/logs），
+/// 与 lib.rs 中 tauri-plugin-log 的写入目录保持一致。
+/// Windows 为 %ProgramData%\Auroweave\logs，macOS 为 ~/Library/Application Support/Auroweave/logs。
 use crate::error::ApiResponse;
 use std::fs;
-
-/// 获取统一数据根目录
-fn data_root() -> std::path::PathBuf {
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    std::path::PathBuf::from(program_data).join("Auroweave")
-}
 
 /// 读取主程序日志（最近 N 行，默认 500 行）
 #[tauri::command]
 pub async fn log_read_app(lines: Option<usize>) -> ApiResponse<String> {
     let limit = lines.unwrap_or(500);
-    let log_path = data_root().join("logs").join("auroweave.log");
+    let log_path = crate::get_log_dir().join("auroweave.log");
     if !log_path.exists() {
         return ApiResponse::ok(String::new());
     }
@@ -32,12 +30,13 @@ pub async fn log_read_app(lines: Option<usize>) -> ApiResponse<String> {
 #[tauri::command]
 pub async fn log_read_service(lines: Option<usize>) -> ApiResponse<String> {
     let limit = lines.unwrap_or(500);
-    let log_path = data_root().join("logs").join("service.log");
+    let log_path = crate::get_log_dir().join("service.log");
     if !log_path.exists() {
         return ApiResponse::ok(String::new());
     }
     match fs::read_to_string(&log_path) {
         Ok(content) => {
+            // 返回最后 N 行
             let all_lines: Vec<&str> = content.lines().collect();
             let start = all_lines.len().saturating_sub(limit);
             ApiResponse::ok(all_lines[start..].join("\n"))
@@ -51,10 +50,10 @@ pub async fn log_read_service(lines: Option<usize>) -> ApiResponse<String> {
 #[tauri::command]
 pub async fn log_clear_all() -> ApiResponse<()> {
     log::info!("[logging] 用户请求清空所有日志文件");
-    let root = data_root();
+    let log_dir = crate::get_log_dir();
     let files = [
-        root.join("logs").join("auroweave.log"),
-        root.join("logs").join("service.log"),
+        log_dir.join("auroweave.log"),
+        log_dir.join("service.log"),
     ];
     let mut errors: Vec<String> = Vec::new();
     for path in &files {

@@ -40,6 +40,14 @@ pub async fn speedtest_run_latency(
         test_url
     );
 
+    // 空节点列表直接报错，避免启动"0 个节点"的空批次让前端误以为测试完成
+    if node_tags.is_empty() {
+        return Ok(ApiResponse::err(
+            AppError::Validation("节点列表为空，无需执行延迟测试".to_string()),
+            400,
+        ));
+    }
+
     let clash_client = Arc::new(ClashApiClient::default());
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut join_set = tokio::task::JoinSet::new();
@@ -101,6 +109,13 @@ pub async fn speedtest_run_single(
     app_handle: tauri::AppHandle,
     node_tag: String,
 ) -> Result<ApiResponse<ThroughputResult>, AppError> {
+    let node_tag = node_tag.trim().to_string();
+    if node_tag.is_empty() {
+        return Ok(ApiResponse::err(
+            AppError::Validation("节点名称不能为空".to_string()),
+            400,
+        ));
+    }
     info!("开始对节点 [{}] 运行单体吞吐量测速...", node_tag);
     let port = crate::speedtest::get_mixed_port(&app_handle);
     match run_single_throughput_test(&node_tag, 5, port).await {
@@ -117,6 +132,13 @@ pub async fn speedtest_run_batch(
     group_tag: String,
     node_tags: Vec<String>,
 ) -> Result<ApiResponse<()>, AppError> {
+    // 空节点列表直接报错，避免启动空批次（调度器会立刻"完成"让前端误判成功）
+    if node_tags.is_empty() {
+        return Ok(ApiResponse::err(
+            AppError::Validation("节点列表为空，无法启动批量测速".to_string()),
+            400,
+        ));
+    }
     info!("启动批量测速队列，分组: {}, 节点数量: {}", group_tag, node_tags.len());
     scheduler.run_batch(app_handle, group_tag, node_tags).await;
     Ok(ApiResponse::ok(()))

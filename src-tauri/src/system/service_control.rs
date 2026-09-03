@@ -26,7 +26,13 @@ mod win {
     const SERVICE_RUNNING: u32 = 4;
     const SERVICE_STOPPED: u32 = 1;
     use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
-    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+    // WAIT_TIMEOUT: WaitForSingleObject 超时返回值；UAC 提权子进程最多等待 120 秒
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, WAIT_TIMEOUT};
+
+    /// UAC 提权子进程等待上限（毫秒）。
+    /// 旧实现使用 INFINITE 等待：UAC 弹窗无人响应会永久挂起主程序，
+    /// 120 秒足够用户在正常节奏下完成密码输入/取消。
+    const UAC_WAIT_TIMEOUT_MS: u32 = 120_000;
 
     const SERVICE_NAME: &str = "AuroweaveCoreService";
 
@@ -199,9 +205,13 @@ mod win {
                 return Err(format!("UAC 弹窗被拒绝或提权启动失败: {}", err));
             }
 
-            // 等待提权子进程退出并检查退出码
+            // 等待提权子进程退出并检查退出码（120 秒超时，防 UAC 弹窗无人响应时永久挂起）
             if info.hProcess != 0 && info.hProcess != INVALID_HANDLE_VALUE {
-                WaitForSingleObject(info.hProcess, INFINITE);
+                let wait_res = WaitForSingleObject(info.hProcess, UAC_WAIT_TIMEOUT_MS);
+                if wait_res == WAIT_TIMEOUT {
+                    CloseHandle(info.hProcess);
+                    return Err("等待提权操作超时（120 秒）：用户取消或未响应 UAC 提示".to_string());
+                }
                 let mut exit_code: u32 = 0;
                 let get_exit_res = GetExitCodeProcess(info.hProcess, &mut exit_code);
                 CloseHandle(info.hProcess);
@@ -366,11 +376,17 @@ pub fn run_direct_tun_task(app_handle: &tauri::AppHandle) -> Result<(), String> 
     let manifest = serde_json::json!({
         "svc_path": svc_path.to_string_lossy(),
         "svc_hash": svc_hash,
+        // svc_version 供服务端自更新做版本单调递增校验（防降级攻击），
+        // 缺失该字段时服务端会拒绝自替换
+        "svc_version": env!("CARGO_PKG_VERSION"),
         "singbox_path": singbox_path.to_string_lossy(),
         "singbox_hash": singbox_hash
     });
-    
-    let _ = std::fs::write(manifest_file, manifest.to_string());
+
+    // manifest 属于消费方（提权进程/服务）的信任输入，写入失败必须上抛而非静默
+    if let Err(e) = std::fs::write(&manifest_file, manifest.to_string()) {
+        return Err(format!("写入 manifest.json 失败: {}", e));
+    }
 
     // 步骤4: 执行 schtasks /run 触发预注册的提权计划任务
     log::info!("执行 schtasks /run /tn AuroweaveDirectTunTask");
@@ -392,45 +408,98 @@ pub fn run_direct_tun_task(app_handle: &tauri::AppHandle) -> Result<(), String> 
 ///
 /// 流程：
 /// 1. 执行 `schtasks /end` 终止计划任务
-/// 2. 等待 300ms 让退出信号生效
-/// 3. 检测 AuroDaemon 和 sing-box 残留进程，若存在则强杀
+/// 2. 等待 300ms 让退出信号生效（异步 sleep，不阻塞运行时线程）
+/// 3. 检测 AuroDaemon 和 sing-box 残留进程：
+///    - 优先读取 PID 文件按 PID 精确终止（taskkill /F /PID）
+///    - PID 不可得时才退化为按名称强杀（最后手段）
 #[cfg(target_os = "windows")]
-pub fn stop_direct_tun_task() -> Result<(), String> {
+pub async fn stop_direct_tun_task() -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    
+
     log::info!("执行 schtasks /end /tn AuroweaveDirectTunTask");
     let mut cmd = std::process::Command::new("schtasks");
     cmd.arg("/end")
         .arg("/tn")
         .arg("AuroweaveDirectTunTask")
         .creation_flags(CREATE_NO_WINDOW);
-        
+
     let _ = cmd.status();
 
-    // 等待计划任务退出信号生效
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    // 等待计划任务退出信号生效（异步 sleep：本函数被 startup.rs 的 async 链路调用）
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
     // 使用共用的模块函数高效检测残留进程
     let running_status = crate::system::process::check_processes_running(&[
         crate::system::process::PROCESS_NAME_DAEMON,
         crate::system::process::PROCESS_NAME_SINGBOX,
     ]);
-    
+
     let has_daemon = *running_status.get(crate::system::process::PROCESS_NAME_DAEMON).unwrap_or(&false);
     let has_singbox = *running_status.get(crate::system::process::PROCESS_NAME_SINGBOX).unwrap_or(&false);
 
+    // 提权任务模式下 AuroDaemon 会将 sing-box 的 PID 写入 config_dir 下的 pid 文件
+    let daemon_pid = read_core_pid_file("singbox.pid");
+    let svc_pid = read_core_pid_file("svc.pid");
+
     if has_daemon {
-        log::info!("AuroDaemon 残留，执行强杀...");
-        crate::system::process::force_kill_process(&format!("{}.exe", crate::system::process::PROCESS_NAME_DAEMON));
+        log::info!("AuroDaemon 残留，按 PID 精确终止...");
+        let killed = match svc_pid {
+            Some(pid) => crate::system::process::force_kill_by_pid(pid),
+            None => {
+                // PID 不可得：按名查 PID 再逐个终止，避免 taskkill /IM 全局误杀
+                let pids = crate::system::process::find_pids_by_name(
+                    &format!("{}.exe", crate::system::process::PROCESS_NAME_DAEMON),
+                );
+                if pids.is_empty() {
+                    crate::system::process::force_kill_process(&format!(
+                        "{}.exe",
+                        crate::system::process::PROCESS_NAME_DAEMON
+                    ))
+                } else {
+                    pids.iter().all(|pid| crate::system::process::force_kill_by_pid(*pid))
+                }
+            }
+        };
+        if !killed {
+            log::warn!("AuroDaemon 残留进程终止失败（可能已自行退出）");
+        }
     }
-        
+
     if has_singbox {
-        log::info!("sing-box 残留，执行强杀...");
-        crate::system::process::force_kill_process(&format!("{}.exe", crate::system::process::PROCESS_NAME_SINGBOX));
+        log::info!("sing-box 残留，按 PID 精确终止...");
+        let killed = match daemon_pid {
+            Some(pid) => crate::system::process::force_kill_by_pid(pid),
+            None => {
+                let pids = crate::system::process::find_pids_by_name(
+                    &format!("{}.exe", crate::system::process::PROCESS_NAME_SINGBOX),
+                );
+                if pids.is_empty() {
+                    crate::system::process::force_kill_process(&format!(
+                        "{}.exe",
+                        crate::system::process::PROCESS_NAME_SINGBOX
+                    ))
+                } else {
+                    pids.iter().all(|pid| crate::system::process::force_kill_by_pid(*pid))
+                }
+            }
+        };
+        if !killed {
+            log::warn!("sing-box 残留进程终止失败（可能已自行退出）");
+        }
     }
 
     Ok(())
+}
+
+/// 读取 config_dir 下的内核/守护进程 PID 文件
+///
+/// 返回 None 表示文件缺失或内容非数字（此时调用方应退化为按进程名处理）。
+#[cfg(target_os = "windows")]
+fn read_core_pid_file(name: &str) -> Option<u32> {
+    let pid_file = crate::get_config_dir().join(name);
+    let content = std::fs::read_to_string(pid_file).ok()?;
+    content.trim().parse::<u32>().ok()
 }
 
 /// 查询提权计划任务是否正在运行

@@ -226,8 +226,13 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
 #[tauri::command]
 pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
     log::info!("[proxy] 强制设置系统代理状态: enabled={}, port={}", enabled, port);
-    let _ = crate::system::sysproxy::set_system_proxy(enabled, port);
-    ApiResponse::ok(())
+    match crate::system::sysproxy::set_system_proxy(enabled, port) {
+        Ok(_) => ApiResponse::ok(()),
+        Err(e) => {
+            log::error!("[proxy] 设置系统代理失败: enabled={}, port={}, 原因: {}", enabled, port, e);
+            ApiResponse::err(format!("设置系统代理失败: {}", e), 500)
+        }
+    }
 }
 
 /// 以管理员身份提权重启当前 Auroweave 程序
@@ -267,24 +272,33 @@ ApiResponse::err("以管理员身份提权重启失败".to_string(), 500)
 }
 
 /// 获取内核版本号
+///
+/// Command::output() 是阻塞系统调用（外部进程执行 + 管道读取），
+/// 移入 spawn_blocking 避免阻塞 tokio 异步运行时工作线程。
 #[tauri::command]
 pub async fn proxy_get_singbox_version() -> ApiResponse<String> {
-    match crate::core::sidecar::SidecarManager::resolve_binary_path() {
-        Ok(path) => {
-            if let Ok(output) = std::process::Command::new(path).arg("version").output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // 提取版本号（sing-box version 1.14.0）
-                for line in stdout.lines() {
-                    if line.starts_with("sing-box version ") {
-                        let version = line.replace("sing-box version ", "").trim().to_string();
-                        return ApiResponse::ok(version);
+    let version_result = tauri::async_runtime::spawn_blocking(|| {
+        crate::core::sidecar::SidecarManager::resolve_binary_path().map(|path| {
+            match std::process::Command::new(path).arg("version").output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    // 提取版本号（sing-box version 1.14.0）
+                    for line in stdout.lines() {
+                        if line.starts_with("sing-box version ") {
+                            return line.replace("sing-box version ", "").trim().to_string();
+                        }
                     }
+                    stdout.lines().next().unwrap_or("Unknown").to_string()
                 }
-                ApiResponse::ok(stdout.lines().next().unwrap_or("Unknown").to_string())
-            } else {
-                ApiResponse::err("无法执行内核程序", 500)
+                Err(_) => "Unknown".to_string(),
             }
-        }
+        })
+    })
+    .await
+    .unwrap_or_else(|e| Err(crate::error::AppError::Unknown(format!("版本查询任务失败: {}", e))));
+
+    match version_result {
+        Ok(version) => ApiResponse::ok(version),
         Err(_) => ApiResponse::err("未找到内核程序", 404),
     }
 }

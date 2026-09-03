@@ -40,17 +40,17 @@ mod win_registry {
             hKey: *mut std::ffi::c_void,
             lpSubKey: *const u16,
             ulOptions: u32,
-            samDesired: u32,
+            samDeserved: u32,
             phkResult: *mut *mut std::ffi::c_void,
         ) -> i32;
 
-        fn RegSetValueExW(
+        fn RegQueryValueExW(
             hKey: *mut std::ffi::c_void,
             lpValueName: *const u16,
-            Reserved: u32,
-            dwType: u32,
-            lpData: *const u8,
-            cbData: u32,
+            lpReserved: *mut u32,
+            lpType: *mut u32,
+            lpData: *mut u8,
+            lpcbData: *mut u32,
         ) -> i32;
 
         fn RegCloseKey(hKey: *mut std::ffi::c_void) -> i32;
@@ -58,6 +58,7 @@ mod win_registry {
 
     const HKEY_CURRENT_USER: *mut std::ffi::c_void = 0x80000001 as *mut std::ffi::c_void;
     const KEY_SET_VALUE: u32 = 0x0002;
+    const KEY_QUERY_VALUE: u32 = 0x0001;
     const REG_DWORD: u32 = 4;
     const REG_SZ: u32 = 1;
 
@@ -67,6 +68,24 @@ mod win_registry {
             .chain(std::iter::once(0))
             .collect()
     }
+
+    /// 查询注册表 ProxyEnable 是否为 1（系统代理是否开启）
+    pub fn is_proxy_enabled() -> bool {
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+        let mut hkey: *mut std::ffi::c_void = ptr::null_mut();
+        unsafe {
+            if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey) != 0 {
+                return false;
+            }
+            let name = to_wide("ProxyEnable");
+            let mut data: u32 = 0;
+            let mut cb_data: u32 = 4;
+            let res = RegQueryValueExW(hkey, name.as_ptr(), ptr::null_mut(), ptr::null_mut(), &mut data as *mut u32 as *mut u8, &mut cb_data);
+            RegCloseKey(hkey);
+            res == 0 && data == 1
+        }
+    }
+
 
     pub fn set_proxy_registry(enabled: bool, server: &str) -> Result<(), String> {
         let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
@@ -236,6 +255,33 @@ mod mac_sysproxy {
         }
     }
 
+    /// 查询系统代理是否开启（macOS）
+    ///
+    /// 通过 `networksetup -getwebproxy Wi-Fi`（或首个可用网络服务）解析
+    /// "Enabled: Yes/No" 判断；查询失败按未开启处理。
+    pub fn is_proxy_enabled() -> bool {
+        let services = get_network_services();
+        let service = match services.first() {
+            Some(s) => s.replace('\'', "'\\''"),
+            None => return false,
+        };
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(format!("networksetup -getwebproxy '{}'", service))
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                stdout
+                    .lines()
+                    .find(|l| l.trim_start().starts_with("Enabled"))
+                    .map(|l| l.to_lowercase().contains("yes"))
+                    .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
     /// 设置系统代理 (macOS)
     ///
     /// 在所有已启用的网络服务上设置/取消 HTTP、HTTPS、SOCKS 代理。
@@ -307,6 +353,19 @@ mod mac_sysproxy {
 mod linux_sysproxy {
     use std::process::Command;
 
+    /// 查询 GNOME 系统代理模式是否为 manual（即 Auroweave 开启的代理状态）
+    pub fn is_proxy_enabled() -> bool {
+        let output = Command::new("gsettings")
+            .args(["get", "org.gnome.system.proxy", "mode"])
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                String::from_utf8_lossy(&out.stdout).trim().eq_ignore_ascii_case("'manual'")
+            }
+            _ => false,
+        }
+    }
+
     pub fn set_proxy(enabled: bool, port: u16) -> Result<(), String> {
         // 检查系统是否有 gsettings 工具
         let has_gsettings = Command::new("which")
@@ -361,10 +420,38 @@ mod linux_sysproxy {
 // 公共 API — 各平台统一接口
 // ===========================================================================
 
+/// 查询系统代理当前是否开启
+///
+/// 供托盘"开→关→开"翻转语义使用：
+/// - Windows: 读取注册表 ProxyEnable
+/// - macOS: 查询首个网络服务的 Web 代理状态
+/// - Linux: 查询 gsettings 代理模式是否为 manual
+pub fn get_system_proxy_status() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        win_registry::is_proxy_enabled()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        mac_sysproxy::is_proxy_enabled()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux_sysproxy::is_proxy_enabled()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        false
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
     let server_val = format!("127.0.0.1:{}", port);
-    win_registry::set_proxy_registry(enabled, &server_val)?;
+    if let Err(e) = win_registry::set_proxy_registry(enabled, &server_val) {
+        log::error!("[sysproxy] 写入注册表失败: enabled={}, port={}, 原因: {}", enabled, port, e);
+        return Err(e);
+    }
     win_sysproxy::refresh();
     Ok(())
 }

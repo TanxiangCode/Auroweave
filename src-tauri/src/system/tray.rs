@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -7,6 +8,30 @@ use tracing::info;
 use crate::commands::settings::settings_get_internal;
 
 pub const TRAY_ID: &str = "auroweave-tray";
+
+/// 托盘设置 TTL 缓存：避免每次流量刷新（最高频 2s/次）都重读 settings.json
+///
+/// 结构: (show_tray_speed 是否显示, clash_api_port 端口, 缓存写入时刻)
+static TRAY_SETTINGS_CACHE: Mutex<Option<(bool, u16, std::time::Instant)>> = Mutex::new(None);
+
+/// TTL 缓存有效期：30 秒（设置变更最多延迟 30 秒反映到托盘，换来高频路径免读盘）
+const TRAY_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// 读取托盘所需设置（show_tray_speed + clash_api_port），带 30s TTL 缓存
+fn tray_settings_cached(app_handle: &AppHandle) -> (bool, u16) {
+    let mut cache = TRAY_SETTINGS_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((show, port, at)) = cache.as_ref() {
+        if at.elapsed() < TRAY_CACHE_TTL {
+            return (*show, *port);
+        }
+    }
+    let settings = settings_get_internal(app_handle);
+    let fresh = (settings.show_tray_speed, settings.clash_api_port);
+    *cache = Some((fresh.0, fresh.1, std::time::Instant::now()));
+    fresh
+}
 
 /// 初始化系统托盘与右键菜单
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -93,9 +118,22 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     });
                 }
                 "toggle_sysproxy" => {
-                    let (port, _) = crate::speedtest::get_configured_ports(app_handle);
-                    let _ = crate::system::sysproxy::set_system_proxy(true, port);
-                    info!("[tray] 开启系统代理: port={}", port);
+                    // 菜单切换语义：读取当前系统代理状态后翻转（开→关→开），
+                    // 而非旧实现的"点击永远是开启"
+                    let currently_enabled = crate::system::sysproxy::get_system_proxy_status();
+                    let target_enabled = !currently_enabled;
+                    if target_enabled {
+                        let (port, _) = crate::speedtest::get_configured_ports(app_handle);
+                        match crate::system::sysproxy::set_system_proxy(true, port) {
+                            Ok(_) => info!("[tray] 系统代理已开启: port={}", port),
+                            Err(e) => info!("[tray] 开启系统代理失败: {}", e),
+                        }
+                    } else {
+                        match crate::system::sysproxy::set_system_proxy(false, 0) {
+                            Ok(_) => info!("[tray] 系统代理已关闭"),
+                            Err(e) => info!("[tray] 关闭系统代理失败: {}", e),
+                        }
+                    }
                 }
                 "restart_kernel" => {
                     let handle = app_handle.clone();
@@ -168,9 +206,10 @@ extern "C" {
 
 /// 刷新托盘网速显示核心逻辑
 pub fn update_tray_speed_display(app_handle: &AppHandle, up_bps: u64, down_bps: u64, is_active: bool) {
-    let settings = settings_get_internal(app_handle);
+    // 使用 30s TTL 缓存读取（show_tray_speed, 端口），避免 1~2s 高频读盘
+    let (show_tray_speed, _) = tray_settings_cached(app_handle);
     if let Some(tray) = app_handle.tray_by_id(TRAY_ID) {
-        if settings.show_tray_speed && is_active {
+        if show_tray_speed && is_active {
             #[cfg(target_os = "macos")]
             {
                 // 双排显示：第一行上行速度，第二行下行速度，右侧速度文本右对齐 (7.3pt 等宽数字)
@@ -254,8 +293,8 @@ fn start_tray_traffic_ticker(app_handle: AppHandle) {
             .unwrap_or_default();
 
         loop {
-            let settings = settings_get_internal(&app_handle);
-            let port = settings.clash_api_port;
+            // 端口读取走 TTL 缓存，避免长连接重试循环反复读盘
+            let (_, port) = tray_settings_cached(&app_handle);
             let url = format!("http://127.0.0.1:{}/traffic", port);
 
             // 连接长连接 stream

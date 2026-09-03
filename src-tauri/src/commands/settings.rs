@@ -81,8 +81,24 @@ pub struct AppSettings {
     #[serde(default = "default_latency_test_url")]
     pub latency_test_url: String,
 
+    /// 分组测速配置覆盖（group tag -> interval 秒 / tolerance 毫秒 / url），
+    /// 由 GroupEditModal 保存，ConfigBuilder 生成 urltest 出站时应用
+    #[serde(default)]
+    pub group_configs: std::collections::HashMap<String, GroupTestConfig>,
+
     #[serde(default = "default_core_settings")]
     pub core: CoreSettings,
+}
+
+/// 单个分组的测速配置覆盖项（未设置的字段保持内置默认值）
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct GroupTestConfig {
+    /// 自动测速心跳间隔（秒），前端已把 "3m"/"1h" 归一为秒
+    pub interval: Option<u64>,
+    /// 测速容差（毫秒）
+    pub tolerance: Option<u64>,
+    /// 测速目标 URL
+    pub url: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -121,6 +137,9 @@ impl Default for AppSettings {
             latency_test_concurrency: 20,
             latency_test_timeout_ms: 3000,
             latency_test_url: "http://www.gstatic.com/generate_204".to_string(),
+
+            // 分组测速配置覆盖（默认空，全部使用内置默认值）
+            group_configs: std::collections::HashMap::new(),
 
             core: default_core_settings(),
         }
@@ -177,18 +196,22 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
             "listen_port": settings.mixed_port
         }));
         
-        // TUN 模式入口 (如果启用)
+            // TUN 模式入口 (如果启用)
         if settings.tun_enabled {
-            // macOS 上 TUN 接口名必须以 utun 开头 (如 utun9)，否则 sing-box 报 bad tun name
-            // Linux 上可使用任意名称 (如 tun0)
-            // Windows 上 interface_name 不生效 (使用 Wintun 驱动)
+            // macOS 上 TUN 接口名必须以 utun 开头 (如 utun6)，否则 sing-box 报 bad tun name；
+            // 但硬编码 utun9 会与其他进程固定抢占同一接口导致冲突。
+            // sing-box 支持不指定 interface_name，由系统自动分配空闲 utun 接口，
+            // 因此 macOS 下默认置空（除非用户显式填了合法 utun 名称）。
+            // Linux 上可使用任意名称 (如 tun0)；Windows 上 interface_name 不生效 (使用 Wintun 驱动)。
             #[cfg(target_os = "macos")]
             let iface_name = {
                 let user_name = settings.tun_interface_name.trim();
-                if user_name.starts_with("utun") {
+                if user_name.starts_with("utun") && user_name.len() > 4
+                    && user_name[4..].chars().all(|c| c.is_ascii_digit()) {
                     user_name.to_string()
                 } else {
-                    "utun9".to_string()
+                    // 未显式指定合法 utun 名称时不传 interface_name，让系统自动分配
+                    String::new()
                 }
             };
             #[cfg(not(target_os = "macos"))]
@@ -197,15 +220,21 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
             } else {
                 settings.tun_interface_name.clone()
             };
-            inbounds.push(serde_json::json!({
+            // macOS 下 iface_name 为空时省略 interface_name 字段（自动分配）
+            let mut tun_inbound = serde_json::json!({
                 "type": "tun",
                 "tag": "tun-in",
-                "interface_name": iface_name,
                 "address": ["172.19.0.1/30"],
                 "auto_route": true,
                 "strict_route": true,
                 "stack": "system"
-            }));
+            });
+            if !iface_name.is_empty() {
+                if let Some(obj) = tun_inbound.as_object_mut() {
+                    obj.insert("interface_name".to_string(), serde_json::json!(iface_name));
+                }
+            }
+            inbounds.push(tun_inbound);
         }
         modified = true;
     }
@@ -227,6 +256,36 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
                 serde_json::json!(crate::get_data_root().join("cache.db").to_string_lossy().to_string())
             );
             modified = true;
+        }
+    }
+
+    // 2.5 同步分组测速配置覆盖（GroupEditModal 保存的 interval/tolerance/url）
+    // 对 config.json 中已存在的 urltest 出站按 tag 应用用户覆盖，
+    // 仅覆盖显式设置的字段；ConfigBuilder 全量重建时亦会应用同一配置
+    if !settings.group_configs.is_empty() {
+        if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+            for out in outbounds.iter_mut() {
+                let tag = out.get("tag").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                if let Some(cfg) = settings.group_configs.get(&tag) {
+                    if out.get("type").and_then(|t| t.as_str()) != Some("urltest") {
+                        continue; // 仅 urltest 组支持覆盖
+                    }
+                    if let Some(obj) = out.as_object_mut() {
+                        if let Some(interval) = cfg.interval {
+                            obj.insert("interval".to_string(), serde_json::json!(format!("{}s", interval)));
+                        }
+                        if let Some(tolerance) = cfg.tolerance {
+                            obj.insert("tolerance".to_string(), serde_json::json!(tolerance));
+                        }
+                        if let Some(url) = &cfg.url {
+                            if !url.trim().is_empty() {
+                                obj.insert("url".to_string(), serde_json::json!(url.trim()));
+                            }
+                        }
+                        modified = true;
+                    }
+                }
+            }
         }
     }
 
@@ -345,7 +404,7 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
     if modified {
         let new_content = serde_json::to_string_pretty(&config_val)
             .map_err(|e| crate::error::AppError::Config(format!("序列化 config.json 失败: {}", e)))?;
-        fs::write(&config_path, new_content)
+        crate::fs_utils::atomic_write(&config_path, new_content.as_bytes())
             .map_err(|e| crate::error::AppError::Io(format!("写入 config.json 失败: {}", e)))?;
         log::info!("[settings] 已重建 config.json，已配置端口并包含 TUN 节点: {}", settings.tun_enabled);
     }
@@ -359,38 +418,56 @@ pub async fn settings_get_all(app_handle: tauri::AppHandle) -> ApiResponse<AppSe
     ApiResponse::ok(settings_get_internal(&app_handle))
 }
 
-/// 内部保存设置辅助函数
+/// 内部保存设置辅助函数（读-改-写事务）
+///
+/// 事务规则：
+/// 1. 整个读-改-写由 acquire_persist_lock 串行化，防止托盘/前端/调度器并发覆盖
+/// 2. 文件存在但读取或解析失败 → 返回错误（绝不静默用默认值整体替换，避免丢设置）
+/// 3. 仅当文件不存在时才以默认值起步
+/// 4. 缺 mixed_port 等单个字段时，先取 defaults，再用现有内容逐 key 覆盖
+///    （方向：以现有内容覆盖默认值，而非用默认值整体替换）
 pub fn update_settings_internal(app_handle: &tauri::AppHandle, patch: serde_json::Value) -> Result<(), String> {
     let path = get_settings_path();
-    let mut current = if path.exists() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            serde_json::from_str::<serde_json::Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
+    // 同步辅助函数内完成 lock → read → merge → atomic_write 全程持锁
+    let merged = {
+        let _guard = crate::fs_utils::acquire_persist_lock();
+        let existing: serde_json::Value = if path.exists() {
+            let content = fs::read_to_string(&path)
+                .map_err(|e| format!("读取 settings.json 失败（为避免丢失设置已中止保存）: {}", e))?;
+            serde_json::from_str::<serde_json::Value>(&content)
+                .map_err(|e| format!("解析 settings.json 失败（为避免丢失设置已中止保存）: {}", e))?
         } else {
             serde_json::json!({})
-        }
-    } else {
-        serde_json::json!({})
-    };
+        };
 
-    if current.get("mixed_port").is_none() {
-        if let Ok(default_val) = serde_json::to_value(AppSettings::default()) {
-            current = default_val;
-        }
-    }
-
-    if let Some(obj) = current.as_object_mut() {
-        if let Some(patch_obj) = patch.as_object() {
-            for (k, v) in patch_obj {
-                obj.insert(k.clone(), v.clone());
+        // 合并方向修正：merged = defaults，然后以现有内容覆盖默认值，
+        // 这样单个缺失字段由默认值补齐，已有字段全部保留
+        let defaults = serde_json::to_value(AppSettings::default())
+            .map_err(|e| format!("序列化默认设置失败: {}", e))?;
+        let mut merged = defaults;
+        if let (Some(m_obj), Some(e_obj)) = (merged.as_object_mut(), existing.as_object()) {
+            for (k, v) in e_obj {
+                m_obj.insert(k.clone(), v.clone());
             }
         }
-    }
 
-    if let Ok(content) = serde_json::to_string_pretty(&current) {
-        fs::write(&path, content).map_err(|e| e.to_string())?;
-    }
+        // 应用补丁
+        if let Some(obj) = merged.as_object_mut() {
+            if let Some(patch_obj) = patch.as_object() {
+                for (k, v) in patch_obj {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
 
-    if let Ok(new_settings) = serde_json::from_value::<AppSettings>(current) {
+        let content = serde_json::to_string_pretty(&merged)
+            .map_err(|e| format!("序列化设置失败: {}", e))?;
+        crate::fs_utils::atomic_write(&path, content.as_bytes())
+            .map_err(|e| format!("写入 settings.json 失败: {}", e))?;
+        merged
+    };
+
+    if let Ok(new_settings) = serde_json::from_value::<AppSettings>(merged) {
         crate::core::clash_api::set_clash_api_port(new_settings.clash_api_port);
     }
 
@@ -456,12 +533,30 @@ pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Valu
     ApiResponse::ok(())
 }
 
+/// 校验注入主机名：仅允许字母、数字、点、冒号、短横线（覆盖 IPv4/IPv6/主机名）
+fn is_valid_proxy_host(host: &str) -> bool {
+    !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == ':' || c == '-')
+}
+
 /// 生成终端代理环境变量注入命令（开发者工具箱）
 #[tauri::command]
 pub async fn settings_inject_terminal_proxy(
     host: String,
     port: u16,
 ) -> ApiResponse<Vec<String>> {
+    // 主机参数会被拼接进 shell 命令，必须先做字符白名单校验，防止命令注入
+    if !is_valid_proxy_host(&host) {
+        return ApiResponse::err(
+            crate::error::AppError::Validation(format!(
+                "无效的主机地址: {:?}（仅允许字母、数字、点、冒号、短横线）",
+                host
+            )),
+            400,
+        );
+    }
     let proxy_url = format!("http://{}:{}", host, port);
     let commands = vec![
         format!("export http_proxy={}", proxy_url),
@@ -524,9 +619,11 @@ pub async fn tun_set_enabled(
         }
     }
 
-    if let Err(e) =
-        update_settings_internal(&app_handle, serde_json::to_value(current_settings).unwrap())
-    {
+    let patch = match serde_json::to_value(current_settings) {
+        Ok(v) => v,
+        Err(e) => return ApiResponse::err(format!("序列化设置失败: {}", e), 500),
+    };
+    if let Err(e) = update_settings_internal(&app_handle, patch) {
         return ApiResponse::err(format!("保存设置失败: {}", e), 500);
     }
 
@@ -577,17 +674,43 @@ pub async fn service_install(app_handle: tauri::AppHandle) -> ApiResponse<()> {
             settings.core.service.last_fallback_reason = None;
 
             if run_mode == "service" {
-                // 仅服务模式下自动启动服务
-                let _ = crate::system::service_control::start_service();
-                settings.core.service.last_known_status = "running".to_string();
-                log::info!("[settings] 提权安装并启动系统服务成功");
+                // 仅服务模式下自动启动服务，并检查启动结果
+                match crate::system::service_control::start_service() {
+                    Ok(_) => {
+                        // 启动成功后再查询实际状态，避免硬编码 running 掩盖异步失败
+                        let actual_status = crate::system::service_control::query_service_status()
+                            .unwrap_or_else(|e| {
+                                log::warn!("[settings] 查询服务状态失败: {}", e);
+                                "unknown".to_string()
+                            });
+                        if actual_status == "stopped" || actual_status == "not_installed" {
+                            log::error!("[settings] 服务启动指令成功但服务未进入运行状态: {}", actual_status);
+                            return ApiResponse::err(
+                                "提权安装成功，但服务未能进入运行状态，请稍后在设置页手动启动",
+                                500,
+                            );
+                        }
+                        settings.core.service.last_known_status = actual_status;
+                        log::info!("[settings] 提权安装并启动系统服务成功");
+                    }
+                    Err(e) => {
+                        log::error!("[settings] 服务模式安装后自动启动服务失败: {}", e);
+                        return ApiResponse::err(format!("提权安装成功，但启动系统服务失败: {}", e), 500);
+                    }
+                }
             } else {
                 // 本地运行模式下，不需要启动服务，更新状态为 stopped
                 settings.core.service.last_known_status = "stopped".to_string();
                 log::info!("[settings] 提权安装计划任务组件成功，本地运行模式无需启动 Windows 服务");
             }
-            
-            let _ = update_settings_internal(&app_handle, serde_json::to_value(settings).unwrap());
+
+            let patch = match serde_json::to_value(settings) {
+                Ok(v) => v,
+                Err(e) => return ApiResponse::err(format!("序列化设置失败: {}", e), 500),
+            };
+            if let Err(e) = update_settings_internal(&app_handle, patch) {
+                return ApiResponse::err(format!("写入服务安装状态失败: {}", e), 500);
+            }
             ApiResponse::ok(())
         }
         Err(e) => {
@@ -605,7 +728,13 @@ pub async fn service_uninstall(app_handle: tauri::AppHandle) -> ApiResponse<()> 
             let mut settings = settings_get_internal(&app_handle);
             settings.core.service.installed_version = None;
             settings.core.service.last_known_status = "not_installed".to_string();
-            let _ = update_settings_internal(&app_handle, serde_json::to_value(settings).unwrap());
+            let patch = match serde_json::to_value(settings) {
+                Ok(v) => v,
+                Err(e) => return ApiResponse::err(format!("序列化设置失败: {}", e), 500),
+            };
+            if let Err(e) = update_settings_internal(&app_handle, patch) {
+                return ApiResponse::err(format!("写入卸载状态失败: {}", e), 500);
+            }
             log::info!("[settings] 提权卸载系统服务成功");
             ApiResponse::ok(())
         }
@@ -694,15 +823,13 @@ pub async fn core_query_running(app_handle: tauri::AppHandle) -> ApiResponse<boo
             { crate::system::service_control::query_singbox_process_running() }
             #[cfg(target_os = "macos")]
             {
+                // 通过 sysinfo 检查 PID 对应进程是否存活（避免 spawn kill -0 子进程开销）
                 let pid_file = std::env::temp_dir().join("auroweave-singbox.pid");
                 if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                    if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                        std::process::Command::new("kill")
-                            .arg("-0")
-                            .arg(pid.to_string())
-                            .status()
-                            .map(|s| s.success())
-                            .unwrap_or(false)
+                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                        let mut sys = sysinfo::System::new();
+                        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+                        sys.process(sysinfo::Pid::from_u32(pid)).is_some()
                     } else {
                         false
                     }
@@ -744,5 +871,66 @@ pub async fn settings_restore_backup(app_handle: tauri::AppHandle) -> ApiRespons
     }
 
     ApiResponse::ok(())
+}
+
+/// 更新分组测速配置（interval / tolerance / url），持久化到 settings.json
+///
+/// 参数 `config` 为 JSON 字符串（前端序列化，interval 已归一为秒）：
+/// `{"interval": 180, "tolerance": 50, "url": "http://..."}`，
+/// 未提供的字段不覆盖已有值。保存后同步修补 config.json 中对应的
+/// urltest 出站（下次重建配置时 ConfigBuilder 亦会应用）。
+#[tauri::command]
+pub async fn group_update_config(
+    app_handle: tauri::AppHandle,
+    group_tag: String,
+    config: String,
+) -> ApiResponse<bool> {
+    // 解析并校验覆盖项
+    let parsed: GroupTestConfig = match serde_json::from_str(&config) {
+        Ok(v) => v,
+        Err(e) => return ApiResponse::err(format!("分组配置 JSON 解析失败: {}", e), 400),
+    };
+
+    // 基本参数校验：interval 合理区间 30s~24h，tolerance 0~2000ms，url 为 http(s)
+    if let Some(interval) = parsed.interval {
+        if !(30..=86400).contains(&interval) {
+            return ApiResponse::err(format!("测速间隔需在 30 秒到 24 小时之间（当前 {}s）", interval), 400);
+        }
+    }
+    if let Some(tolerance) = parsed.tolerance {
+        if tolerance > 2000 {
+            return ApiResponse::err(format!("容差需在 0~2000ms 之间（当前 {}ms）", tolerance), 400);
+        }
+    }
+    if let Some(url) = &parsed.url {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            match reqwest::Url::parse(trimmed) {
+                Ok(u) if u.scheme() == "http" || u.scheme() == "https" => {}
+                _ => return ApiResponse::err("测速 URL 必须是合法的 http/https 地址".to_string(), 400),
+            }
+        }
+    }
+
+    // 读-改-写 settings.group_configs（持久化锁 + 原子写由 update_settings_internal 保证）
+    let mut settings = settings_get_internal(&app_handle);
+    settings
+        .group_configs
+        .insert(group_tag.clone(), parsed);
+
+    let patch = serde_json::to_value(&settings).unwrap_or_else(|_| serde_json::json!({}));
+    match update_settings_internal(&app_handle, patch) {
+        Ok(_) => {}
+        Err(e) => return ApiResponse::err(format!("保存分组配置失败: {}", e), 500),
+    }
+
+    // 同步修补当前 config.json 的对应 urltest 出站（热生效，无需等下次重建）
+    if let Err(e) = rebuild_config_from_settings(&app_handle) {
+        log::error!("[settings] 应用分组配置到 config.json 失败: {}", e);
+        return ApiResponse::err(format!("配置已保存，但同步内核配置失败: {}", e), 500);
+    }
+
+    log::info!("[settings] 分组 [{}] 测速配置已更新并同步", group_tag);
+    ApiResponse::ok(true)
 }
 

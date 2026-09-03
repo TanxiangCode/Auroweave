@@ -114,8 +114,10 @@ pub async fn apply_core_mode_with_fallback(
     }
 
     // ---- 步骤2: 根据最新 settings 重建 config.json ----
-    // 端口、TUN 等配置可能已变化，需要重建后再拉起
-    let _ = crate::commands::settings::rebuild_config_from_settings(app_handle);
+    // 端口、TUN 等配置可能已变化，需要重建后再拉起（失败记录详情，不再静默丢弃）
+    if let Err(e) = crate::commands::settings::rebuild_config_from_settings(app_handle) {
+        error!("[app] 重建 config.json 失败（将以现有配置继续启动）: {}", e);
+    }
     // 每次读取最新的 settings，避免使用过期的本地缓存
     let settings = crate::commands::settings::settings_get_internal(app_handle);
     let sm = app_handle.state::<Arc<crate::core::sidecar::SidecarManager>>().inner().clone();
@@ -163,27 +165,25 @@ pub async fn apply_core_mode_with_fallback(
                 }
             }
             if !fallback {
-                // 服务就绪后等待 500ms 再同步配置，确保 IPC 管道已就绪
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                info!("[app] 向系统服务同步配置文件...");
-                if let Err(e) = crate::commands::settings::sync_config_to_service(app_handle).await {
-                    error!("[app] 配置同步至服务失败: {}，回退为本地运行模式", e);
+                // 服务就绪后等待 IPC 管道就绪再同步配置：
+                // 固定 500ms 在慢速机器上可能不足，改为 100ms/300ms/500ms 三次退避重试
+                if !wait_for_service_ipc_ready().await {
+                    error!("[app] 系统服务 IPC 管道未就绪，回退为本地运行模式");
                     persist_settings_patch(app_handle, |s| {
                         s.core.service.last_fallback_reason = Some("sync_failed".to_string());
                     });
                     fallback = true;
+                } else {
+                    info!("[app] 向系统服务同步配置文件...");
+                    if let Err(e) = crate::commands::settings::sync_config_to_service(app_handle).await {
+                        error!("[app] 配置同步至服务失败: {}，回退为本地运行模式", e);
+                        persist_settings_patch(app_handle, |s| {
+                            s.core.service.last_fallback_reason = Some("sync_failed".to_string());
+                        });
+                        fallback = true;
+                    }
                 }
             }
-        }
-
-        // ---- 步骤4a-1: 服务模式下的直连快速路径 ----
-        // 若 proxy_mode=direct 且 TUN 关闭，通知服务端停止内核即可，无需拉起
-        let current_settings = crate::commands::settings::settings_get_internal(app_handle);
-        if current_settings.proxy_mode == "direct" && !current_settings.tun_enabled {
-            info!("[app] 服务模式下：系统处于直连且TUN关闭，通知服务停止内核");
-            let _ = crate::core::ipc_client::send_ipc_request("SHUTDOWN_CORE", None).await;
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-            return Ok(());
         }
 
         if fallback {
@@ -239,6 +239,18 @@ pub async fn apply_core_mode_with_fallback(
                 let _ = sm.start(&path_str).await;
                 let _ = crate::system::sysproxy::set_system_proxy(true, port);
             }
+            return Ok(());
+        }
+
+        // ---- 步骤4a-1: 服务模式成功路径上的直连快速路径 ----
+        // 放在 fallback 处理之后：若服务未安装/启动/同步失败，先走 run_mode=local 回退，
+        // 再判断 direct 快速路径，避免"提前 return 导致回退永不发生"。
+        // （direct 快速路径仅由成功的服务模式处理：通知服务停止内核即可，无需拉起）
+        let current_settings = crate::commands::settings::settings_get_internal(app_handle);
+        if current_settings.proxy_mode == "direct" && !current_settings.tun_enabled {
+            info!("[app] 服务模式下：系统处于直连且TUN关闭，通知服务停止内核");
+            let _ = crate::core::ipc_client::send_ipc_request("SHUTDOWN_CORE", None).await;
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
             return Ok(());
         }
 
@@ -325,17 +337,40 @@ pub async fn apply_core_mode_with_fallback(
 ///
 /// 解决竞态问题：避免使用过期的本地 settings 变量直接修改并保存，
 /// 而是每次都从磁盘读取最新值，确保并发修改不会互相覆盖。
+/// 持久化经由 update_settings_internal：acquire_persist_lock 串行化 + 原子写入（tmp + rename）。
 fn persist_settings_patch<F>(app_handle: &tauri::AppHandle, patch_fn: F)
 where
     F: FnOnce(&mut crate::commands::settings::AppSettings),
 {
     let mut settings = crate::commands::settings::settings_get_internal(app_handle);
     patch_fn(&mut settings);
-    // 使用 unwrap_or_default 避免 panic，序列化失败时用空对象兜底
-    let patch_value = serde_json::to_value(&settings).unwrap_or(serde_json::json!({}));
+    let patch_value = match serde_json::to_value(&settings) {
+        Ok(v) => v,
+        Err(e) => {
+            // 序列化失败时不写盘（比旧实现的空对象兜底更安全：宁可不改也不清空）
+            error!("[app] 持久化 settings 序列化失败，跳过本次更新: {}", e);
+            return;
+        }
+    };
     if let Err(e) = crate::commands::settings::update_settings_internal(app_handle, patch_value) {
         error!("[app] 持久化 settings 更新失败: {}", e);
     }
+}
+
+/// 等待系统服务 IPC 管道就绪（带退避的 3 次重试：100ms / 300ms / 500ms）
+///
+/// 替代旧实现的固定 sleep 500ms：慢速机器上 500ms 可能不够，
+/// 快速机器上也能在 100ms 时提前就绪，兼顾启动速度与稳定性。
+async fn wait_for_service_ipc_ready() -> bool {
+    const BACKOFFS_MS: [u64; 3] = [100, 300, 500];
+    for delay in BACKOFFS_MS {
+        tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+        // 用一次轻量 GET_STATUS 探测 IPC 管道可用性（成功即视为就绪）
+        if crate::core::ipc_client::send_ipc_request("GET_STATUS", None).await.is_ok() {
+            return true;
+        }
+    }
+    false
 }
 
 /// 在后台异步启动 sing-box 子进程并设置系统代理
