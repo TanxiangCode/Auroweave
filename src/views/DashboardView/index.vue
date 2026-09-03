@@ -6,6 +6,7 @@
  * 职责：布局拼装、状态绑定、Hook 协调
  */
 import { storeToRefs } from "pinia";
+import { onActivated } from "vue";
 import { useRouter } from "vue-router";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
@@ -31,11 +32,11 @@ const { smoothDownloadSpeed, activeConnectionCount, totalDownload, totalUpload }
 
 // === Hook 初始化 ===
 
-const { proxyActive, coreStarting, operating, toggleProxy, changeMode } = useProxyToggle();
+const { proxyActive, coreStarting, operating, recentToggleUntil, toggleProxy, changeMode } = useProxyToggle();
 
 const { inboundMode } = useInboundMode({ proxyActive, operating });
 
-useCoreStatus({ proxyActive, coreStarting, operating });
+useCoreStatus({ proxyActive, coreStarting, operating, recentToggleUntil });
 
 // === 流体波浪旋转角度 ===
 
@@ -47,8 +48,11 @@ function navigate(path: string) {
   router.push(path);
 }
 
-// 拉取订阅列表，供 IdleTipsPanel 判断是否显示订阅入口按钮
-subStore.fetchAll();
+// KeepAlive 激活时拉取订阅列表，供 IdleTipsPanel 判断是否显示订阅入口按钮
+// （避免 setup 顶层执行导致缓存后不再刷新）
+onActivated(() => {
+  subStore.fetchAll();
+});
 </script>
 
 <template>

@@ -67,7 +67,9 @@ onMounted(async () => {
     <main class="app-main">
       <RouterView v-slot="{ Component }">
         <Transition name="page" mode="out-in">
-          <KeepAlive>
+          <!-- KeepAlive 按 name 匹配 include 时依赖各视图显式声明组件名，
+               故采用 :max 限制缓存数量上限（视图组件不足 8 个，效果等同全缓存但封顶内存） -->
+          <KeepAlive :max="8">
             <component :is="Component" />
           </KeepAlive>
         </Transition>

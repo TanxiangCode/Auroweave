@@ -22,15 +22,22 @@ export function useTrafficHistory() {
   const timeDimension = ref<"day" | "month" | "year">("day");
   /** 柱状图数据 */
   const chartData = ref<ChartPoint[]>([]);
+  /** 请求序号：维度快速切换时，仅最新一次请求的结果允许写入，避免竞态覆盖 */
+  let requestId = 0;
 
   /** 获取流量历史 */
   async function fetchTrafficHistory() {
+    const currentRequestId = ++requestId;
     try {
       const res: any = await invoke("get_traffic_history", { dimension: timeDimension.value });
+      // 迟到的旧响应直接丢弃（用户已切换到其他维度）
+      if (currentRequestId !== requestId) return;
       if (res.success && res.data) {
         const data = res.data;
-        const totalBytesArr = data.map((d: any) => d.download_bytes + d.upload_bytes);
-        const maxBytes = Math.max(...totalBytesArr, 1);
+        const maxBytes = data.reduce(
+          (max: number, d: any) => Math.max(max, d.download_bytes + d.upload_bytes),
+          1
+        );
 
         chartData.value = data.map((d: any) => {
           const bytes = d.download_bytes + d.upload_bytes;

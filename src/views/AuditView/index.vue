@@ -33,6 +33,14 @@ const statusFilter = ref<"all" | "proxied" | "direct" | "blocked">("all");
 const protocolFilter = ref<"all" | "tcp" | "udp">("all");
 // 悬停自动暂停开关（默认关闭，由用户自主开启）
 const autoPauseOnHover = ref(false);
+// 手动暂停标志：用户点击暂停按钮后，鼠标离开不再自动恢复
+const manuallyPaused = ref(false);
+
+function handleTogglePause() {
+  // 点击"暂停/恢复"按钮时切换手动暂停标志
+  manuallyPaused.value = !isPaused.value;
+  isPaused.value = !isPaused.value;
+}
 
 // 选中的单条连接（详情抽屉）
 const selectedRecord = ref<SemanticAuditRecord | null>(null);
@@ -77,13 +85,14 @@ function handleSelectRecord(record: SemanticAuditRecord) {
 }
 
 function handleMouseEnter() {
-  if (autoPauseOnHover.value) {
+  if (autoPauseOnHover.value && !manuallyPaused.value) {
     isPaused.value = true;
   }
 }
 
 function handleMouseLeave() {
-  if (autoPauseOnHover.value) {
+  // 手动暂停时不被悬停逻辑自动恢复
+  if (autoPauseOnHover.value && !manuallyPaused.value) {
     isPaused.value = false;
   }
 }
@@ -100,12 +109,13 @@ function handleMouseLeave() {
       :download-speed="connectionStore.formatSpeed(connectionStore.rawDownloadSpeed)"
       :upload-speed="connectionStore.formatSpeed(connectionStore.rawUploadSpeed)"
       :is-paused="isPaused"
-      @toggle-pause="isPaused = !isPaused"
+      @toggle-pause="handleTogglePause"
       @close-all="handleCloseAllConnections"
       @clear-history="clearHistory"
     />
 
-    <!-- 多维过滤工具栏 (第二行整合：事件统计 + 悬停暂停开关 + 视图Tab) -->
+    <!-- 多维过滤工具栏 (第二行整合：事件统计 + 悬停暂停开关 + 视图Tab)
+         组件内部在 raw 视图下自动隐藏搜索/过滤行（原始日志流不走过滤逻辑） -->
     <AuditFilterToolbar
       v-model:search-query="searchQuery"
       v-model:status-filter="statusFilter"

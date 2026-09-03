@@ -5,19 +5,19 @@
       <!-- 远端加密 DNS -->
       <div class="setting-item">
         <div class="item-label">
-          <span>远端加密 DNS (Remote DoH)</span>
+          <span>远端加密 DNS (Remote DoH) <span class="readonly-tag">只读</span></span>
           <span class="sub-label">海外加密解析，防 DNS 污染 (默认: https://1.1.1.1/dns-query)</span>
         </div>
-        <input type="text" value="https://1.1.1.1/dns-query" class="text-input" readonly />
+        <input type="text" value="https://1.1.1.1/dns-query" class="text-input readonly" readonly tabindex="-1" />
       </div>
 
       <!-- 本地直连 DNS -->
       <div class="setting-item">
         <div class="item-label">
-          <span>本地直连 DNS (Local UDP)</span>
+          <span>本地直连 DNS (Local UDP) <span class="readonly-tag">只读</span></span>
           <span class="sub-label">国内零延迟解析 (默认: udp://223.5.5.5)</span>
         </div>
-        <input type="text" value="223.5.5.5" class="text-input" readonly />
+        <input type="text" value="223.5.5.5" class="text-input readonly" readonly tabindex="-1" />
       </div>
 
       <!-- 延迟测试目标 URL -->
@@ -80,10 +80,10 @@
       <!-- 自动心跳检测间隔 -->
       <div class="setting-item">
         <div class="item-label">
-          <span>自动优选探测周期 (Interval)</span>
+          <span>自动优选探测周期 (Interval) <span class="readonly-tag">只读</span></span>
           <span class="sub-label">内核后台周期性探测间隔 (默认: {{ DEFAULT_LATENCY_TEST_INTERVAL_SEC }} 秒 / 容差 {{ DEFAULT_LATENCY_TEST_TOLERANCE_MS }}ms)</span>
         </div>
-        <input type="text" :value="`${DEFAULT_LATENCY_TEST_INTERVAL_SEC}s`" class="text-input" readonly />
+        <input type="text" :value="`${DEFAULT_LATENCY_TEST_INTERVAL_SEC}s`" class="text-input readonly" readonly tabindex="-1" />
       </div>
     </div>
   </div>
@@ -107,16 +107,19 @@ const localTestUrl = ref(settingsStore.settings.latency_test_url || DEFAULT_LATE
 const localConcurrency = ref(settingsStore.settings.latency_test_concurrency || 20);
 const localTimeoutMs = ref(settingsStore.settings.latency_test_timeout_ms || 3000);
 
+// 精确监听三个相关字段（数组形式 getter），避免深度 watch 整个 settings
+// 在无关字段变化时触发无意义的重置
 watch(
-  () => settingsStore.settings,
-  (newVal) => {
-    if (newVal) {
-      localTestUrl.value = newVal.latency_test_url || DEFAULT_LATENCY_TEST_URL;
-      localConcurrency.value = newVal.latency_test_concurrency || 20;
-      localTimeoutMs.value = newVal.latency_test_timeout_ms || 3000;
-    }
-  },
-  { deep: true }
+  () => [
+    settingsStore.settings.latency_test_url,
+    settingsStore.settings.latency_test_concurrency,
+    settingsStore.settings.latency_test_timeout_ms,
+  ] as const,
+  ([url, concurrency, timeoutMs]) => {
+    localTestUrl.value = url || DEFAULT_LATENCY_TEST_URL;
+    localConcurrency.value = concurrency || 20;
+    localTimeoutMs.value = timeoutMs || 3000;
+  }
 );
 
 async function saveLatencyUrl() {
@@ -213,6 +216,27 @@ h2 {
 .text-input.editable:focus {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 6px var(--accent-cyan-glow);
+}
+
+/* 只读输入框：明显弱化的不可编辑样式，让用户明确知道该值当前不可配置 */
+.text-input.readonly {
+  opacity: 0.65;
+  cursor: not-allowed;
+  border-style: dashed;
+  filter: grayscale(0.3);
+}
+
+/* "只读"标注徽标 */
+.readonly-tag {
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-tertiary);
+  background: var(--layer-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 0 4px;
+  margin-left: 4px;
+  vertical-align: 1px;
 }
 
 .input-with-unit {

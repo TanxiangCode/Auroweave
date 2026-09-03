@@ -23,9 +23,12 @@ withDefaults(
     isSelectable: boolean;
     /** 布局模式 */
     layoutMode?: "grid" | "list";
+    /** 分组数据拉取错误信息（有值时显示错误态而非误导性的空态） */
+    fetchError?: string | null;
   }>(),
   {
     layoutMode: "grid",
+    fetchError: null,
   }
 );
 
@@ -44,6 +47,14 @@ const speedtestStore = useSpeedtestStore();
     <div class="state-inner">
       <span class="loading-spin"></span>
       <span>正在加载代理节点列表...</span>
+    </div>
+  </div>
+
+  <!-- 拉取失败错误态（区别于空态：明确告知是获取失败，而非没有订阅） -->
+  <div v-else-if="fetchError" class="state-tip">
+    <div class="state-inner">
+      <span class="state-icon">⚠️</span>
+      <span>节点列表获取失败：{{ fetchError }}</span>
     </div>
   </div>
 

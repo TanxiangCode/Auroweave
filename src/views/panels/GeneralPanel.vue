@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { useSettingsStore } from "@/stores/settings.store";
+import type { AppSettings } from "@/types";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 
 const settingsStore = useSettingsStore();
 
-async function save() {
-  await settingsStore.updateSettings(settingsStore.settings);
+/**
+ * 局部 patch 保存：仅提交当前修改的字段，避免全量 settings
+ * 覆盖其他面板尚未保存的修改或重复触发不必要的内核重启。
+ * @param field - 本次变更的设置键名
+ */
+async function save(field: keyof AppSettings) {
+  await settingsStore.updateSettings({ [field]: settingsStore.settings[field] } as Partial<AppSettings>);
 }
 
 </script>
@@ -30,7 +36,7 @@ async function save() {
             <span>界面主题 (Theme)</span>
             <span class="sub-label">选择客户端视窗明暗极客风格</span>
           </div>
-          <select v-model="settingsStore.settings.theme" class="select-input" @change="save">
+          <select v-model="settingsStore.settings.theme" class="select-input" @change="save('theme')">
             <option value="dark">深色极光 (Dark)</option>
             <option value="light">浅色明亮 (Light)</option>
             <option value="system">跟随操作系统 (System)</option>
@@ -42,7 +48,7 @@ async function save() {
             <span>界面语言 (Language)</span>
             <span class="sub-label">切换客户端操作语言</span>
           </div>
-          <select v-model="settingsStore.settings.language" class="select-input" @change="save">
+          <select v-model="settingsStore.settings.language" class="select-input" @change="save('language')">
             <option value="zh-CN">简体中文 (Simplified Chinese)</option>
             <option value="en-US">English (US)</option>
           </select>
@@ -73,7 +79,7 @@ async function save() {
             type="checkbox"
             v-model="settingsStore.settings.auto_start"
             class="switch"
-            @change="save"
+            @change="save('auto_start')"
           />
         </div>
 
@@ -86,7 +92,7 @@ async function save() {
             type="checkbox"
             v-model="settingsStore.settings.minimize_to_tray"
             class="switch"
-            @change="save"
+            @change="save('minimize_to_tray')"
           />
         </div>
 
@@ -99,7 +105,7 @@ async function save() {
             type="checkbox"
             v-model="settingsStore.settings.hide_dock_on_close"
             class="switch"
-            @change="save"
+            @change="save('hide_dock_on_close')"
           />
         </div>
 
@@ -112,7 +118,7 @@ async function save() {
             type="checkbox"
             v-model="settingsStore.settings.show_tray_speed"
             class="switch"
-            @change="save"
+            @change="save('show_tray_speed')"
           />
         </div>
 
@@ -125,7 +131,7 @@ async function save() {
             type="checkbox"
             v-model="settingsStore.settings.start_minimized"
             class="switch"
-            @change="save"
+            @change="save('start_minimized')"
           />
         </div>
       </div>
@@ -154,7 +160,7 @@ async function save() {
             type="checkbox"
             v-model="settingsStore.settings.allow_lan"
             class="switch"
-            @change="save"
+            @change="save('allow_lan')"
           />
         </div>
 
@@ -167,7 +173,7 @@ async function save() {
             type="checkbox"
             v-model="settingsStore.settings.enable_app_traffic_tracking"
             class="switch"
-            @change="save"
+            @change="save('enable_app_traffic_tracking')"
           />
         </div>
       </div>

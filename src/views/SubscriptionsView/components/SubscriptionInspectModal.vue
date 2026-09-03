@@ -34,20 +34,29 @@ const activeTab = ref<InspectTab>("nodes");
 const loading = ref(false);
 const inspectData = ref<SubscriptionInspectData | null>(null);
 const searchKeyword = ref("");
-const expandedNodeIndex = ref<number | null>(null);
+/** 当前展开详情的节点 tag（以 tag 而非索引为键，过滤后展开态不漂移） */
+const expandedNodeTag = ref<string | null>(null);
 const isFullscreen = ref(false);
 
-// 监听弹窗显示与订阅变更
+// 已拉取过详情的订阅 ID，避免同一订阅反复打开时重复请求
+let lastFetchedSubId: string | null = null;
+
+// 监听弹窗显示：仅由 visible 驱动重置 UI；
+// 订阅对象引用可能每次打开都变化，故比较 sub.id 判断是否需要重新拉取
 watch(
-  () => [props.visible, props.subscription] as const,
-  async ([visible, sub]) => {
+  () => props.visible,
+  async (visible) => {
+    const sub = props.subscription;
     if (visible && sub) {
       searchKeyword.value = "";
-      expandedNodeIndex.value = null;
+      expandedNodeTag.value = null;
       activeTab.value = "nodes";
-      await fetchInspectData(sub.id);
+      if (sub.id !== lastFetchedSubId || !inspectData.value) {
+        await fetchInspectData(sub.id);
+      }
     } else {
       inspectData.value = null;
+      lastFetchedSubId = null;
     }
   },
   { immediate: true }
@@ -116,9 +125,9 @@ async function copyText(text: string, label: string) {
   }
 }
 
-// 展开/收起单个节点 JSON 详情
-function toggleNodeExpand(idx: number) {
-  expandedNodeIndex.value = expandedNodeIndex.value === idx ? null : idx;
+// 展开/收起单个节点 JSON 详情（以 tag 为键：过滤后索引变化不会导致展开态漂移到其他节点）
+function toggleNodeExpand(tag: string) {
+  expandedNodeTag.value = expandedNodeTag.value === tag ? null : tag;
 }
 
 // 格式化展示协议 Badge 颜色
@@ -283,13 +292,13 @@ function getProtocolBadgeClass(type: string) {
             <div class="flex-1 overflow-y-auto p-4 space-y-2 select-text">
               <div
                 v-for="(node, idx) in filteredNodes"
-                :key="idx"
+                :key="node.tag"
                 class="bg-[#151821] border border-white/5 rounded-xl overflow-hidden transition-all hover:border-white/15"
               >
                 <!-- 节点摘要行 -->
                 <div
                   class="flex items-center justify-between px-4 py-2.5 cursor-pointer hover:bg-white/[0.02]"
-                  @click="toggleNodeExpand(idx)"
+                  @click="toggleNodeExpand(node.tag)"
                 >
                   <div class="flex items-center gap-3 min-w-0 flex-1">
                     <span class="text-xs text-white/30 w-7 font-mono shrink-0">#{{ idx + 1 }}</span>
@@ -307,7 +316,7 @@ function getProtocolBadgeClass(type: string) {
                       {{ node.server }}:{{ node.server_port || 0 }}
                     </span>
                     <BaseIcon
-                      :name="expandedNodeIndex === idx ? 'ChevronUp' : 'ChevronDown'"
+                      :name="expandedNodeTag === node.tag ? 'ChevronUp' : 'ChevronDown'"
                       class="w-4 h-4 text-white/30"
                     />
                   </div>
@@ -315,7 +324,7 @@ function getProtocolBadgeClass(type: string) {
 
                 <!-- 节点展开后的 JSON 配置详情 -->
                 <div
-                  v-if="expandedNodeIndex === idx"
+                  v-if="expandedNodeTag === node.tag"
                   class="px-4 py-3 bg-[#0a0c10] border-t border-white/5 text-xs font-mono"
                 >
                   <div class="flex items-center justify-between mb-2 text-white/40">

@@ -220,9 +220,9 @@ import { useToast } from "@/composables/useToast";
 import { invoke } from "@tauri-apps/api/core";
 import {
   checkSingboxUpdate,
-  upgradeSingbox,
   restoreConfigBackup,
 } from "@/api/ipc/settings";
+import { invokeWithTimeout } from "@/api/ipc/client";
 import type { SingboxUpdateInfo } from "@/types";
 
 const props = defineProps<{
@@ -263,20 +263,25 @@ async function fetchCurrentVersion() {
 }
 
 async function handleCheckUpdate() {
+  if (checkingUpdate.value) return;
   checkingUpdate.value = true;
   toast.info("正在查询 GitHub Release 最新版本...");
-  const res = await checkSingboxUpdate();
-  checkingUpdate.value = false;
-
-  if (res.success && res.data) {
-    updateInfo.value = res.data;
-    if (res.data.has_update) {
-      toast.info(`发现新版本 ${res.data.latest_version}`, "点击「立即升级」可一键自动更新内核");
+  try {
+    const res = await checkSingboxUpdate();
+    if (res.success && res.data) {
+      updateInfo.value = res.data;
+      if (res.data.has_update) {
+        toast.info(`发现新版本 ${res.data.latest_version}`, "点击「立即升级」可一键自动更新内核");
+      } else {
+        toast.success("当前已是最新内核版本", `v${res.data.current_version}`);
+      }
     } else {
-      toast.success("当前已是最新内核版本", `v${res.data.current_version}`);
+      toast.error("检查更新失败", res.error || "无法连接到 GitHub API");
     }
-  } else {
-    toast.error("检查更新失败", res.error || "无法连接到 GitHub API");
+  } catch (e) {
+    toast.error("检查更新失败", e instanceof Error ? e.message : String(e));
+  } finally {
+    checkingUpdate.value = false;
   }
 }
 
@@ -288,15 +293,24 @@ async function handleUpgrade() {
 
   upgrading.value = true;
   toast.info("正在下载内核安装包并执行热替换，请稍候...");
-  const res = await upgradeSingbox(updateInfo.value.download_url);
-  upgrading.value = false;
-
-  if (res.success) {
-    toast.success("Sing-box 内核升级成功！", "新版本已自动替换并重新拉起运行");
-    await fetchCurrentVersion();
-    updateInfo.value.has_update = false;
-  } else {
-    toast.error("内核升级失败", res.error || "下载或解压过程中发生异常");
+  // 内核下载 + 解压 + 热替换耗时较长，显式传 10 分钟大超时（默认 180s 不够）
+  try {
+    const res = await invokeWithTimeout<import("@/types").ApiResponse<void>>(
+      "core_upgrade_singbox",
+      { downloadUrl: updateInfo.value.download_url },
+      600000
+    );
+    if (res.success) {
+      toast.success("Sing-box 内核升级成功！", "新版本已自动替换并重新拉起运行");
+      await fetchCurrentVersion();
+      updateInfo.value.has_update = false;
+    } else {
+      toast.error("内核升级失败", res.error || "下载或解压过程中发生异常");
+    }
+  } catch (e) {
+    toast.error("内核升级失败", e instanceof Error ? e.message : String(e));
+  } finally {
+    upgrading.value = false;
   }
 }
 
@@ -322,12 +336,17 @@ async function handleRestore() {
   }
   restoring.value = true;
   toast.info("正在恢复配置文件并重启核心...");
-  const res = await restoreConfigBackup();
-  restoring.value = false;
-  if (res.success) {
-    toast.success("配置备份已成功恢复", "内核已重新加载运行");
-  } else {
-    toast.error("恢复备份失败", res.error);
+  try {
+    const res = await restoreConfigBackup();
+    if (res.success) {
+      toast.success("配置备份已成功恢复", "内核已重新加载运行");
+    } else {
+      toast.error("恢复备份失败", res.error);
+    }
+  } catch (e) {
+    toast.error("恢复备份失败", e instanceof Error ? e.message : String(e));
+  } finally {
+    restoring.value = false;
   }
 }
 

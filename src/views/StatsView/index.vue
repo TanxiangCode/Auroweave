@@ -32,22 +32,23 @@ const { topApps, fetchAppTraffic } = useAppTraffic();
 
 // === 事件处理 ===
 
-/** 清空大盘数据 */
+/** 清空大盘数据（先确保后端数据库清除成功，再清本地，避免前后端不一致） */
 async function clearStats() {
-  if (confirm("确定要清空累计的历史流量统计与数据库记录吗？该操作不可恢复。")) {
+  if (!confirm("确定要清空累计的历史流量统计与数据库记录吗？该操作不可恢复。")) {
+    return;
+  }
+  try {
+    await invoke("stats_clear_all");
+    // 后端清除成功后才清理本地累计数据
     totalDownload.value = 0;
     totalUpload.value = 0;
     localStorage.setItem("auroweave_total_download", "0");
     localStorage.setItem("auroweave_total_upload", "0");
-
-    try {
-      await invoke("stats_clear_all");
-      await fetchTrafficHistory();
-      await fetchAppTraffic();
-      toast.success("流量数据已重置", "本地历史记录已全部清空");
-    } catch (e: any) {
-      toast.error("重置失败", e?.message || String(e));
-    }
+    await fetchTrafficHistory();
+    await fetchAppTraffic();
+    toast.success("流量数据已重置", "本地历史记录已全部清空");
+  } catch (e: any) {
+    toast.error("重置失败", e?.message || String(e));
   }
 }
 

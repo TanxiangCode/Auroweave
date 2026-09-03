@@ -100,8 +100,8 @@ onMounted(() => {
           <h3><BaseIcon name="AlertTriangle" :size="20" color="#f59e0b" /> 批量吞吐量测速确认</h3>
           <p>将对分组 <strong>「{{ activeGroupTag }}」</strong> 的 <strong>{{ currentNodes.length }}</strong> 个节点依次进行带宽测试。</p>
           <div class="estimate-box">
-            <div><BaseIcon name="Clock" :size="14" /> 预计耗时: 约 {{ Math.ceil(currentNodes.length * 3 / 60) }} 分钟</div>
-            <div><BaseIcon name="TrendingDown" :size="14" /> 预计流量消耗: 约 {{ currentNodes.length * 15 }} MB</div>
+            <div><BaseIcon name="Clock" :size="14" /> 预计耗时: 约 {{ Math.ceil(currentNodes.length * speedtestStore.THROUGHPUT_TEST_DURATION_SEC / 60) }} 分钟</div>
+            <div><BaseIcon name="TrendingDown" :size="14" /> 预计流量消耗: 约 {{ currentNodes.length * (speedtestStore.THROUGHPUT_TEST_CHUNK_BYTES / (1024 * 1024)) }} MB</div>
           </div>
           <p class="warning-tip">测速过程将以串行队列运行，以确保带宽测试结果精准无干扰。</p>
           <div class="modal-actions">

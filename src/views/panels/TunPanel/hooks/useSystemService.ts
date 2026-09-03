@@ -4,7 +4,7 @@
  *
  * 职责：服务状态轮询、安装/卸载/启停、运行模式切换、日志获取
  */
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import {
   serviceQueryStatus,
@@ -66,13 +66,37 @@ export function useSystemService() {
   });
 
   onMounted(() => {
+    // 初次进入面板先查一次状态供展示，持续轮询仅在本机 service 模式下开启
     refreshStatus();
-    statusTimer = setInterval(refreshStatus, 3000);
+    if (runMode.value === "service") {
+      startPolling();
+    }
   });
 
   onUnmounted(() => {
-    if (statusTimer) clearInterval(statusTimer);
+    stopPolling();
   });
+
+  // 运行模式切换时启停轮询：local 模式下无系统服务可查，无需持续 IPC 轮询
+  watch(runMode, (mode) => {
+    if (mode === "service") {
+      startPolling();
+    } else {
+      stopPolling();
+    }
+  });
+
+  function startPolling() {
+    if (statusTimer) return;
+    statusTimer = setInterval(refreshStatus, 3000);
+  }
+
+  function stopPolling() {
+    if (statusTimer) {
+      clearInterval(statusTimer);
+      statusTimer = null;
+    }
+  }
 
   /** 刷新服务状态 */
   async function refreshStatus() {

@@ -5,10 +5,11 @@
  *
  * 纯 SVG 绘制的高清发光柱状图，含日/月/年维度切换器
  */
+import { computed } from "vue";
 import { formatBytes } from "@/utils/format";
 import type { ChartPoint } from "../hooks/useTrafficHistory";
 
-defineProps<{
+const props = defineProps<{
   chartData: ChartPoint[];
   timeDimension: string;
 }>();
@@ -16,6 +17,35 @@ defineProps<{
 const emit = defineEmits<{
   'update:timeDimension': [value: "day" | "month" | "year"];
 }>();
+
+// === 布局常量（与 SVG viewBox 0 0 800 240 保持一致）===
+/** 绘图区左右边界 */
+const CHART_LEFT = 45;
+const CHART_RIGHT = 760;
+
+/**
+ * 统一的 x 轴布局：rect 与 text 必须使用同一 step 与 x 公式，避免错位。
+ * step = (右边界 - 左边界) / 柱数；柱中心 x = 左边界 + (i + 0.5) * step。
+ */
+const layout = computed(() => {
+  const count = Math.max(props.chartData.length, 1);
+  const step = (CHART_RIGHT - CHART_LEFT) / count;
+  const barWidth = Math.max(2, step * 0.6);
+  return { step, barWidth };
+});
+
+/** 第 i 根柱的中心 x 坐标（rect 与 text 共用） */
+function barCenterX(i: number): number {
+  return CHART_LEFT + (i + 0.5) * layout.value.step;
+}
+
+/** x 轴刻度文本的抽稀：每隔约 6 个柱显示一个，最后一个必显 */
+function isTickVisible(i: number): boolean {
+  const count = props.chartData.length;
+  if (count === 0) return false;
+  const every = Math.max(1, Math.ceil(count / 6));
+  return i % every === 0 || i === count - 1;
+}
 </script>
 
 <template>
@@ -45,9 +75,9 @@ const emit = defineEmits<{
 
         <g v-for="(bar, i) in chartData" :key="i">
           <rect
-            :x="45 + i * ((760 - 45) / chartData.length)"
+            :x="barCenterX(i) - layout.barWidth / 2"
             :y="200 - bar.heightPercent"
-            :width="Math.max(4, 16 - (chartData.length / 5))"
+            :width="layout.barWidth"
             :height="bar.heightPercent"
             fill="url(#barGrad)"
             rx="3"
@@ -60,11 +90,11 @@ const emit = defineEmits<{
         <text
           v-for="(bar, i) in chartData"
           :key="i"
-          :x="45 + i * ((760 - 45) / Math.max(chartData.length, 1)) + (16/2)"
+          :x="barCenterX(i)"
           y="220"
           class="svg-text"
           text-anchor="middle"
-          :opacity="(i % Math.ceil(chartData.length / 6) === 0 || i === chartData.length - 1) ? 1 : 0"
+          :opacity="isTickVisible(i) ? 1 : 0"
         >
           {{ bar.label }}
         </text>

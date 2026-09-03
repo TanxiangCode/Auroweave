@@ -12,6 +12,7 @@ import { useSettingsStore } from "@/stores/settings.store";
 import { invoke } from "@tauri-apps/api/core";
 import { info as logInfo, error as logError } from "@tauri-apps/plugin-log";
 import { reconnectAll, setProxyActiveStatus } from "@/api/clash-ws";
+import { useToast } from "@/composables/useToast";
 import type { ApiResponse } from "@/types";
 
 
@@ -19,17 +20,20 @@ interface UseCoreStatusOptions {
   proxyActive: Ref<boolean>;
   coreStarting: Ref<boolean>;
   operating: Ref<boolean>;
+  /** 乐观更新保护窗口截止时间戳（toggle 操作后 10 秒内轮询不覆盖 proxyActive） */
+  recentToggleUntil?: Ref<number>;
 }
 
 /**
  * 内核运行状态轮询 Hook
  *
- * @param options - 依赖注入：代理激活状态、启动中标志、操作标志
+ * @param options - 依赖注入：代理激活状态、启动中标志、操作标志、乐观更新保护窗口
  */
 export function useCoreStatus(options: UseCoreStatusOptions) {
-  const { proxyActive, coreStarting, operating } = options;
+  const { proxyActive, coreStarting, operating, recentToggleUntil } = options;
   const proxyStore = useProxyStore();
   const settingsStore = useSettingsStore();
+  const toast = useToast();
 
   let statusTimer: ReturnType<typeof setInterval> | null = null;
   /** 记录上一次的内核运行状态，用于检测 0→1 变化并触发 WebSocket 重连 */
@@ -38,6 +42,8 @@ export function useCoreStatus(options: UseCoreStatusOptions) {
   let startupPollCount = 0;
   /** 已检测到首次启动完成 */
   let startupCompleted = false;
+  /** 启动超时提示是否已弹出过（只 toast 一次） */
+  let startupTimeoutToasted = false;
 
   /** 轮询内核运行状态 */
   async function checkRunningStatus() {
@@ -46,6 +52,15 @@ export function useCoreStatus(options: UseCoreStatusOptions) {
       const runningRes: ApiResponse<boolean> = await invoke("core_query_running");
       if (runningRes.success) {
         const isRunning = runningRes.data ?? false;
+
+        // 直连模式下无需拉起内核，立即退出启动态
+        if (!startupCompleted && settingsStore.settings.proxy_mode === "direct") {
+          startupCompleted = true;
+          if (coreStarting.value) {
+            coreStarting.value = false;
+            logInfo("[DashboardView] 当前为直连模式，无需启动内核，退出启动中状态");
+          }
+        }
 
         // 应用启动阶段：如果代理模式不是 direct，显示"正在启动"中间状态
         if (!startupCompleted && !isRunning) {
@@ -63,6 +78,10 @@ export function useCoreStatus(options: UseCoreStatusOptions) {
             logInfo("[DashboardView] 启动超时，保持待机状态");
             startupCompleted = true;
             coreStarting.value = false;
+            if (!startupTimeoutToasted) {
+              startupTimeoutToasted = true;
+              toast.warning("内核启动超时", "请检查日志或手动重试开启代理");
+            }
           }
         }
 
@@ -74,7 +93,13 @@ export function useCoreStatus(options: UseCoreStatusOptions) {
           reconnectAll();
         }
 
-        proxyActive.value = isRunning;
+        // 乐观更新保护窗口：toggle 操作后 10 秒内，轮询结果不覆盖 proxyActive，
+        // 避免内核尚未确认前被旧状态回写
+        const inToggleWindow =
+          !!recentToggleUntil && recentToggleUntil.value > Date.now();
+        if (!inToggleWindow) {
+          proxyActive.value = isRunning;
+        }
         setProxyActiveStatus(isRunning);
         wasRunning = isRunning;
       }
@@ -84,9 +109,11 @@ export function useCoreStatus(options: UseCoreStatusOptions) {
     }
   }
 
-  // 首次挂载：仅加载一次设置
+  // 首次挂载：仅加载一次设置（已有其他入口加载过则跳过）
   onMounted(async () => {
-    await settingsStore.fetchSettings();
+    if (!settingsStore.loaded) {
+      await settingsStore.fetchSettings();
+    }
   });
 
   // 每次激活：同步状态、拉取分组、启动轮询

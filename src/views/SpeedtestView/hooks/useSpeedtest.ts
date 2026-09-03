@@ -41,15 +41,30 @@ export function useSpeedtest() {
 
   async function handleSelectNode(nodeTag: string) {
     if (!activeGroupTag.value) return;
-    await proxyStore.selectNode(activeGroupTag.value, nodeTag);
-    toast.success("节点已切换", `切至: ${nodeTag}`);
+    const res = await proxyStore.selectNode(activeGroupTag.value, nodeTag);
+    if (res && res.success) {
+      toast.success("节点已切换", `切至: ${nodeTag}`);
+    } else {
+      toast.error("切换节点失败", res?.error || "未知错误");
+    }
   }
 
   async function handleRunLatency() {
     if (!activeGroupTag.value) return;
+    // 过滤子策略组（selector/urltest/fallback 类型节点不是真实出口，无法测延迟）
+    // group.proxies 仅是 tag 数组，需从 nodeMap 取节点对象获得 type
+    const nodes = proxyStore.nodeMap.get(activeGroupTag.value) ?? [];
+    const tags = nodes
+      .filter((n) => !["selector", "urltest", "fallback"].includes(n.type.toLowerCase()))
+      .map((n) => n.tag);
+    if (tags.length === 0) {
+      toast.warning("该策略组内没有可供测试的真实节点");
+      return;
+    }
     toast.info("正在并发测试延迟...");
-    await speedtestStore.testLatency(activeGroupTag.value, currentNodes.value);
-    toast.success("延迟测试完成");
+    await speedtestStore.testLatency(activeGroupTag.value, tags);
+    const success = Object.values(speedtestStore.latencyMap).filter((v) => v > 0).length;
+    toast.success("延迟测试完成", `有效响应: ${success} / 总计: ${tags.length}`);
   }
 
   async function handleSingleLatency(nodeTag: string) {

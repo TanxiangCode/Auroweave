@@ -13,7 +13,12 @@ const props = defineProps<{
   totalUpload: number;
 }>();
 
-/** 协议配额配置（占比例） */
+/**
+ * 协议配额配置（占比例）
+ * 注意：当前为固定示意比例，后端尚未提供按协议维度的流量统计数据。
+ * 若未来后端增加协议分布统计（如各 outbound 协议的流量字节数），
+ * 将此数组替换为真实数据聚合即可。
+ */
 const dummyProtos = [
   { name: "VMess 协议", ratio: 0.40, color: "var(--accent-cyan)" },
   { name: "Trojan 协议", ratio: 0.25, color: "var(--accent-blue)" },
@@ -59,7 +64,10 @@ const protocols = computed(() => {
 
 <template>
   <div class="chart-box glass-effect">
-    <h3 class="chart-box-title">各连接协议数据流占比分析 (环形)</h3>
+    <h3 class="chart-box-title">
+      各连接协议数据流占比分析 (环形)
+      <span class="demo-badge" title="当前后端未提供按协议维度的流量统计，图为示意比例">示意数据</span>
+    </h3>
     <div class="donut-chart-wrapper">
       <div class="donut-visual">
         <svg viewBox="0 0 100 100" class="donut-svg">
@@ -108,6 +116,22 @@ const protocols = computed(() => {
   font-size: var(--text-sm);
   color: var(--text-primary);
   font-weight: var(--weight-bold);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 示意数据徽标：诚实标注当前图为固定示意比例，非真实统计 */
+.demo-badge {
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-tertiary);
+  background: var(--layer-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
 .donut-chart-wrapper {

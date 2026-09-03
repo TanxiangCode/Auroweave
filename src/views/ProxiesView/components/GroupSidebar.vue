@@ -43,6 +43,11 @@ const filteredRegionGroups = computed(() => {
   return props.regionGroups.filter(g => g.tag.toLowerCase().includes(kw));
 });
 
+/** 地区分组列表（预计算地区徽标，避免模板每次渲染重复调用 3 次 getRegionBadge） */
+const regionGroupsWithBadge = computed(() =>
+  filteredRegionGroups.value.map((g) => ({ group: g, badge: getRegionBadge(g.tag) }))
+);
+
 function getGroupIcon(tag: string, type: string): string {
   if (tag === "proxy") return "Compass";
   if (tag === "auto") return "Zap";
@@ -67,7 +72,8 @@ function getRegionBadge(tag: string): RegionBadgeInfo {
   if (t.includes("JP") || tag.includes("日本")) {
     return { code: "JP", bg: "rgba(255, 94, 98, 0.15)", color: "#ff5e62" };
   }
-  if (t.includes("US") || tag.includes("美国") || tag.includes("美國")) {
+  // US 需按词边界匹配，避免误命中 RUSSIA / AUSTRALIA 等包含 "US" 子串的地区
+  if (/(^|[^A-Z])US([^A-Z]|$)/.test(t) || tag.includes("美国") || tag.includes("美國")) {
     return { code: "US", bg: "rgba(79, 172, 254, 0.15)", color: "#4facfe" };
   }
   if (t.includes("TW") || tag.includes("台湾") || tag.includes("台灣")) {
@@ -79,22 +85,22 @@ function getRegionBadge(tag: string): RegionBadgeInfo {
   if (t.includes("KR") || tag.includes("韩国") || tag.includes("韓國")) {
     return { code: "KR", bg: "rgba(56, 249, 215, 0.15)", color: "#38f9d7" };
   }
-  if (t.includes("UK") || t.includes("GB") || tag.includes("英国")) {
+  if (/(^|[^A-Z])(UK|GB)([^A-Z]|$)/.test(t) || tag.includes("英国")) {
     return { code: "UK", bg: "rgba(161, 140, 209, 0.15)", color: "#a18cd1" };
   }
-  if (t.includes("DE") || tag.includes("德国")) {
+  if (/(^|[^A-Z])DE([^A-Z]|$)/.test(t) || tag.includes("德国")) {
     return { code: "DE", bg: "rgba(254, 207, 239, 0.15)", color: "#fecfef" };
   }
-  if (t.includes("FR") || tag.includes("法国")) {
+  if (/(^|[^A-Z])FR([^A-Z]|$)/.test(t) || tag.includes("法国")) {
     return { code: "FR", bg: "rgba(69, 162, 255, 0.15)", color: "#45a2ff" };
   }
-  if (t.includes("CA") || tag.includes("加拿大")) {
+  if (/(^|[^A-Z])CA([^A-Z]|$)/.test(t) || tag.includes("加拿大")) {
     return { code: "CA", bg: "rgba(255, 120, 117, 0.15)", color: "#ff7875" };
   }
-  if (t.includes("AU") || tag.includes("澳大利亚") || tag.includes("澳洲")) {
+  if (/(^|[^A-Z])AU([^A-Z]|$)/.test(t) || tag.includes("澳大利亚") || tag.includes("澳洲")) {
     return { code: "AU", bg: "rgba(255, 197, 61, 0.15)", color: "#ffc53d" };
   }
-  
+
   // 提取首字母
   const letters = tag.replace(/[^a-zA-Z]/g, "").toUpperCase();
   const code = letters.length >= 2 ? letters.slice(0, 2) : tag.slice(0, 2).toUpperCase();
@@ -221,7 +227,7 @@ function getGroupTypeLabel(tag: string, type: string): string {
 
       <div class="groups-list">
         <div
-          v-for="group in filteredRegionGroups"
+          v-for="{ group, badge } in regionGroupsWithBadge"
           :key="group.tag"
           class="group-item-wrapper"
         >
@@ -235,7 +241,7 @@ function getGroupTypeLabel(tag: string, type: string): string {
           >
             <div class="group-header-info">
               <div class="group-name-wrapper">
-                <span class="region-code-badge" :style="{ background: getRegionBadge(group.tag).bg, color: getRegionBadge(group.tag).color }">{{ getRegionBadge(group.tag).code }}</span>
+                <span class="region-code-badge" :style="{ background: badge.bg, color: badge.color }">{{ badge.code }}</span>
                 <span class="group-name" :title="group.tag">{{ group.tag }}</span>
                 <span v-if="routingGroupTags.has(group.tag)" class="route-pulse-dot" title="当前活跃出口链路成员"></span>
               </div>

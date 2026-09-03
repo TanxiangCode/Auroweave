@@ -106,9 +106,11 @@ async function handleSave() {
       rename_replace: renameReplace.value.trim() || undefined,
     };
 
+    // 剪贴板订阅没有 URL，payload 不携带 url 字段，避免把空串误提交覆盖原值
+    const isClipboard = props.subscription.source_type === "clipboard";
     const res = await subStore.updateSubMeta(props.subscription.id, {
       name: editName.value.trim(),
-      url: editUrl.value.trim(),
+      url: isClipboard ? undefined : editUrl.value.trim(),
       userAgent: editUa.value.trim() || undefined,
       autoUpdateIntervalHours: autoUpdateHours.value,
       filterRule: (filterRule.exclude_pattern || filterRule.include_pattern || filterRule.rename_pattern)

@@ -4,7 +4,7 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
  * TUN 虚拟网卡名称配置
  * 作者: TanXiang
  */
-import { ref, watch } from "vue";
+import { ref, watch, onUnmounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 
 const props = defineProps<{
@@ -17,10 +17,23 @@ const localName = ref(props.initialName);
 const saving = ref(false);
 const saved = ref(false);
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let savedResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 同步外部 initialName 变化 */
 watch(() => props.initialName, (val) => {
   localName.value = val;
+});
+
+/** 清理挂起的防抖保存与"已保存"指示器定时器，避免卸载后仍触发保存 */
+onUnmounted(() => {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (savedResetTimer) {
+    clearTimeout(savedResetTimer);
+    savedResetTimer = null;
+  }
 });
 
 /** 防抖保存 */
@@ -31,6 +44,11 @@ function onNameInput() {
 }
 
 async function saveName() {
+  // blur 与 800ms 防抖都可能触发保存：先取消挂起的定时器，避免一次输入保存两次
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
   const trimmed = localName.value.trim();
   if (!trimmed) {
     localName.value = "Auroweave";
@@ -39,7 +57,8 @@ async function saveName() {
   await settingsStore.updateSettings({ tun_interface_name: localName.value });
   saving.value = false;
   saved.value = true;
-  setTimeout(() => { saved.value = false; }, 2000);
+  if (savedResetTimer) clearTimeout(savedResetTimer);
+  savedResetTimer = setTimeout(() => { saved.value = false; }, 2000);
 }
 </script>
 

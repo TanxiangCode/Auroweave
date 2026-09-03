@@ -1,7 +1,7 @@
 <template>
   <div class="audit-filter-toolbar">
-    <!-- 第一行：搜索与多维状态/协议过滤 -->
-    <div class="toolbar-primary-row">
+    <!-- 第一行：搜索与多维状态/协议过滤（raw 内核日志视图不参与过滤，整行隐藏） -->
+    <div class="toolbar-primary-row" v-if="viewMode !== 'raw'">
       <!-- 搜索框 -->
       <div class="search-box">
         <span class="search-icon"><BaseIcon name="Search" :size="14" /></span>

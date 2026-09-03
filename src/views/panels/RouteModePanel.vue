@@ -56,7 +56,11 @@ const proxyStore = useProxyStore();
 const toast = useToast();
 
 async function save() {
-  await settingsStore.updateSettings(settingsStore.settings);
+  // 局部 patch：仅提交本面板涉及的端口字段，避免全量 settings 覆盖其他未保存修改
+  await settingsStore.updateSettings({
+    mixed_port: settingsStore.settings.mixed_port,
+    clash_api_port: settingsStore.settings.clash_api_port,
+  });
   toast.success("端口与代理模式设置已保存");
 }
 

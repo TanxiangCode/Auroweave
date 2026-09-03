@@ -94,10 +94,26 @@ function openGroupEdit(groupTag: string) {
 }
 
 
-/** 保存分组配置 */
+/** 保存分组配置（调用 IPC 持久化，失败不关闭弹窗） */
 async function saveGroupConfig() {
-  toast.info("配置已更新", "将在下次刷新订阅时生效");
-  showGroupEditModal.value = false;
+  const tag = editingGroupTag.value;
+  if (!tag) return;
+  const cfg = editingGroupConfig.value;
+  try {
+    const res = await proxyStore.updateGroupConfig(tag, {
+      interval: cfg.interval,
+      tolerance: cfg.tolerance,
+      url: cfg.url,
+    });
+    if (res.success) {
+      toast.success("分组配置已更新", "将在下次重建内核配置时生效");
+      showGroupEditModal.value = false;
+    } else {
+      toast.error("保存分组配置失败", res.error || "未知错误");
+    }
+  } catch (e) {
+    toast.error("保存分组配置失败", e instanceof Error ? e.message : String(e));
+  }
 }
 
 // ==================== 事件协调 ====================
@@ -204,6 +220,7 @@ onDeactivated(() => {
           :search-text="searchText"
           :is-selectable="isSelectorGroup"
           :layout-mode="viewMode"
+          :fetch-error="proxyStore.error"
           @select="handleNodeSelect"
           @test-latency="handleSingleLatency"
           @test-speed="handleSingleSpeed"

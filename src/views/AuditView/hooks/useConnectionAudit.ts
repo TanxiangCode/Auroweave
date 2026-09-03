@@ -100,6 +100,8 @@ export function useConnectionAudit() {
   /** 清空历史记录 */
   function clearHistory() {
     historyRecords.value = [];
+    // 同步清空已见连接 ID 集合：否则清除后同 ID 连接的后续新会话会被当作旧连接漏记
+    seenConnIds.clear();
     toast.info("历史记录已清空", "连接审计队列已重置");
   }
 

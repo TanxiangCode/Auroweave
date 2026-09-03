@@ -7,6 +7,7 @@
 import { computed, type Ref } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
+import { useToast } from "@/composables/useToast";
 import { invoke } from "@tauri-apps/api/core";
 import { info as logInfo, error as logError, warn as logWarn } from "@tauri-apps/plugin-log";
 import type { ApiResponse } from "@/types";
@@ -25,6 +26,7 @@ export function useInboundMode(options: UseInboundModeOptions) {
   const { proxyActive, operating } = options;
   const proxyStore = useProxyStore();
   const settingsStore = useSettingsStore();
+  const toast = useToast();
 
   /** 流量接管双态读写双向绑定 */
   const inboundMode = computed({
@@ -75,7 +77,7 @@ export function useInboundMode(options: UseInboundModeOptions) {
                 // macOS: TUN 提权通过 osascript 密码框完成，失败时无需安装服务
                 // 后端已自动回退为系统代理模式，仅提示用户即可
                 logWarn(`[DashboardView] macOS TUN 启动失败: ${res.error}`);
-                alert(`TUN 模式启动失败。\n\n${res.error}\n\n已自动回退为系统代理模式。`);
+                toast.error("TUN 模式启动失败", `${res.error ?? "未知错误"}（已自动回退为系统代理模式）`);
                 settingsStore.settings.tun_enabled = originalVal; // 回滚
                 return;
               }

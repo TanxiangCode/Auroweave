@@ -14,8 +14,7 @@
  *     .energy-rotor::before — 模糊光晕（跟随彗星，营造泛光效果）
  *     .energy-inner         — 静止内容层（图标 + 文字）
  */
-import { computed } from "vue";
-import { withDefaults } from "vue";
+import { computed, withDefaults } from "vue";
 import { CORE_GLOW_THEMES } from "../utils/core-glow-themes";
 import IdleTipsPanel from "./IdleTipsPanel.vue";
 

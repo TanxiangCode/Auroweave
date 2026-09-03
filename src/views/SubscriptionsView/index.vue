@@ -14,6 +14,7 @@ import { ref, computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
 import { useSubscriptionStore } from "@/stores/subscription.store";
 import { useToast } from "@/composables/useToast";
+import { formatBytes } from "@/utils/format";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import SubscriptionImportModal from "./components/SubscriptionImportModal.vue";
 import SubscriptionEditModal from "./components/SubscriptionEditModal.vue";
@@ -25,13 +26,28 @@ const toast = useToast();
 
 const { subscriptions } = storeToRefs(subStore);
 
-const operatingId = ref<string | null>(null);
+/** 正在操作中的订阅 ID 集合（支持多卡片同时显示 spinner） */
+const operatingIds = ref<Set<string>>(new Set());
 const batchUpdating = ref(false);
+/** 批量更新进度：正在更新第 n 个 / 共 total 个（仅计远程订阅） */
+const batchProgress = ref<{ current: number; total: number } | null>(null);
 const showImportModal = ref(false);
 const showEditModal = ref(false);
 const showInspectModal = ref(false);
 const currentEditingSub = ref<Subscription | null>(null);
 const currentInspectSub = ref<Subscription | null>(null);
+
+/** 标记某订阅为操作中 */
+function markOperating(id: string) {
+  operatingIds.value = new Set(operatingIds.value).add(id);
+}
+
+/** 解除某订阅的操作中状态 */
+function unmarkOperating(id: string) {
+  const next = new Set(operatingIds.value);
+  next.delete(id);
+  operatingIds.value = next;
+}
 
 function handleOpenInspect(sub: Subscription) {
   currentInspectSub.value = sub;
@@ -63,19 +79,6 @@ function formatTime(ts?: number | null): string {
   const diffHours = Math.floor(diffMin / 60);
   if (diffHours < 24) return `${diffHours} 小时前`;
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-/** 格式化流量字节数 */
-function formatBytes(bytes?: number | null): string {
-  if (!bytes || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let val = bytes;
-  let unitIndex = 0;
-  while (val >= 1024 && unitIndex < units.length - 1) {
-    val /= 1024;
-    unitIndex++;
-  }
-  return `${val.toFixed(1)} ${units[unitIndex]}`;
 }
 
 /** 计算流量百分比 */
@@ -111,48 +114,64 @@ function getSourceBadge(sub: Subscription) {
 
 /** 切换活跃订阅 */
 async function handleActivate(id: string) {
-  operatingId.value = id;
-  const res = await subStore.activateSub(id);
-  if (res.success) {
-    toast.success("已切换订阅", "核心已完成配置热重载");
-  } else {
-    toast.error("切换失败", res.error || "配置应用异常");
+  markOperating(id);
+  try {
+    const res = await subStore.activateSub(id);
+    if (res.success) {
+      toast.success("已切换订阅", "核心已完成配置热重载");
+    } else {
+      toast.error("切换失败", res.error || "配置应用异常");
+    }
+  } finally {
+    unmarkOperating(id);
   }
-  operatingId.value = null;
 }
 
 /** 刷新单个订阅 */
 async function handleRefresh(id: string) {
-  operatingId.value = id;
-  const res = await subStore.refreshSub(id);
-  if (res.success) {
-    toast.success("订阅刷新成功", `当前节点数: ${res.data?.node_count || 0}`);
-  } else {
-    toast.error("刷新失败", res.error || "网络拉取超时，已保留原配置");
+  markOperating(id);
+  try {
+    const res = await subStore.refreshSub(id);
+    if (res.success) {
+      toast.success("订阅刷新成功", `当前节点数: ${res.data?.node_count || 0}`);
+    } else {
+      toast.error("刷新失败", res.error || "网络拉取超时，已保留原配置");
+    }
+  } finally {
+    unmarkOperating(id);
   }
-  operatingId.value = null;
 }
 
 /** 一键更新全部订阅 */
 async function handleBatchUpdateAll() {
-  if (subscriptions.value.length === 0) return;
+  if (subscriptions.value.length === 0 || batchUpdating.value) return;
   batchUpdating.value = true;
   let successCount = 0;
   let failCount = 0;
 
-  for (const sub of subscriptions.value) {
-    if (sub.source_type === "clipboard") continue; // 剪贴板无需网络刷新
-    operatingId.value = sub.id;
-    const res = await subStore.refreshSub(sub.id);
-    if (res.success) {
-      successCount++;
-    } else {
-      failCount++;
-    }
-  }
+  // 仅远程订阅需要网络刷新，剪贴板订阅跳过
+  const remoteSubs = subscriptions.value.filter((s) => s.source_type !== "clipboard");
+  batchProgress.value = { current: 0, total: remoteSubs.length };
 
-  operatingId.value = null;
-  batchUpdating.value = false;
+  try {
+    for (const sub of remoteSubs) {
+      batchProgress.value = { current: successCount + failCount + 1, total: remoteSubs.length };
+      markOperating(sub.id);
+      try {
+        const res = await subStore.refreshSub(sub.id);
+        if (res.success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } finally {
+        unmarkOperating(sub.id);
+      }
+    }
+  } finally {
+    batchUpdating.value = false;
+    batchProgress.value = null;
+  }
 
   if (failCount === 0) {
     toast.success("批量更新完成", `成功刷新全量 ${successCount} 个远程订阅`);
@@ -170,14 +189,17 @@ function handleOpenEdit(sub: Subscription) {
 /** 删除订阅 */
 async function handleDelete(sub: Subscription) {
   if (!confirm(`确定要删除订阅 "${sub.name}" 吗？`)) return;
-  operatingId.value = sub.id;
-  const res = await subStore.removeSub(sub.id);
-  if (res.success) {
-    toast.success("已删除订阅", sub.name);
-  } else {
-    toast.error("删除失败", res.error || "未知错误");
+  markOperating(sub.id);
+  try {
+    const res = await subStore.removeSub(sub.id);
+    if (res.success) {
+      toast.success("已删除订阅", sub.name);
+    } else {
+      toast.error("删除失败", res.error || "未知错误");
+    }
+  } finally {
+    unmarkOperating(sub.id);
   }
-  operatingId.value = null;
 }
 </script>
 
@@ -230,7 +252,13 @@ async function handleDelete(sub: Subscription) {
           title="并发拉取并更新所有远程订阅源"
         >
           <BaseIcon name="RefreshCw" :size="14" :class="{ spin: batchUpdating }" />
-          <span>{{ batchUpdating ? "正在批量更新..." : "一键更新全部" }}</span>
+          <span>{{
+            batchUpdating && batchProgress
+              ? `正在更新 ${batchProgress.current}/${batchProgress.total}...`
+              : batchUpdating
+                ? "正在批量更新..."
+                : "一键更新全部"
+          }}</span>
         </button>
       </div>
     </header>
@@ -256,7 +284,7 @@ async function handleDelete(sub: Subscription) {
           v-for="sub in subscriptions"
           :key="sub.id"
           class="subscription-card glass-effect"
-          :class="{ active: sub.is_active, operating: operatingId === sub.id }"
+          :class="{ active: sub.is_active, operating: operatingIds.has(sub.id) }"
         >
           <!-- 卡片头部：名称、来源格式与状态 -->
           <div class="card-header">
@@ -301,7 +329,7 @@ async function handleDelete(sub: Subscription) {
                 {{ getRemainingDays(sub.user_info.expire_timestamp) }}
               </span>
               <span class="traffic-subtext">
-                ↑ {{ formatBytes(sub.user_info.upload_bytes) }} · ↓ {{ formatBytes(sub.user_info.download_bytes) }}
+                ↑ {{ formatBytes(sub.user_info.upload_bytes ?? 0) }} · ↓ {{ formatBytes(sub.user_info.download_bytes ?? 0) }}
               </span>
             </div>
           </div>
@@ -333,7 +361,7 @@ async function handleDelete(sub: Subscription) {
               <button
                 v-if="!sub.is_active"
                 class="btn-card-action activate"
-                :disabled="operatingId === sub.id"
+                :disabled="operatingIds.has(sub.id)"
                 @click="handleActivate(sub.id)"
                 title="切换为当前主力订阅"
               >
@@ -345,11 +373,11 @@ async function handleDelete(sub: Subscription) {
               <button
                 v-if="sub.source_type !== 'clipboard'"
                 class="btn-card-action refresh"
-                :disabled="operatingId === sub.id"
+                :disabled="operatingIds.has(sub.id)"
                 @click="handleRefresh(sub.id)"
                 title="从云端拉取更新"
               >
-                <BaseIcon name="RefreshCw" :size="13" :class="{ spin: operatingId === sub.id }" />
+                <BaseIcon name="RefreshCw" :size="13" :class="{ spin: operatingIds.has(sub.id) }" />
               </button>
 
               <!-- 查看完整配置按钮 -->
@@ -373,7 +401,7 @@ async function handleDelete(sub: Subscription) {
               <!-- 删除按钮 -->
               <button
                 class="btn-card-action delete"
-                :disabled="operatingId === sub.id"
+                :disabled="operatingIds.has(sub.id)"
                 @click="handleDelete(sub)"
                 title="删除此订阅"
               >

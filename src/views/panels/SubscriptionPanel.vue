@@ -127,7 +127,10 @@ onMounted(() => {
 });
 
 async function save() {
-  await settingsStore.updateSettings(settingsStore.settings);
+  // 局部 patch：仅提交本面板涉及的开关字段，避免全量 settings 覆盖其他面板的未保存修改
+  await settingsStore.updateSettings({
+    auto_group_on_import: settingsStore.settings.auto_group_on_import,
+  });
   toast.success("订阅设置已保存");
 }
 
@@ -166,54 +169,59 @@ async function handleImport() {
   }
 }
 
-async function handleActivate(id: string) {
-  operating.value = id;
-  const res = await subStore.activateSub(id);
-  if (res.success) {
-    toast.success("订阅已切换", `当前使用: ${res.data?.name}`);
-    proxyStore.clearCache();
+/**
+ * 等待 sing-box 完全就绪后代理分组可用（带重试）。
+ * 后端 build_and_apply_config 已等待 ClashAPI 就绪，但前端仍需短暂缓冲。
+ */
+async function waitForGroups(maxRetries = 3, intervalMs = 1000): Promise<boolean> {
+  for (let i = 0; i < maxRetries; i++) {
     await proxyStore.fetchGroups();
-  } else {
-    toast.error("切换失败", res.error);
+    if (proxyStore.groups.length > 0) {
+      return true;
+    }
+    if (i < maxRetries - 1) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
   }
-  operating.value = null;
+  return false;
 }
 
-  async function handleRefresh(id: string) {
-    operating.value = id;
+async function handleActivate(id: string) {
+  operating.value = id;
+  try {
+    const res = await subStore.activateSub(id);
+    if (res.success) {
+      toast.success("订阅已切换", `当前使用: ${res.data?.name}`);
+      proxyStore.clearCache();
+      await proxyStore.fetchGroups();
+    } else {
+      toast.error("切换失败", res.error);
+    }
+  } finally {
+    operating.value = null;
+  }
+}
+
+async function handleRefresh(id: string) {
+  operating.value = id;
+  try {
     const res = await subStore.refreshSub(id);
     if (res.success) {
       toast.success("订阅刷新成功", `解析出 ${res.data?.node_count || 0} 个节点`);
       proxyStore.clearCache();
-      // 关键修复：等待 sing-box 完全就绪后再拉取代理列表，避免 ClashAPI 请求失败
-      // 后端 build_and_apply_config 已等待 ClashAPI 就绪，但前端也需要短暂缓冲
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // 重试机制：最多尝试3次拉取代理列表
-      let retryCount = 0;
-      let groupsFetched = false;
-      while (retryCount < 3 && !groupsFetched) {
-        await proxyStore.fetchGroups();
-        if (proxyStore.groups.length > 0) {
-          groupsFetched = true;
-          break;
-        }
-        retryCount++;
-        if (retryCount < 3) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-      
+      const groupsFetched = await waitForGroups(3, 1000);
       if (!groupsFetched) {
         toast.warning("代理列表暂时为空", "Sing-box 可能还在初始化，请稍后刷新");
       }
     } else {
       toast.error("刷新失败", res.error);
     }
+  } finally {
     operating.value = null;
   }
+}
 
-  async function handleDelete(id: string) {
+async function handleDelete(id: string) {
   const sub = subscriptions.value.find(s => s.id === id);
   if (!sub) return;
 

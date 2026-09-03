@@ -25,6 +25,8 @@ export function useProxyGroups() {
   const { groups, loading } = storeToRefs(proxyStore);
 
   const selectedGroupTag = ref<string>("");
+  /** 分组切换令牌：快速连点时，仅最后一次切换的 fetch 允许收尾，避免旧响应错乱 */
+  let selectionToken = 0;
 
   /** 系统内置分组（主策略组：proxy / auto / balance） */
   const systemGroups = computed<ProxyGroup[]>(() => {
@@ -97,11 +99,19 @@ export function useProxyGroups() {
     }
   }
 
-  /** 切换分组 */
+  /** 切换分组（带竞态保护：快速连点时仅最后一次切换生效） */
   async function handleGroupSelect(groupTag: string) {
     selectedGroupTag.value = groupTag;
-    await proxyStore.fetchGroupNodes(groupTag);
-    proxyStore.recordGroupUsage(groupTag);
+    const token = ++selectionToken;
+    try {
+      await proxyStore.fetchGroupNodes(groupTag);
+    } finally {
+      // 仅当本次 fetch 仍是用户最后一次选择时才记录使用频次，
+      // 防止旧请求返回后把过期分组的 usage 记入统计
+      if (token === selectionToken && selectedGroupTag.value === groupTag) {
+        proxyStore.recordGroupUsage(groupTag);
+      }
+    }
   }
 
   return {
