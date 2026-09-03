@@ -200,8 +200,9 @@ if (typeof window !== "undefined") {
 // 动态获取最新的 WebSocket URL，以在设置端口变化时生效
 // token 参数：clash_api 启用 secret 后浏览器 WS 只能靠 ?token= 鉴权
 // secret 未就绪时退化为无 token 连接（依赖模块加载时的预热尽快补齐）
+// extraParams：端点附加查询参数（如 /logs 的 level）
 // ------------------------------------------------------------
-function getDynamicWsUrl(path: string): string {
+function getDynamicWsUrl(path: string, extraParams: Record<string, string> = {}): string {
   const baseUrl = (() => {
     try {
       const store = useSettingsStore();
@@ -209,11 +210,13 @@ function getDynamicWsUrl(path: string): string {
       return `ws://127.0.0.1:${port}`;
     } catch {
       // 降级兜底
-      return "ws://127.0.0.1:9090";
+      return `ws://127.0.0.1:9090`;
     }
   })();
-  if (!cachedSecret) return `${baseUrl}${path}`;
-  return `${baseUrl}${path}?token=${encodeURIComponent(cachedSecret)}`;
+  const params = new URLSearchParams(extraParams);
+  if (cachedSecret) params.set("token", cachedSecret);
+  const qs = params.toString();
+  return qs ? `${baseUrl}${path}?${qs}` : `${baseUrl}${path}`;
 }
 
 // ------------------------------------------------------------
@@ -387,8 +390,10 @@ export function subscribeLog(cb: LogCallback): () => void {
   logCallbacks.push(cb);
   if (!logClient) {
     logClient = new WsClient({
-      url: () => getDynamicWsUrl("/logs"),
-      onMessage: (data) => logCallbacks.forEach((fn) => fn(data.payload)),
+      // level=trace：sing-box 仅下发 ≤level 的日志，默认 info 会漏掉
+      // WARN/ERROR/FATAL（Level 数值越大级别越高），raw 日志视图必须取全量
+      url: () => getDynamicWsUrl("/logs", { level: "trace" }),
+      onMessage: (data) => logCallbacks.forEach((fn) => fn(`${data.type.toUpperCase()} ${data.payload}`)),
     });
     logClient.connect();
   }
