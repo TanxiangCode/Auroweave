@@ -279,12 +279,66 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         }
     }
 
-    // 5. 确保 dns.strategy 存在（兼容旧版配置文件，缺少时补写 prefer_ipv4）
-    // prefer_ipv4 策略可避免 TUN 模式下因 IPv6 解析失败导致的连接超时
+    // 5. 确保 dns 配置规范（校准 local DNS 为系统原生类型并清理错误的静态测速域名规则）
     if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
         if !dns.contains_key("strategy") {
             dns.insert("strategy".to_string(), serde_json::json!("prefer_ipv4"));
             modified = true;
+        }
+
+        // 校准 local dns server 为 type: local，校准 remote dns server 为 type: https
+        if let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut()) {
+            for srv in servers.iter_mut() {
+                if srv.get("tag").and_then(|t| t.as_str()) == Some("local") {
+                    if srv.get("type").and_then(|t| t.as_str()) != Some("local") || srv.get("server").is_some() {
+                        *srv = serde_json::json!({
+                            "tag": "local",
+                            "type": "local"
+                        });
+                        modified = true;
+                    }
+                } else if srv.get("tag").and_then(|t| t.as_str()) == Some("remote") {
+                    if srv.get("type").and_then(|t| t.as_str()) != Some("https") {
+                        *srv = serde_json::json!({
+                            "tag": "remote",
+                            "type": "https",
+                            "server": "8.8.8.8",
+                            "detour": "proxy"
+                        });
+                        modified = true;
+                    }
+                }
+            }
+        }
+
+        // 清理 dns.rules 中残留的 www.gstatic.com 强制 local 规则
+        if let Some(rules) = dns.get_mut("rules").and_then(|r| r.as_array_mut()) {
+            let before_len = rules.len();
+            rules.retain(|r| {
+                if let Some(domains) = r.get("domain").and_then(|d| d.as_array()) {
+                    !domains.iter().any(|dom| dom.as_str() == Some("www.gstatic.com"))
+                } else {
+                    true
+                }
+            });
+            if rules.len() != before_len {
+                modified = true;
+            }
+        }
+    }
+
+    // 6. 确保 mixed inbounds 开启了流量嗅探 (sniff)
+    if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|i| i.as_array_mut()) {
+        for inb in inbounds.iter_mut() {
+            if inb.get("type").and_then(|t| t.as_str()) == Some("mixed") {
+                if inb.get("sniff").is_none() || inb.get("sniff_override_destination").is_none() {
+                    if let Some(obj) = inb.as_object_mut() {
+                        obj.insert("sniff".to_string(), serde_json::json!(true));
+                        obj.insert("sniff_override_destination".to_string(), serde_json::json!(true));
+                        modified = true;
+                    }
+                }
+            }
         }
     }
 

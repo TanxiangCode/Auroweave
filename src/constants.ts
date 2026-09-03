@@ -66,9 +66,9 @@ export const LATENCY_TEST_TIMEOUT_MS = 5_000; // 单次延迟测试超时
 // ============================================================
 
 export const WS_RECONNECT_DELAY_MS = 1_000;   // 初始重连间隔
-export const WS_RECONNECT_MAX_DELAY_MS = 30_000;
-export const WS_RECONNECT_MAX_RETRIES = 10;
-export const WS_MAX_CONSECUTIVE_FAILURES = 2;
+export const WS_RECONNECT_MAX_DELAY_MS = 10_000;
+export const WS_RECONNECT_MAX_RETRIES = 50;
+export const WS_MAX_CONSECUTIVE_FAILURES = 15;
 
 // ============================================================
 // 能量核动画

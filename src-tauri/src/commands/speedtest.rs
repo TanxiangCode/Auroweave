@@ -49,6 +49,9 @@ pub async fn speedtest_run_latency(
         let sem = semaphore.clone();
         let url = test_url.clone();
         join_set.spawn(async move {
+            if crate::core::parser::is_announcement_or_fake_node(&tag, None, None) {
+                return (tag, 0u16);
+            }
             let _permit = sem.acquire().await.ok();
             if idx > 0 && idx % 10 == 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(15)).await;

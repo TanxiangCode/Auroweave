@@ -20,7 +20,7 @@
 /// - 优先匹配国旗 emoji（最精确）
 /// - 其次匹配中文关键词（香港、日本、美国等）
 /// - 最后使用英文缩写单词边界匹配（避免 "us" 误匹配 "Russia"）
-use super::parser::ParsedOutbound;
+use super::parser::{is_announcement_or_fake_node, ParsedOutbound};
 use crate::error::AppError;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -39,18 +39,17 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
         "dns": {
             "servers": [
                 {
-                    "server": "8.8.8.8",
                     "tag": "remote",
-                    "type": "udp"
+                    "type": "udp",
+                    "server": "8.8.8.8"
                 },
                 {
-                    "server": "223.5.5.5",
                     "tag": "local",
-                    "type": "udp"
+                    "type": "local"
                 }
             ],
             "rules": [],
-            "final": "remote",
+            "final": "local",
             "strategy": "prefer_ipv4"
         },
         "inbounds": [
@@ -129,7 +128,6 @@ impl ConfigBuilder {
         self
     }
 
-
     /// 设置本地 rule-set 文件路径（如果文件存在则使用 type:local 引用）
     pub fn with_local_rule_sets(mut self, geosite_cn: Option<String>, geoip_cn: Option<String>) -> Self {
         self.geosite_cn_path = geosite_cn;
@@ -143,17 +141,31 @@ impl ConfigBuilder {
             return Err(AppError::Config("没有可用节点，无法生成 config.json".to_string()));
         }
 
-        // ---- 阶段1: 遍历节点，提取 tag 和原始 JSON，按地区分组 ----
-        let mut node_tags = Vec::new();
+        // ---- 阶段1: 遍历节点，提取 tag 和原始 JSON，按地区分组（过滤公告和伪节点） ----
+        let mut valid_node_tags = Vec::new();
+        let mut all_node_tags = Vec::new();
         let mut raw_outbounds = Vec::new();
         let mut region_map: HashMap<String, Vec<String>> = HashMap::new();
 
         for out in &self.outbounds {
-            node_tags.push(out.tag.clone());
+            all_node_tags.push(out.tag.clone());
             raw_outbounds.push(out.raw_json.clone());
-            let region = detect_region(&out.tag);
-            region_map.entry(region).or_default().push(out.tag.clone());
+
+            // 过滤伪节点/公告节点，避免污染自动测速策略组
+            let is_fake = is_announcement_or_fake_node(&out.tag, out.server.as_deref(), out.server_port);
+            if !is_fake {
+                valid_node_tags.push(out.tag.clone());
+                let region = detect_region(&out.tag);
+                region_map.entry(region).or_default().push(out.tag.clone());
+            }
         }
+
+        // 如果全部都是伪节点（极端情况），回退使用全部 tag
+        let pool_tags = if valid_node_tags.is_empty() {
+            all_node_tags.clone()
+        } else {
+            valid_node_tags.clone()
+        };
 
         let mut final_outbounds = Vec::new();
 
@@ -168,7 +180,15 @@ impl ConfigBuilder {
         for (region, _) in &region_map {
             proxy_group_list.push(format!("{}-auto", region));
         }
-        proxy_group_list.extend(node_tags.clone());
+        // 先放入有效真实节点，再追加其它节点
+        proxy_group_list.extend(pool_tags.clone());
+        if !valid_node_tags.is_empty() {
+            for tag in &all_node_tags {
+                if !valid_node_tags.contains(tag) {
+                    proxy_group_list.push(tag.clone());
+                }
+            }
+        }
 
         final_outbounds.push(json!({
             "type": "selector",
@@ -180,7 +200,7 @@ impl ConfigBuilder {
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "auto",
-            "outbounds": node_tags.clone(),
+            "outbounds": pool_tags.clone(),
             "url": "http://www.gstatic.com/generate_204",
             "interval": "3m",
             "idle_timeout": "15m",
@@ -188,11 +208,11 @@ impl ConfigBuilder {
             "interrupt_exist_connections": false
         }));
 
-        // 2c-2. "balance" 负载均衡出站（urltest + 短间隔 + tolerance，近似负载均衡效果）
+        // 2c-2. "balance" 负载均衡出站（urltest + 短间隔 + tolerance）
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "balance",
-            "outbounds": node_tags,
+            "outbounds": pool_tags,
             "url": "http://www.gstatic.com/generate_204",
             "interval": "3m",
             "idle_timeout": "10m",
@@ -214,7 +234,6 @@ impl ConfigBuilder {
             }));
         }
 
-
         // 2e. 节点具体出站
         final_outbounds.extend(raw_outbounds);
 
@@ -230,28 +249,15 @@ impl ConfigBuilder {
         server_domains.sort();
         server_domains.dedup();
 
-    let mut dns_rules = if server_domains.is_empty() {
-        vec![]
-    } else {
-        vec![json!({ "domain": server_domains, "server": "local" })]
-    };
+        let mut dns_rules = Vec::new();
+        if !server_domains.is_empty() {
+            dns_rules.push(json!({ "domain": server_domains, "server": "local" }));
+        }
 
-    // 测速与健康检测域名强制使用 local DNS 解析，避免未选定节点时依赖 remote/proxy 产生 DNS 死锁
-    dns_rules.push(json!({
-        "domain": [
-            "www.gstatic.com",
-            "connectivitycheck.gstatic.com",
-            "cp.cloudflare.com",
-            "msftconnecttest.com"
-        ],
-        "server": "local"
-    }));
-
-    // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则
-    if self.geosite_cn_path.is_some() {
-        dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
-    }
-
+        // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则：国内域名由 local DNS 权威解析
+        if self.geosite_cn_path.is_some() {
+            dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
+        }
 
         // ---- 阶段4: 组装路由 ----
         // 检查本地 rule-set 文件是否存在
@@ -309,12 +315,11 @@ impl ConfigBuilder {
                         "detour": "proxy",
                         "server": "8.8.8.8",
                         "tag": "remote",
-                        "type": "udp"
+                        "type": "https"
                     },
                     {
-                        "server": "223.5.5.5",
                         "tag": "local",
-                        "type": "udp"
+                        "type": "local"
                     }
                 ],
                 "rules": dns_rules,
@@ -326,10 +331,11 @@ impl ConfigBuilder {
                     "type": "mixed",
                     "tag": "mixed-in",
                     "listen": if self.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
-                    "listen_port": self.mixed_port
+                    "listen_port": self.mixed_port,
+                    "sniff": true,
+                    "sniff_override_destination": true
                 }
             ],
-
             "outbounds": final_outbounds,
             "route": route,
             "experimental": {
@@ -385,20 +391,22 @@ fn tokenize_tag(s: &str) -> Vec<&str> {
 
 /// 构建完整的 route.rules 规则列表（公共函数，供 ConfigBuilder 和 rebuild_config_from_settings 统一调用）
 ///
-/// 规则匹配顺序：
+/// 规则匹配顺序（严格遵循域名优先、IP后置原则）：
 /// 1. 基础嗅探与 DNS 劫持
-/// 2. 私有内网 IP 直连
-/// 3. App-Matrix 应用进程分流规则
-/// 4. Custom Rules 自定义域名/IP分流规则
-/// 5. 国内域名与 IP 规则集直连（标记 clash_mode: "rule"，确保 Global 模式下自动避让并走代理出站）
+/// 2. App-Matrix 应用进程分流规则
+/// 3. Custom Rules 自定义域名分流规则
+/// 4. 国内域名规则集直连（geosite-cn -> direct，避免境外域名提前触发国内 DNS 解析遭受污染）
+/// 5. 私有内网 IP 直连（ip_is_private -> direct）
+/// 6. Custom Rules 自定义 IP 分流规则 (ip_cidr)
+/// 7. 国内 IP 规则集直连（geoip-cn -> direct）
+/// 8. 兜底策略由 route.final 决定（Rule/Global 模式下为 proxy）
 pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> {
     let mut rules = vec![
         json!({ "action": "sniff" }),
         json!({ "protocol": "dns", "action": "hijack-dns" }),
-        json!({ "ip_is_private": true, "outbound": "direct" }),
     ];
 
-    // 注入 App-Matrix 应用分流规则 (优先级高于通用域名分流)
+    // 1. 注入 App-Matrix 应用分流规则 (优先级高于通用域名分流)
     let app_rules = crate::commands::routing::load_app_rules_internal();
     for (proc_name, outbound) in app_rules {
         if !proc_name.is_empty() && !outbound.is_empty() {
@@ -409,8 +417,10 @@ pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> 
         }
     }
 
-    // 注入自定义域名 / IP 分流规则 (仅注入 enabled == true)
+    // 2. 注入自定义分流规则 (先处理域名规则，IP规则暂存后续注入)
     let custom_rules = crate::commands::routing::load_custom_rules_internal();
+    let mut custom_ip_rules = Vec::new();
+
     for cr in custom_rules {
         if !cr.enabled || cr.payload.trim().is_empty() || cr.outbound_tag.trim().is_empty() {
             continue;
@@ -432,7 +442,7 @@ pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> 
                 rules.push(json!({ "domain_regex": [payload], "outbound": outbound }));
             }
             "ip_cidr" => {
-                rules.push(json!({ "ip_cidr": [payload], "outbound": outbound }));
+                custom_ip_rules.push(json!({ "ip_cidr": [payload], "outbound": outbound }));
             }
             _ => {
                 rules.push(json!({ "domain_suffix": [payload], "outbound": outbound }));
@@ -440,21 +450,31 @@ pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> 
         }
     }
 
-    // 注入国内规则集直连规则 (带 clash_mode: "rule"，确保 Global 模式下避让直连规则走全局代理)
+    // 3. 注入国内域名规则集直连规则 (域名优先匹配，避免未匹配的境外域名提前进行本地 DNS 解析遭投毒)
     if has_geosite {
-        if has_geoip {
-            rules.push(json!({
-                "clash_mode": "rule",
-                "rule_set": ["geosite-cn", "geoip-cn"],
-                "outbound": "direct"
-            }));
-        } else {
-            rules.push(json!({
-                "clash_mode": "rule",
-                "rule_set": ["geosite-cn"],
-                "outbound": "direct"
-            }));
-        }
+        rules.push(json!({
+            "clash_mode": "rule",
+            "rule_set": ["geosite-cn"],
+            "outbound": "direct"
+        }));
+    }
+
+    // 4. 私有内网 IP 直连规则 (放置在域名规则之后)
+    rules.push(json!({
+        "ip_is_private": true,
+        "outbound": "direct"
+    }));
+
+    // 5. 注入自定义 IP CIDR 规则
+    rules.extend(custom_ip_rules);
+
+    // 6. 注入国内 IP 规则集直连规则 (geoip-cn)
+    if has_geoip {
+        rules.push(json!({
+            "clash_mode": "rule",
+            "rule_set": ["geoip-cn"],
+            "outbound": "direct"
+        }));
     }
 
     rules
@@ -465,16 +485,71 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_full_route_rules_clash_mode() {
+    fn test_build_full_route_rules_order() {
         let rules = build_full_route_rules(true, true);
         assert!(!rules.is_empty());
-        let geosite_rule = rules.iter().find(|r| {
-            r.get("rule_set").is_some()
+
+        // 验证域名规则 (geosite-cn) 在私有 IP 规则 (ip_is_private) 之前
+        let geosite_idx = rules.iter().position(|r| {
+            r.get("rule_set").and_then(|rs| rs.as_array())
+                .map(|arr| arr.iter().any(|item| item.as_str() == Some("geosite-cn")))
+                .unwrap_or(false)
         });
-        assert!(geosite_rule.is_some());
-        let obj = geosite_rule.unwrap();
-        assert_eq!(obj.get("clash_mode").and_then(|m| m.as_str()), Some("rule"));
-        assert_eq!(obj.get("outbound").and_then(|o| o.as_str()), Some("direct"));
+        let ip_private_idx = rules.iter().position(|r| {
+            r.get("ip_is_private").and_then(|v| v.as_bool()).unwrap_or(false)
+        });
+
+        assert!(geosite_idx.is_some());
+        assert!(ip_private_idx.is_some());
+        assert!(geosite_idx.unwrap() < ip_private_idx.unwrap(), "geosite-cn 规则必须排在 ip_is_private 规则之前");
+    }
+
+    #[test]
+    fn test_config_builder_dns_and_fake_node_filtering() {
+        let outbounds = vec![
+            ParsedOutbound {
+                tag: "认准官网地址".to_string(),
+                r#type: "vless".to_string(),
+                server: Some("zf-tw1.9999231.xyz".to_string()),
+                server_port: Some(500),
+                raw_json: json!({ "type": "vless", "tag": "认准官网地址", "server": "zf-tw1.9999231.xyz", "server_port": 500, "uuid": "xxx" }),
+            },
+            ParsedOutbound {
+                tag: "🇯🇵 日本-极速-001".to_string(),
+                r#type: "vless".to_string(),
+                server: Some("zf-jp.9999231.xyz".to_string()),
+                server_port: Some(1004),
+                raw_json: json!({ "type": "vless", "tag": "🇯🇵 日本-极速-001", "server": "zf-jp.9999231.xyz", "server_port": 1004, "uuid": "xxx" }),
+            },
+            ParsedOutbound {
+                tag: "🇭🇰 香港-极速-001".to_string(),
+                r#type: "vless".to_string(),
+                server: Some("zf-hk.9999231.xyz".to_string()),
+                server_port: Some(1001),
+                raw_json: json!({ "type": "vless", "tag": "🇭🇰 香港-极速-001", "server": "zf-hk.9999231.xyz", "server_port": 1001, "uuid": "xxx" }),
+            },
+        ];
+
+        let builder = ConfigBuilder::new(outbounds);
+        let config = builder.build().expect("build config 应该成功");
+
+        // 验证 DNS 配置
+        let dns = config.get("dns").expect("应该包含 dns 配置");
+        let servers = dns.get("servers").and_then(|s| s.as_array()).expect("servers 应该存在");
+        let local_srv = servers.iter().find(|s| s.get("tag").and_then(|t| t.as_str()) == Some("local")).expect("应该包含 local dns");
+        assert_eq!(local_srv.get("type").and_then(|t| t.as_str()), Some("local"));
+        assert!(local_srv.get("server").is_none(), "type: local 不应有 server 字段");
+
+        // 验证 auto urltest 策略组中过滤了公告伪节点
+        let outbounds_arr = config.get("outbounds").and_then(|o| o.as_array()).expect("outbounds 应该存在");
+        let auto_group = outbounds_arr.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("auto")).expect("应该包含 auto 分组");
+        let auto_nodes = auto_group.get("outbounds").and_then(|n| n.as_array()).expect("auto 节点列表");
+        let auto_tags: Vec<String> = auto_nodes.iter().filter_map(|s| s.as_str().map(|v| v.to_string())).collect();
+
+        assert!(!auto_tags.contains(&"认准官网地址".to_string()), "auto 分组不应包含公告节点");
+        assert!(auto_tags.contains(&"🇯🇵 日本-极速-001".to_string()), "auto 分组应包含有效日本节点");
+        assert!(auto_tags.contains(&"🇭🇰 香港-极速-001".to_string()), "auto 分组应包含有效香港节点");
     }
 }
+
 

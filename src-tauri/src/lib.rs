@@ -74,7 +74,7 @@ pub fn run() {
                     tauri_plugin_log::TargetKind::Webview
                 ))
                 // 日志级别：默认 Trace
-                .level(log::LevelFilter::Info)
+                .level(log::LevelFilter::Trace)
                 // Tauri 内部框架仅记录 Warn 以上，减少噪音
                 .level_for("tauri", log::LevelFilter::Warn)
                 .level_for("tao", log::LevelFilter::Warn)

@@ -295,10 +295,13 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
     let mut net_type = None;
     let mut path = None;
     let mut service_name = None;
+    let mut fp = None;
+    let mut insecure = false;
+    let mut alpn: Option<Vec<String>> = None;
 
     for (k, v) in parsed_url.query_pairs() {
         match k.as_ref() {
-            "sni" | "serverName" => sni = Some(v.to_string()),
+            "sni" | "serverName" | "peer" => sni = Some(v.to_string()),
             "security" => security = Some(v.to_string()),
             "pbk" => pbk = Some(v.to_string()),
             "sid" => sid = Some(v.to_string()),
@@ -306,6 +309,9 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
             "type" => net_type = Some(v.to_string()),
             "path" => path = Some(v.to_string()),
             "serviceName" => service_name = Some(v.to_string()),
+            "fp" | "fingerprint" => fp = Some(v.to_string()),
+            "insecure" | "allowInsecure" => insecure = v == "1" || v == "true",
+            "alpn" => alpn = Some(v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
             _ => {}
         }
     }
@@ -315,7 +321,8 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
         "tag": tag,
         "server": server,
         "server_port": port,
-        "uuid": uuid
+        "uuid": uuid,
+        "packet_encoding": "xudp"
     });
 
     if let Some(f) = flow {
@@ -338,11 +345,23 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
         if let Some(s) = sni {
             reality_obj["server_name"] = json!(s);
         }
+        if let Some(f) = fp {
+            reality_obj["utls"] = json!({ "enabled": true, "fingerprint": f });
+        }
         raw_json["tls"] = reality_obj;
-    } else if sec == "tls" {
+    } else if sec == "tls" || sni.is_some() {
         let mut tls_obj = json!({ "enabled": true });
         if let Some(s) = sni {
             tls_obj["server_name"] = json!(s);
+        }
+        if insecure {
+            tls_obj["insecure"] = json!(true);
+        }
+        if let Some(f) = fp {
+            tls_obj["utls"] = json!({ "enabled": true, "fingerprint": f });
+        }
+        if let Some(a) = alpn {
+            tls_obj["alpn"] = json!(a);
         }
         raw_json["tls"] = tls_obj;
     }
@@ -382,12 +401,18 @@ fn parse_trojan_uri(uri: &str) -> Option<ParsedOutbound> {
     let mut sni = None;
     let mut net_type = None;
     let mut path = None;
+    let mut fp = None;
+    let mut insecure = false;
+    let mut alpn: Option<Vec<String>> = None;
 
     for (k, v) in parsed_url.query_pairs() {
         match k.as_ref() {
-            "sni" | "peer" => sni = Some(v.to_string()),
+            "sni" | "peer" | "serverName" => sni = Some(v.to_string()),
             "type" => net_type = Some(v.to_string()),
             "path" => path = Some(v.to_string()),
+            "fp" | "fingerprint" => fp = Some(v.to_string()),
+            "insecure" | "allowInsecure" => insecure = v == "1" || v == "true",
+            "alpn" => alpn = Some(v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
             _ => {}
         }
     }
@@ -397,6 +422,15 @@ fn parse_trojan_uri(uri: &str) -> Option<ParsedOutbound> {
         tls_obj["server_name"] = json!(s);
     } else {
         tls_obj["server_name"] = json!(server);
+    }
+    if insecure {
+        tls_obj["insecure"] = json!(true);
+    }
+    if let Some(f) = fp {
+        tls_obj["utls"] = json!({ "enabled": true, "fingerprint": f });
+    }
+    if let Some(a) = alpn {
+        tls_obj["alpn"] = json!(a);
     }
 
     let mut raw_json = json!({
@@ -485,41 +519,61 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     })
 }
 
-/// AnyTLS 链接解析器
+/// AnyTLS 链接解析器 (sing-box 原生支持 type: "anytls")
 fn parse_anytls_uri(uri: &str) -> Option<ParsedOutbound> {
     let parsed_url = Url::parse(uri).ok()?;
     let tag = extract_tag(&parsed_url, "AnyTLS");
     let server = parsed_url.host_str()?.to_string();
     let port = parsed_url.port()?;
-    let uuid = parsed_url.username().to_string();
+    let password = parsed_url.username().to_string();
 
     let mut sni = None;
-    let mut insecure = false;
+    let mut fp = "chrome".to_string();
+    let mut alpn = vec!["h2".to_string(), "http/1.1".to_string()];
+    let mut insecure = true;
 
     for (k, v) in parsed_url.query_pairs() {
         match k.as_ref() {
-            "sni" => sni = Some(v.to_string()),
-            "insecure" => insecure = v == "1" || v == "true",
+            "sni" | "peer" | "serverName" => sni = Some(v.to_string()),
+            "insecure" | "allowInsecure" | "skip-cert-verify" => insecure = v == "1" || v == "true",
+            "fp" | "fingerprint" => fp = v.to_string(),
+            "alpn" => {
+                let list: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                if !list.is_empty() {
+                    alpn = list;
+                }
+            }
             _ => {}
         }
     }
 
-    let mut tls = json!({ "enabled": true });
-    if let Some(s) = sni { tls["server_name"] = json!(s); }
-    if insecure { tls["insecure"] = json!(true); }
+    let mut tls = json!({
+        "enabled": true,
+        "insecure": insecure,
+        "utls": {
+            "enabled": true,
+            "fingerprint": fp
+        },
+        "alpn": alpn
+    });
+    if let Some(s) = sni {
+        tls["server_name"] = json!(s);
+    } else {
+        tls["server_name"] = json!(server);
+    }
 
     let raw_json = json!({
-        "type": "vless",
+        "type": "anytls",
         "tag": tag,
         "server": server,
         "server_port": port,
-        "uuid": uuid,
+        "password": password,
         "tls": tls
     });
 
     Some(ParsedOutbound {
         tag,
-        r#type: "vless".to_string(),
+        r#type: "anytls".to_string(),
         server: Some(server),
         server_port: Some(port),
         raw_json,
@@ -564,10 +618,24 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_user_subscription() {
-        let sample = "YW55dGxzOi8vYmQ5NDEwZmItZDgyOS00ODI3LWIzYWQtNzAwMzlmMjI4YjVmQHVzYS45OTY2NjkwLnh5ejo1MDAxLz90eXBlPXRjcCZpbnNlY3VyZT0xJmZwPWNocm9tZSZzbmk9aW9zYXBwcy5pdHVuZXMuYXBwbGUuY29tIyVFNSU4OSVBOSVFNCVCRCU5OSVFNiVCNSU4MSVFOSU4NyU4RiVFRiVCQyU5OTk5OTkyNzIuOTUlMjBHQg0KaHlzdGVyaWEyOi8vYmQ5NDEwZmItZDgyOS00ODI3LWIzYWQtNzAwMzlmMjI4YjVmQHVzYS45OTY2Njkw.eHl6OjEwMDAwLz9pbnNlY3VyZT0xJnNuaT1pb3NhcHBzLml0dW5lcy5hcHBsZS5jb20mb2Jmcz1zYWxhbWFuZGVyJm9iZnMtcGFzc3dvcmQ9WXpneU9Ua3dORGs0WlRVMk5UZGlOQSUzRCUzRCZtcG9ydD0xMDAwMC0xOTk5OSMlRjAlOUYlODclQkElRjAlOUYlODclQjglMjAlRTclQkUlOEUlRTUlOUIlQkQtJUU5JTk4JUJGJUU0VCVBQy0wMS0lRjAlOUYlOTMlQjY=";
-        let res = parse_v2ray_base64(sample).unwrap();
-        assert!(!res.is_empty());
+    fn test_parse_anytls_uri() {
+        let uri = "anytls://bd9410fb-d829-4827-b3ad-70039f228b5f@zf-tw2.9999231.xyz:1023/?type=tcp&insecure=0&fp=chrome&sni=sg-sjy.9999231.xyz#%F0%9F%87%B8%F0%9F%87%AC%20%E6%96%B0%E5%8A%A0%E5%9D%A1-002";
+        let parsed = parse_anytls_uri(uri).expect("anytls 应该解析成功");
+        assert_eq!(parsed.tag, "🇸🇬 新加坡-002");
+        assert_eq!(parsed.server_port, Some(1023));
+        assert_eq!(parsed.r#type, "anytls");
+        assert_eq!(parsed.raw_json.get("type").and_then(|t| t.as_str()), Some("anytls"));
+        assert_eq!(parsed.raw_json.get("password").and_then(|p| p.as_str()), Some("bd9410fb-d829-4827-b3ad-70039f228b5f"));
+
+        let tls = parsed.raw_json.get("tls").expect("应该包含 tls 配置");
+        assert_eq!(tls.get("server_name").and_then(|s| s.as_str()), Some("sg-sjy.9999231.xyz"));
+
+        let utls = tls.get("utls").expect("应该包含 utls 配置");
+        assert_eq!(utls.get("fingerprint").and_then(|s| s.as_str()), Some("chrome"));
+
+        let alpn = tls.get("alpn").and_then(|a| a.as_array()).expect("应该包含 alpn 配置");
+        assert_eq!(alpn.len(), 2);
     }
 }
+
 

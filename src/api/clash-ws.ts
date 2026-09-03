@@ -142,12 +142,13 @@ class WsClient<T> {
       return;
     }
     const delay = Math.min(
-      WS_RECONNECT_DELAY_MS * Math.pow(2, this.retryCount),
+      WS_RECONNECT_DELAY_MS * Math.pow(1.5, Math.min(this.retryCount, 10)),
       WS_RECONNECT_MAX_DELAY_MS
     );
     this.retryCount++;
     this.consecutiveFailures++;
     this.consecutiveFailuresResetTime = Date.now();
+    if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = setTimeout(() => {
       this.connect();
     }, delay);
@@ -187,10 +188,25 @@ import { invoke } from "@tauri-apps/api/core";
 
 let isProxyActive = true;
 
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && isProxyActive) {
+      trafficClient?.resume();
+      connectionsClient?.resume();
+      logClient?.resume();
+    }
+  });
+}
+
 /** 供前端状态机同步当前代理核心是否激活 */
 export function setProxyActiveStatus(active: boolean) {
   isProxyActive = active;
-  if (!active) {
+  if (active) {
+    // 代理开启时主动唤醒与恢复 WebSocket 数据流
+    trafficClient?.resume();
+    connectionsClient?.resume();
+    logClient?.resume();
+  } else {
     // 代理关闭时立即通知托盘隐藏网速
     invoke("tray_update_traffic", {
       up: 0,

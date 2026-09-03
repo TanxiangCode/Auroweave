@@ -138,7 +138,7 @@ fn load_raw_subscription(id: &str) -> Option<String> {
     fs::read_to_string(&path).ok()
 }
 
-pub const DEFAULT_SUBSCRIPTION_UA: &str = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36";
+pub const DEFAULT_SUBSCRIPTION_UA: &str = "ClashMeta;sing-box;Auroweave/1.0";
 
 /// 内部核心函数：拉取订阅 URL 内容并解析为 outbounds 与 userinfo
 async fn fetch_and_parse(url: &str, custom_ua: Option<&str>) -> Result<(SubscriptionFormat, Vec<crate::core::parser::ParsedOutbound>, Option<SubscriptionUserInfo>, String), AppError> {

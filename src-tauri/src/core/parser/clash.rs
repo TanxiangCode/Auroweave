@@ -172,20 +172,24 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
             });
             if let Some(s) = sni {
                 tls_obj["server_name"] = json!(s);
+            } else {
+                tls_obj["server_name"] = json!(server);
             }
             if let Some(alpn_seq) = proxy.get("alpn").and_then(|v| v.as_sequence()) {
                 let alpn_list: Vec<String> = alpn_seq.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();
                 if !alpn_list.is_empty() {
                     tls_obj["alpn"] = json!(alpn_list);
                 }
+            } else {
+                tls_obj["alpn"] = json!(["h2", "http/1.1"]);
             }
 
-            ("vless".to_string(), json!({
-                "type": "vless",
+            ("anytls".to_string(), json!({
+                "type": "anytls",
                 "tag": name,
                 "server": server,
                 "server_port": port,
-                "uuid": password,
+                "password": password,
                 "tls": tls_obj
             }))
         }
@@ -241,9 +245,11 @@ proxies:
         assert_eq!(outbounds.len(), 1);
         let node = &outbounds[0];
         assert_eq!(node.tag, "🇹🇼 台湾-住宅家宽-001");
-        assert_eq!(node.r#type, "vless");
+        assert_eq!(node.r#type, "anytls");
         assert_eq!(node.server, Some("zf-tw1.9999231.xyz".to_string()));
         assert_eq!(node.server_port, Some(500));
+        assert_eq!(node.raw_json["type"], "anytls");
+        assert_eq!(node.raw_json["password"], "bd9410fb-d829-4827-b3ad-70039f228b5f");
         assert_eq!(node.raw_json["tls"]["enabled"], true);
         assert_eq!(node.raw_json["tls"]["server_name"], "tw01.9999231.xyz");
         assert_eq!(node.raw_json["tls"]["utls"]["fingerprint"], "chrome");
