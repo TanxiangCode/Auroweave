@@ -16,25 +16,60 @@ pub fn parse_clash_yaml(content: &str) -> Result<Vec<ParsedOutbound>, AppError> 
     };
 
     let mut outbounds = Vec::new();
+    // 记录首个解析失败代理的名称与原因，供最终错误信息携带（避免逐层吞掉）
+    let mut first_failure: Option<String> = None;
 
     for proxy in proxies_arr {
         if let Some(parsed) = convert_clash_proxy_to_singbox(proxy) {
             outbounds.push(parsed);
+        } else if first_failure.is_none() {
+            let name = proxy.get("name").and_then(|v| v.as_str()).unwrap_or("<无名>");
+            let ptype = proxy.get("type").and_then(|v| v.as_str()).unwrap_or("<无类型>");
+            let port_invalid = proxy
+                .get("port")
+                .and_then(|v| v.as_f64())
+                .map(|p| !(1.0..=65535.0).contains(&p))
+                .unwrap_or(false);
+            first_failure = Some(if port_invalid {
+                format!("代理 [{}] (type: {}) 端口非法", name, ptype)
+            } else {
+                format!("代理 [{}] (type: {}) 缺少必要字段或类型不支持", name, ptype)
+            });
         }
     }
 
     if outbounds.is_empty() {
-        return Err(AppError::Subscription("Clash 订阅中未找到有效节点".to_string()));
+        let detail = first_failure.unwrap_or_else(|| "未解析出任何节点".to_string());
+        return Err(AppError::Subscription(format!(
+            "Clash 订阅中未找到有效节点（首个失败原因: {}）",
+            detail
+        )));
     }
 
     Ok(outbounds)
+}
+
+/// 校验端口范围：YAML 中 port 可能是数字或数字字符串
+/// 返回 None 表示端口缺失或超出 1..=65535（拒绝而非静默截断）
+fn extract_port(proxy: &YamlValue) -> Option<u16> {
+    let raw = proxy.get("port")?;
+    let port_u64 = match raw {
+        YamlValue::Number(n) => n.as_u64(),
+        YamlValue::String(s) => s.trim().parse::<u64>().ok(),
+        _ => None,
+    }?;
+    if (1..=65535).contains(&port_u64) {
+        Some(port_u64 as u16)
+    } else {
+        None
+    }
 }
 
 fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
     let name = proxy.get("name")?.as_str()?.to_string();
     let proxy_type = proxy.get("type")?.as_str()?.to_lowercase();
     let server = proxy.get("server")?.as_str()?.to_string();
-    let port = proxy.get("port")?.as_u64()? as u16;
+    let port = extract_port(proxy)?;
 
     let (singbox_type, raw_json) = match proxy_type.as_str() {
         "ss" | "shadowsocks" => {
@@ -65,8 +100,10 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
             if let Some(tls) = proxy.get("tls").and_then(|v| v.as_bool()) {
                 if tls {
                     let sni = proxy.get("servername").or_else(|| proxy.get("sni")).and_then(|v| v.as_str());
+                    let skip_verify = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
                     let mut tls_obj = json!({ "enabled": true });
                     if let Some(s) = sni { tls_obj["server_name"] = json!(s); }
+                    if skip_verify { tls_obj["insecure"] = json!(true); }
                     obj["tls"] = tls_obj;
                 }
             }
@@ -97,6 +134,7 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 let public_key = reality_opts.get("public-key").and_then(|v| v.as_str()).unwrap_or("");
                 let short_id = reality_opts.get("short-id").and_then(|v| v.as_str()).unwrap_or("");
                 let sni = proxy.get("servername").or_else(|| proxy.get("sni")).and_then(|v| v.as_str());
+                let skip_verify = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
                 let mut reality = json!({
                     "enabled": true,
                     "reality": {
@@ -106,11 +144,14 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                     }
                 });
                 if let Some(s) = sni { reality["server_name"] = json!(s); }
+                if skip_verify { reality["insecure"] = json!(true); }
                 obj["tls"] = reality;
             } else if proxy.get("tls").and_then(|v| v.as_bool()).unwrap_or(false) {
                 let sni = proxy.get("servername").or_else(|| proxy.get("sni")).and_then(|v| v.as_str());
+                let skip_verify = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
                 let mut tls_obj = json!({ "enabled": true });
                 if let Some(s) = sni { tls_obj["server_name"] = json!(s); }
+                if skip_verify { tls_obj["insecure"] = json!(true); }
                 obj["tls"] = tls_obj;
             }
             ("vless".to_string(), obj)
@@ -118,16 +159,19 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
         "trojan" => {
             let password = proxy.get("password")?.as_str()?.to_string();
             let sni = proxy.get("sni").or_else(|| proxy.get("servername")).and_then(|v| v.as_str()).unwrap_or(&server);
+            let skip_verify = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut tls_obj = json!({
+                "enabled": true,
+                "server_name": sni
+            });
+            if skip_verify { tls_obj["insecure"] = json!(true); }
             let mut obj = json!({
                 "type": "trojan",
                 "tag": name,
                 "server": server,
                 "server_port": port,
                 "password": password,
-                "tls": {
-                    "enabled": true,
-                    "server_name": sni
-                }
+                "tls": tls_obj
             });
             if let Some(net) = proxy.get("network").and_then(|v| v.as_str()) {
                 if net == "ws" {
@@ -146,10 +190,12 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 "server_port": port,
                 "password": password
             });
-            let sni = proxy.get("sni").or_else(|| proxy.get("servername")).and_then(|v| v.as_str());
-            if let Some(s) = sni {
-                obj["tls"] = json!({ "enabled": true, "server_name": s });
-            }
+            // hy2 始终基于 TLS：sni 缺省时回退 server 地址，确保 tls 块必定存在
+            let sni = proxy.get("sni").or_else(|| proxy.get("servername")).and_then(|v| v.as_str()).unwrap_or(&server);
+            let skip_verify = proxy.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut tls_obj = json!({ "enabled": true, "server_name": sni });
+            if skip_verify { tls_obj["insecure"] = json!(true); }
+            obj["tls"] = tls_obj;
             if let Some(obfs) = proxy.get("obfs").and_then(|v| v.as_str()) {
                 let obfs_pass = proxy.get("obfs-password").and_then(|v| v.as_str()).unwrap_or("");
                 obj["obfs"] = json!({ "type": obfs, "password": obfs_pass });
@@ -253,5 +299,51 @@ proxies:
         assert_eq!(node.raw_json["tls"]["enabled"], true);
         assert_eq!(node.raw_json["tls"]["server_name"], "tw01.9999231.xyz");
         assert_eq!(node.raw_json["tls"]["utls"]["fingerprint"], "chrome");
+    }
+
+    #[test]
+    fn test_parse_clash_hy2_tls_fallback_and_insecure() {
+        // 无 sni 时 tls 块仍必须存在，server_name 回退为 server 地址
+        let yaml_no_sni = r#"
+proxies:
+  - { name: 'hy2-无sni', type: hy2, server: hy2.example.com, port: 443, password: pw }
+"#;
+        let outbounds = parse_clash_yaml(yaml_no_sni).unwrap();
+        assert_eq!(outbounds.len(), 1);
+        let tls = &outbounds[0].raw_json["tls"];
+        assert_eq!(tls["enabled"], true);
+        assert_eq!(tls["server_name"], "hy2.example.com");
+
+        // skip-cert-verify: true 应写入 tls.insecure
+        let yaml_insecure = r#"
+proxies:
+  - { name: 'hy2-跳过校验', type: hysteria2, server: hy2.example.com, port: 443, password: pw, sni: sni.example.com, skip-cert-verify: true }
+"#;
+        let outbounds = parse_clash_yaml(yaml_insecure).unwrap();
+        assert_eq!(outbounds[0].raw_json["tls"]["insecure"], true);
+        assert_eq!(outbounds[0].raw_json["tls"]["server_name"], "sni.example.com");
+    }
+
+    #[test]
+    fn test_parse_clash_port_out_of_range_rejected() {
+        // 端口 70000 超出 1..=65535 应拒绝该节点（返回 None），不能静默截断
+        let yaml_bad_port = r#"
+proxies:
+  - { name: 'bad-port', type: ss, server: a.example.com, port: 70000, cipher: aes-256-gcm, password: pw }
+"#;
+        let result = parse_clash_yaml(yaml_bad_port);
+        assert!(result.is_err(), "非法端口订阅应整体返回错误");
+    }
+
+    #[test]
+    fn test_parse_clash_vless_skip_cert_verify() {
+        let yaml = r#"
+proxies:
+  - { name: 'vless-跳过校验', type: vless, server: v.example.com, port: 443, uuid: uuid-x, tls: true, skip-cert-verify: true }
+  - { name: 'trojan-跳过校验', type: trojan, server: t.example.com, port: 443, password: pw, skip-cert-verify: true }
+"#;
+        let outbounds = parse_clash_yaml(yaml).unwrap();
+        assert_eq!(outbounds[0].raw_json["tls"]["insecure"], true);
+        assert_eq!(outbounds[1].raw_json["tls"]["insecure"], true);
     }
 }

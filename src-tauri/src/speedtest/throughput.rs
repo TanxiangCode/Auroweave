@@ -24,11 +24,23 @@ pub async fn run_single_throughput_test(
         .build()
         .map_err(|e| AppError::Network(e.to_string()))?;
 
-    // 1. 下载测速
-    let download_bps = measure_download(&client, duration_secs).await.unwrap_or(0);
+    // 1. 下载测速（失败记日志，与真实 0 带宽区分）
+    let download_bps = match measure_download(&client, duration_secs).await {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("[throughput] 下载测速失败: {}", e);
+            0
+        }
+    };
 
     // 2. 上传测速 (循环上传分块，计算真实平均吞吐率)
-    let upload_bps = measure_upload(&client, duration_secs).await.unwrap_or(0);
+    let upload_bps = match measure_upload(&client, duration_secs).await {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("[throughput] 上传测速失败: {}", e);
+            0
+        }
+    };
 
     Ok(ThroughputResult {
         download_bps,
@@ -78,13 +90,15 @@ async fn measure_upload(client: &reqwest::Client, duration_secs: u64) -> Result<
     let duration = Duration::from_secs(duration_secs);
     let mut uploaded_bytes: u64 = 0;
 
-    // 使用 1MB 的块进行循环上传
-    let payload = vec![0u8; 1 * 1024 * 1024];
+    // 使用 1MB 的块进行循环上传。
+    // reqwest::Body 会夺取所有权，因此每轮通过 wrap 静态切片构造 Body，
+    // 避免旧实现每轮 payload.clone() 分配 1MB（高频批量测速下的无谓堆压力）。
+    let payload: &'static [u8] = Box::leak(vec![0u8; 1024 * 1024].into_boxed_slice());
 
     while start.elapsed() < duration {
         let res = client
             .post("https://speed.cloudflare.com/__up")
-            .body(payload.clone())
+            .body(reqwest::Body::from(payload))
             .send()
             .await;
 
@@ -92,9 +106,11 @@ async fn measure_upload(client: &reqwest::Client, duration_secs: u64) -> Result<
             if r.status().is_success() {
                 uploaded_bytes += payload.len() as u64;
             } else {
+                log::warn!("[throughput] 上传测速收到非成功状态: {}", r.status());
                 break;
             }
         } else {
+            log::warn!("[throughput] 上传测速请求失败: 网络错误（区别于真实 0 带宽）");
             break;
         }
     }

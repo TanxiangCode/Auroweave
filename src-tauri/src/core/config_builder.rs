@@ -77,7 +77,7 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
         "experimental": {
             "clash_api": {
                 "external_controller": format!("127.0.0.1:{}", clash_api_port),
-                "secret": ""
+                "secret": super::clash_api::get_clash_api_secret()
             },
             "cache_file": {
                 "enabled": true,
@@ -96,6 +96,9 @@ pub struct ConfigBuilder {
     geosite_cn_path: Option<String>,
     /// geoip-cn.srs 本地文件路径
     geoip_cn_path: Option<String>,
+    /// 分组测速配置覆盖（group tag -> interval/tolerance/url），
+    /// 由设置页 GroupEditModal 保存，仅覆盖显式设置的字段
+    group_configs: std::collections::HashMap<String, crate::commands::settings::GroupTestConfig>,
 }
 
 impl ConfigBuilder {
@@ -108,6 +111,7 @@ impl ConfigBuilder {
             allow_lan: false,
             geosite_cn_path: None,
             geoip_cn_path: None,
+            group_configs: std::collections::HashMap::new(),
         }
     }
 
@@ -135,6 +139,33 @@ impl ConfigBuilder {
         self
     }
 
+    /// 设置分组测速配置覆盖（GroupEditModal 保存的 interval/tolerance/url）
+    pub fn with_group_configs(mut self, group_configs: std::collections::HashMap<String, crate::commands::settings::GroupTestConfig>) -> Self {
+        self.group_configs = group_configs;
+        self
+    }
+
+    /// 生成 urltest 出站的公共参数：应用用户对指定 group tag 的覆盖配置。
+    /// 未覆盖的字段保持内置默认（interval "3m"、tolerance 50、gstatic 测速 URL）
+    fn urltest_params(&self, tag: &str) -> (String, String, u64) {
+        const DEFAULT_INTERVAL_SECS: u64 = 180; // "3m"
+        const DEFAULT_TOLERANCE: u64 = 50;
+        const DEFAULT_URL: &str = "http://www.gstatic.com/generate_204";
+
+        match self.group_configs.get(tag) {
+            Some(cfg) => (
+                format!("{}s", cfg.interval.unwrap_or(DEFAULT_INTERVAL_SECS)),
+                cfg.url.clone().unwrap_or_else(|| DEFAULT_URL.to_string()),
+                cfg.tolerance.unwrap_or(DEFAULT_TOLERANCE),
+            ),
+            None => (
+                DEFAULT_INTERVAL_SECS.to_string() + "s",
+                DEFAULT_URL.to_string(),
+                DEFAULT_TOLERANCE,
+            ),
+        }
+    }
+
     /// 生成完整的 sing-box 1.11+ / 1.13+ / 1.14+ 兼容 config.json
     pub fn build(&self) -> Result<Value, AppError> {
         if self.outbounds.is_empty() {
@@ -142,22 +173,54 @@ impl ConfigBuilder {
         }
 
         // ---- 阶段1: 遍历节点，提取 tag 和原始 JSON，按地区分组（过滤公告和伪节点） ----
+        // 节点 tag 去重：sing-box 要求 outbound tag 全局唯一，重名节点追加 -2/-3 后缀
+        // 保留名冲突：与 direct/block/proxy/auto/balance/{region}-auto 冲突的节点跳过（log::warn）
+        const RESERVED_TAGS: &[&str] = &["direct", "block", "proxy", "auto", "balance"];
+
         let mut valid_node_tags = Vec::new();
         let mut all_node_tags = Vec::new();
         let mut raw_outbounds = Vec::new();
         let mut region_map: HashMap<String, Vec<String>> = HashMap::new();
+        let mut seen_tags: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for out in &self.outbounds {
-            all_node_tags.push(out.tag.clone());
-            raw_outbounds.push(out.raw_json.clone());
+            let mut tag = out.tag.clone();
+            let lower_tag = tag.to_lowercase();
+
+            // 与保留 tag 冲突的节点跳过（selector/urltest 会引用同名 tag 造成循环）
+            if RESERVED_TAGS.contains(&lower_tag.as_str()) || lower_tag.ends_with("-auto") {
+                log::warn!("[config] 节点 tag [{}] 与保留名冲突，已跳过该节点", tag);
+                continue;
+            }
+
+            // 重名节点追加 -2/-3 后缀去重
+            if !seen_tags.insert(tag.clone()) {
+                let mut suffix = 2u32;
+                let mut candidate = format!("{}-{}", tag, suffix);
+                while !seen_tags.insert(candidate.clone()) {
+                    suffix += 1;
+                    candidate = format!("{}-{}", tag, suffix);
+                }
+                log::warn!("[config] 节点 tag [{}] 重复，已重命名为 [{}]", tag, candidate);
+                tag = candidate;
+            }
+
+            let mut raw_json = out.raw_json.clone();
+            raw_json["tag"] = json!(tag);
+            all_node_tags.push(tag.clone());
+            raw_outbounds.push(raw_json);
 
             // 过滤伪节点/公告节点，避免污染自动测速策略组
             let is_fake = is_announcement_or_fake_node(&out.tag, out.server.as_deref(), out.server_port);
             if !is_fake {
-                valid_node_tags.push(out.tag.clone());
-                let region = detect_region(&out.tag);
-                region_map.entry(region).or_default().push(out.tag.clone());
+                valid_node_tags.push(tag.clone());
+                let region = detect_region(&tag);
+                region_map.entry(region).or_default().push(tag.clone());
             }
+        }
+
+        if all_node_tags.is_empty() {
+            return Err(AppError::Config("所有节点 tag 均与保留名冲突，无法生成 config.json".to_string()));
         }
 
         // 如果全部都是伪节点（极端情况），回退使用全部 tag
@@ -166,6 +229,7 @@ impl ConfigBuilder {
         } else {
             valid_node_tags.clone()
         };
+        let valid_node_tag_set: std::collections::HashSet<String> = valid_node_tags.iter().cloned().collect();
 
         let mut final_outbounds = Vec::new();
 
@@ -176,15 +240,18 @@ impl ConfigBuilder {
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
         // 2b. Selector "proxy" 主出站
+        // region_map 迭代前按 region 名排序，保证生成配置的确定性（HashMap 迭代顺序不稳定）
+        let mut sorted_regions: Vec<String> = region_map.keys().cloned().collect();
+        sorted_regions.sort();
         let mut proxy_group_list = vec!["auto".to_string(), "balance".to_string()];
-        for (region, _) in &region_map {
+        for region in &sorted_regions {
             proxy_group_list.push(format!("{}-auto", region));
         }
-        // 先放入有效真实节点，再追加其它节点
+        // 先放入有效真实节点，再追加其它节点（HashSet O(1) 查询）
         proxy_group_list.extend(pool_tags.clone());
         if !valid_node_tags.is_empty() {
             for tag in &all_node_tags {
-                if !valid_node_tags.contains(tag) {
+                if !valid_node_tag_set.contains(tag) {
                     proxy_group_list.push(tag.clone());
                 }
             }
@@ -196,40 +263,44 @@ impl ConfigBuilder {
             "outbounds": proxy_group_list
         }));
 
-        // 2c. 全局 "auto" urltest 出站（自动测速选最优节点，3 分钟心跳，50ms 容差）
+        // 2c. 全局 "auto" urltest 出站（默认 3 分钟心跳，50ms 容差，可被用户覆盖）
+        let (auto_interval, auto_url, auto_tolerance) = self.urltest_params("auto");
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "auto",
             "outbounds": pool_tags.clone(),
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": "3m",
+            "url": auto_url,
+            "interval": auto_interval,
             "idle_timeout": "15m",
-            "tolerance": 50,
+            "tolerance": auto_tolerance,
             "interrupt_exist_connections": false
         }));
 
-        // 2c-2. "balance" 负载均衡出站（urltest + 短间隔 + tolerance）
+        // 2c-2. "balance" 负载均衡出站（urltest + 短间隔 + tolerance，可被用户覆盖）
+        let (bal_interval, bal_url, bal_tolerance) = self.urltest_params("balance");
         final_outbounds.push(json!({
             "type": "urltest",
             "tag": "balance",
             "outbounds": pool_tags,
-            "url": "http://www.gstatic.com/generate_204",
-            "interval": "3m",
+            "url": bal_url,
+            "interval": bal_interval,
             "idle_timeout": "10m",
-            "tolerance": 50,
+            "tolerance": bal_tolerance,
             "interrupt_exist_connections": false
         }));
 
-        // 2d. 地区 urltest 出站（3 分钟自动探测最优节点）
-        for (region, tags) in region_map {
+        // 2d. 地区 urltest 出站（默认 3 分钟自动探测最优节点，按 region 名排序保证确定性）
+        for region in &sorted_regions {
+            let region_tag = format!("{}-auto", region);
+            let (rg_interval, rg_url, rg_tolerance) = self.urltest_params(&region_tag);
             final_outbounds.push(json!({
                 "type": "urltest",
-                "tag": format!("{}-auto", region),
-                "outbounds": tags,
-                "url": "http://www.gstatic.com/generate_204",
-                "interval": "3m",
+                "tag": region_tag,
+                "outbounds": region_map[region].clone(),
+                "url": rg_url,
+                "interval": rg_interval,
                 "idle_timeout": "15m",
-                "tolerance": 50,
+                "tolerance": rg_tolerance,
                 "interrupt_exist_connections": false
             }));
         }
@@ -254,15 +325,17 @@ impl ConfigBuilder {
             dns_rules.push(json!({ "domain": server_domains, "server": "local" }));
         }
 
-        // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则：国内域名由 local DNS 权威解析
-        if self.geosite_cn_path.is_some() {
-            dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
-        }
-
         // ---- 阶段4: 组装路由 ----
-        // 检查本地 rule-set 文件是否存在
+        // 检查本地 rule-set 文件是否存在（以 Path::exists() 实际检查为准）
+        // DNS 分流与 route 规则统一使用同一组 has_geosite/has_geoip 布尔值，
+        // 避免 DNS 引用 geosite-cn 而 route 未注册该 rule-set 的不一致门控
         let has_geosite = self.geosite_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
         let has_geoip = self.geoip_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
+
+        // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则：国内域名由 local DNS 权威解析
+        if has_geosite {
+            dns_rules.push(json!({ "rule_set": "geosite-cn", "server": "local" }));
+        }
 
         let mut rule_set_config = Vec::new();
         if has_geosite {
@@ -341,7 +414,7 @@ impl ConfigBuilder {
             "experimental": {
                 "clash_api": {
                     "external_controller": format!("127.0.0.1:{}", self.clash_api_port),
-                    "secret": ""
+                    "secret": super::clash_api::get_clash_api_secret()
                 },
                 "cache_file": {
                     "enabled": true,
@@ -549,6 +622,114 @@ mod tests {
         assert!(!auto_tags.contains(&"认准官网地址".to_string()), "auto 分组不应包含公告节点");
         assert!(auto_tags.contains(&"🇯🇵 日本-极速-001".to_string()), "auto 分组应包含有效日本节点");
         assert!(auto_tags.contains(&"🇭🇰 香港-极速-001".to_string()), "auto 分组应包含有效香港节点");
+    }
+
+    /// 构造测试用节点的辅助函数
+    fn make_node(tag: &str) -> ParsedOutbound {
+        ParsedOutbound {
+            tag: tag.to_string(),
+            r#type: "vless".to_string(),
+            server: Some(format!("srv-{}.example.com", tag.len())),
+            server_port: Some(443),
+            raw_json: json!({ "type": "vless", "tag": tag, "server": "srv.example.com", "server_port": 443, "uuid": "xxx" }),
+        }
+    }
+
+    #[test]
+    fn test_tag_dedup_rename_suffix() {
+        // 重名节点应追加 -2/-3 后缀去重，outbound tag 全局唯一
+        let outbounds = vec![
+            make_node("🇯🇵 日本-A"),
+            make_node("🇯🇵 日本-A"),
+            make_node("🇯🇵 日本-A"),
+        ];
+        let builder = ConfigBuilder::new(outbounds);
+        let config = builder.build().expect("build config 应该成功");
+
+        let outbound_tags: Vec<String> = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|o| o.get("tag").and_then(|t| t.as_str()).map(|s| s.to_string()))
+            .collect();
+
+        assert!(outbound_tags.contains(&"🇯🇵 日本-A".to_string()));
+        assert!(outbound_tags.contains(&"🇯🇵 日本-A-2".to_string()));
+        assert!(outbound_tags.contains(&"🇯🇵 日本-A-3".to_string()));
+
+        // tag 全局唯一
+        let mut sorted = outbound_tags.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), outbound_tags.len(), "outbound tag 必须全局唯一");
+
+        // urltest 分组引用的 tag 必须与实际节点 tag 一致（重命名后同步）
+        let auto_group = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("auto"))
+            .unwrap();
+        let auto_refs: Vec<String> = auto_group["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t.as_str().map(|s| s.to_string()))
+            .collect();
+        assert!(auto_refs.contains(&"🇯🇵 日本-A-2".to_string()), "urltest 引用需同步重命名后的 tag");
+    }
+
+    #[test]
+    fn test_reserved_tag_conflict_skipped() {
+        // 与保留名 direct/block/proxy/auto/balance/{region}-auto 冲突的节点应被跳过
+        let outbounds = vec![
+            make_node("direct"),
+            make_node("auto"),
+            make_node("HK-auto"),
+            make_node("🇭🇰 香港-真实-001"),
+        ];
+        let builder = ConfigBuilder::new(outbounds);
+        let config = builder.build().expect("build config 应该成功");
+
+        let outbound_tags: Vec<&str> = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|o| o.get("tag").and_then(|t| t.as_str()))
+            .collect();
+
+        // direct/auto 只应出现一次（内置出站），冲突节点不会产生同名第二份
+        assert_eq!(outbound_tags.iter().filter(|t| **t == "direct").count(), 1);
+        assert_eq!(outbound_tags.iter().filter(|t| **t == "auto").count(), 1);
+        // "HK-auto" 节点被跳过，不会与地区 urltest 分组 tag 冲突
+        let hk_auto_count = outbound_tags.iter().filter(|t| **t == "HK-auto").count();
+        assert!(hk_auto_count <= 1, "HK-auto 若存在只能是 urltest 分组，不能有同名节点出站");
+        // 真实节点保留
+        assert!(outbound_tags.contains(&"🇭🇰 香港-真实-001"));
+    }
+
+    #[test]
+    fn test_dns_route_gating_consistent() {
+        // geosite_cn_path 指向不存在的文件时：DNS 规则与 route rule-set 均不引用 geosite-cn
+        let outbounds = vec![make_node("🇯🇵 日本-001")];
+        let builder = ConfigBuilder::new(outbounds)
+            .with_local_rule_sets(Some("/nonexistent/geosite-cn.srs".to_string()), Some("/nonexistent/geoip-cn.srs".to_string()));
+        let config = builder.build().expect("build config 应该成功");
+
+        let dns_rules = config["dns"]["rules"].as_array().unwrap();
+        let dns_refs_geosite = dns_rules.iter().any(|r| {
+            r.get("rule_set").and_then(|rs| rs.as_array())
+                .map(|arr| arr.iter().any(|i| i.as_str() == Some("geosite-cn")))
+                .unwrap_or(false)
+                || r.get("rule_set").and_then(|rs| rs.as_str()) == Some("geosite-cn")
+        });
+        let route_rule_sets: Vec<&str> = config["route"].get("rule_set")
+            .and_then(|rs| rs.as_array())
+            .map(|arr| arr.iter().filter_map(|i| i.as_str()).collect())
+            .unwrap_or_default();
+
+        assert!(!dns_refs_geosite, "文件不存在时 DNS 不得引用 geosite-cn");
+        assert!(!route_rule_sets.contains(&"geosite-cn"), "文件不存在时 route 不得注册 geosite-cn");
     }
 }
 

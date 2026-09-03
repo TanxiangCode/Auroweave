@@ -6,14 +6,20 @@ use std::sync::{Arc, Mutex};
 use crate::get_data_root;
 
 lazy_static::lazy_static! {
-    pub static ref DB_CONN: Arc<Mutex<Connection>> = {
+    pub static ref DB_CONN: Arc<Mutex<Option<Connection>>> = {
         let db_path = get_db_path();
         // 确保目录存在
         if let Some(parent) = db_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let conn = Connection::open(&db_path).expect("无法打开或创建流量数据库");
-        init_schema(&conn).expect("初始化数据库表结构失败");
+        // 打开失败（磁盘满/权限/文件损坏）时降级为 None：统计功能静默禁用，不再 panic 拖垮后端
+        let conn = match Connection::open(&db_path).and_then(|c| { init_schema(&c)?; Ok(c) }) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                log::error!("[stats_db] 初始化流量数据库失败，统计功能已禁用: {}", e);
+                None
+            }
+        };
         Arc::new(Mutex::new(conn))
     };
 }
@@ -48,40 +54,62 @@ fn init_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// 写入流量增量
-pub fn add_traffic_delta(timestamp_hour: i64, download_delta: u64, upload_delta: u64) -> Result<()> {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute(
-        "INSERT INTO traffic_hourly (timestamp_hour, download_bytes, upload_bytes)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(timestamp_hour) DO UPDATE SET
-         download_bytes = download_bytes + excluded.download_bytes,
-         upload_bytes = upload_bytes + excluded.upload_bytes",
-        rusqlite::params![timestamp_hour, download_delta as i64, upload_delta as i64],
-    )?;
-    Ok(())
+/// 获取数据库连接。数据库不可用时返回 Err（调用方决定记录日志或忽略）。
+pub fn with_conn<T>(f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+    let guard = match DB_CONN.lock() {
+        Ok(g) => g,
+        // 锁中毒：前持锁者已 panic，强取继续（连接本身未损坏）
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let conn = guard.as_ref().ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+        Box::new(std::io::Error::new(std::io::ErrorKind::NotConnected, "流量数据库不可用"))
+    ))?;
+    f(conn)
 }
 
-/// 写入应用程序流量增量
-pub fn add_app_traffic_delta(timestamp_hour: i64, process_name: &str, download_delta: u64, upload_delta: u64) -> Result<()> {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute(
-        "INSERT INTO app_traffic_hourly (timestamp_hour, process_name, download_bytes, upload_bytes)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(timestamp_hour, process_name) DO UPDATE SET
-         download_bytes = download_bytes + excluded.download_bytes,
-         upload_bytes = upload_bytes + excluded.upload_bytes",
-        rusqlite::params![timestamp_hour, process_name, download_delta as i64, upload_delta as i64],
-    )?;
-    Ok(())
+/// 写入流量增量（失败仅记录日志，不打断流量监控循环）
+pub fn add_traffic_delta(timestamp_hour: i64, download_delta: u64, upload_delta: u64) {
+    if let Err(e) = with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO traffic_hourly (timestamp_hour, download_bytes, upload_bytes)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(timestamp_hour) DO UPDATE SET
+             download_bytes = download_bytes + excluded.download_bytes,
+             upload_bytes = upload_bytes + excluded.upload_bytes",
+            rusqlite::params![timestamp_hour, download_delta as i64, upload_delta as i64],
+        )?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 写入流量增量失败: {}", e);
+    }
 }
 
-/// 清空所有历史流量统计记录
+/// 写入应用程序流量增量（失败仅记录日志）
+pub fn add_app_traffic_delta(timestamp_hour: i64, process_name: &str, download_delta: u64, upload_delta: u64) {
+    if let Err(e) = with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO app_traffic_hourly (timestamp_hour, process_name, download_bytes, upload_bytes)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(timestamp_hour, process_name) DO UPDATE SET
+             download_bytes = download_bytes + excluded.download_bytes,
+             upload_bytes = upload_bytes + excluded.upload_bytes",
+            rusqlite::params![timestamp_hour, process_name, download_delta as i64, upload_delta as i64],
+        )?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 写入应用流量增量失败: {}", e);
+    }
+}
+
+/// 清空所有历史流量统计记录（事务包裹，避免部分清空）
 pub fn clear_all_stats() -> Result<()> {
-    let conn = DB_CONN.lock().unwrap();
-    conn.execute("DELETE FROM traffic_hourly", [])?;
-    conn.execute("DELETE FROM app_traffic_hourly", [])?;
-    let _ = conn.execute("VACUUM", []);
-    Ok(())
+    with_conn(|conn| {
+        conn.execute_batch(
+            "BEGIN;
+             DELETE FROM traffic_hourly;
+             DELETE FROM app_traffic_hourly;
+             COMMIT;",
+        )?;
+        Ok(())
+    })
 }
-

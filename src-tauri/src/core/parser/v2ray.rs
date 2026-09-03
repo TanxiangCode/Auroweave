@@ -133,10 +133,16 @@ fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
         .and_then(|s| s.as_str())?
         .to_string();
 
-    // 兼容数字或字符串格式的 port
+    // 兼容数字或字符串格式的 port（校验 1..=65535，拒绝超范围而非静默截断）
     let port = match v.get("port") {
-        Some(serde_json::Value::Number(n)) => n.as_u64().map(|p| p as u16),
-        Some(serde_json::Value::String(s)) => s.parse::<u16>().ok(),
+        Some(serde_json::Value::Number(n)) => n
+            .as_u64()
+            .and_then(|p| if (1..=65535).contains(&p) { Some(p as u16) } else { None }),
+        Some(serde_json::Value::String(s)) => s
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|p| *p >= 1),
         _ => None,
     }?;
 
@@ -266,12 +272,12 @@ fn parse_ss_uri(uri: &str) -> Option<ParsedOutbound> {
     None
 }
 
-/// 辅助解析 host:port
+/// 辅助解析 host:port（端口必须落在 1..=65535，超范围拒绝而非截断）
 fn parse_host_port(s: &str) -> Option<(String, u16)> {
     let s = s.split('?').next().unwrap_or(s); // 去除 query
     let s = s.split('/').next().unwrap_or(s);
     if let Some((h, p)) = s.rsplit_once(':') {
-        let port = p.parse::<u16>().ok()?;
+        let port = p.parse::<u16>().ok().filter(|port| *port >= 1)?;
         let host = h.trim_start_matches('[').trim_end_matches(']').to_string();
         Some((host, port))
     } else {
@@ -295,6 +301,7 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
     let mut net_type = None;
     let mut path = None;
     let mut service_name = None;
+    let mut host = None;
     let mut fp = None;
     let mut insecure = false;
     let mut alpn: Option<Vec<String>> = None;
@@ -308,6 +315,7 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
             "flow" => flow = Some(v.to_string()),
             "type" => net_type = Some(v.to_string()),
             "path" => path = Some(v.to_string()),
+            "host" => host = Some(v.to_string()),
             "serviceName" => service_name = Some(v.to_string()),
             "fp" | "fingerprint" => fp = Some(v.to_string()),
             "insecure" | "allowInsecure" => insecure = v == "1" || v == "true",
@@ -334,12 +342,14 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
     // 处理 TLS / Reality
     let sec = security.as_deref().unwrap_or("none");
     if sec == "reality" {
+        // Reality 必须有 public_key (pbk)，缺失则生成必坏节点，直接拒绝解析
+        let pbk_val = pbk.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
         let mut reality_obj = json!({
             "enabled": true,
             "reality": {
                 "enabled": true,
-                "public_key": pbk.unwrap_or_default(),
-                "short_id": sid.unwrap_or_default()
+                "public_key": pbk_val,
+                "short_id": sid.clone().unwrap_or_default()
             }
         });
         if let Some(s) = sni {
@@ -369,10 +379,17 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
     // 处理 Transport
     if let Some(t) = net_type {
         if t == "ws" {
-            raw_json["transport"] = json!({
+            let mut transport = json!({
                 "type": "ws",
-                "path": path.unwrap_or_else(|| "/".to_string())
+                "path": path.clone().unwrap_or_else(|| "/".to_string())
             });
+            // ws 传输的 host 参数写入 Host 头（CDN 场景下与 path 同样关键）
+            if let Some(h) = host.as_deref() {
+                if !h.is_empty() {
+                    transport["headers"] = json!({ "Host": h });
+                }
+            }
+            raw_json["transport"] = transport;
         } else if t == "grpc" {
             raw_json["transport"] = json!({
                 "type": "grpc",
@@ -497,12 +514,11 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
         "password": password
     });
 
-    if sni.is_some() || insecure {
-        let mut tls = json!({ "enabled": true });
-        if let Some(s) = sni { tls["server_name"] = json!(s); }
-        if insecure { tls["insecure"] = json!(true); }
-        raw_json["tls"] = tls;
-    }
+    // hy2 始终基于 TLS：无条件启用 tls 块，sni 缺省回退 server 地址
+    let sni_name = sni.clone().unwrap_or_else(|| server.clone());
+    let mut tls = json!({ "enabled": true, "server_name": sni_name });
+    if insecure { tls["insecure"] = json!(true); }
+    raw_json["tls"] = tls;
 
     if let Some(o_type) = obfs_type {
         let mut obfs = json!({ "type": o_type });
@@ -530,7 +546,8 @@ fn parse_anytls_uri(uri: &str) -> Option<ParsedOutbound> {
     let mut sni = None;
     let mut fp = "chrome".to_string();
     let mut alpn = vec!["h2".to_string(), "http/1.1".to_string()];
-    let mut insecure = true;
+    // 默认不跳过证书校验（与 clash.rs 语义一致），仅显式 insecure=1/true 时开启
+    let mut insecure = false;
 
     for (k, v) in parsed_url.query_pairs() {
         match k.as_ref() {
@@ -635,6 +652,61 @@ mod tests {
 
         let alpn = tls.get("alpn").and_then(|a| a.as_array()).expect("应该包含 alpn 配置");
         assert_eq!(alpn.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_anytls_default_insecure_false() {
+        // 不带 insecure 参数时默认不跳过证书校验（原为默认 true，存在 MITM 风险）
+        let uri = "anytls://pw@zf-tw2.9999231.xyz:1023/#%E8%8A%82%E7%82%B9";
+        let parsed = parse_anytls_uri(uri).expect("anytls 应该解析成功");
+        assert_eq!(parsed.raw_json["tls"]["insecure"], false);
+    }
+
+    #[test]
+    fn test_parse_hy2_tls_always_present() {
+        // 无 sni 参数时 tls 块也必须存在，server_name 回退为 server 地址
+        let uri = "hy2://pw@hy2.example.com:443/#hy2-%E8%8A%82%E7%82%B9";
+        let parsed = parse_hysteria2_uri(uri).expect("hy2 应该解析成功");
+        assert_eq!(parsed.raw_json["tls"]["enabled"], true);
+        assert_eq!(parsed.raw_json["tls"]["server_name"], "hy2.example.com");
+
+        // insecure=1 时写入 insecure
+        let uri2 = "hy2://pw@hy2.example.com:443/?insecure=1&sni=s.example.com#hy2-2";
+        let parsed2 = parse_hysteria2_uri(uri2).expect("hy2 应该解析成功");
+        assert_eq!(parsed2.raw_json["tls"]["server_name"], "s.example.com");
+        assert_eq!(parsed2.raw_json["tls"]["insecure"], true);
+    }
+
+    #[test]
+    fn test_parse_vless_reality_missing_pbk_rejected() {
+        // security=reality 但缺 pbk：生成必坏节点，必须拒绝解析（返回 None 跳过该行）
+        let uri = "vless://uuid-x@v.example.com:443/?security=reality&sni=s.example.com#reality-%E8%8A%82%E7%82%B9";
+        assert!(parse_vless_uri(uri).is_none(), "缺 pbk 的 reality 节点应被拒绝");
+    }
+
+    #[test]
+    fn test_parse_vless_ws_host_header() {
+        // ws 传输必须把 host 参数写入 transport.headers.Host
+        let uri = "vless://uuid-x@v.example.com:443/?type=ws&path=/ws&host=cdn.example.com#ws-%E8%8A%82%E7%82%B9";
+        let parsed = parse_vless_uri(uri).expect("vless ws 应该解析成功");
+        assert_eq!(parsed.raw_json["transport"]["type"], "ws");
+        assert_eq!(parsed.raw_json["transport"]["headers"]["Host"], "cdn.example.com");
+    }
+
+    #[test]
+    fn test_parse_vmess_port_out_of_range_rejected() {
+        // 端口 70000 超范围应拒绝该节点而非静默截断为 4464
+        let vmess_json = json!({
+            "v": "2",
+            "ps": "超大端口节点",
+            "add": "1.2.3.4",
+            "port": 70000,
+            "id": "a0000000-0000-0000-0000-000000000001",
+            "net": "tcp"
+        });
+        let b64 = STANDARD.encode(vmess_json.to_string());
+        let uri = format!("vmess://{}", b64);
+        assert!(parse_vmess_uri(&uri).is_none(), "超范围端口应拒绝解析");
     }
 }
 

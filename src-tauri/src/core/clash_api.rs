@@ -1,10 +1,12 @@
 /// Sing-box ClashAPI HTTP 客户端
 /// 作者: TanXiang
-use crate::error::AppError;
+use crate::error::{ApiResponse, AppError};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::Client;
 use serde_json::Value;
 use std::time::Duration;
 use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::OnceLock;
 
 pub static CLASH_API_PORT: AtomicU16 = AtomicU16::new(9090);
 
@@ -16,6 +18,33 @@ pub fn get_clash_api_port() -> u16 {
     CLASH_API_PORT.load(Ordering::Relaxed)
 }
 
+/// ClashAPI 访问令牌：首次生成随机值并原子落盘，之后所有请求统一携带 Bearer 头。
+/// 修复原 secret 为空导致本机任意进程/浏览器跨站请求可完全控制内核的问题。
+static CLASH_API_SECRET: OnceLock<String> = OnceLock::new();
+
+pub fn get_clash_api_secret() -> &'static str {
+    CLASH_API_SECRET.get_or_init(|| {
+        let path = crate::get_data_root().join("clash_api_secret");
+        if let Ok(s) = std::fs::read_to_string(&path) {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        if let Err(e) = crate::fs_utils::atomic_write(&path, token.as_bytes()) {
+            log::warn!("[clash_api] 持久化 ClashAPI secret 失败（本次会话使用内存值）: {}", e);
+        }
+        token
+    })
+}
+
+/// 供前端 WebSocket 拼接 ?token= 参数使用（浏览器 WS 无法设置 Header）
+#[tauri::command]
+pub fn core_get_clash_secret() -> ApiResponse<String> {
+    ApiResponse::ok(get_clash_api_secret().to_string())
+}
+
 pub struct ClashApiClient {
     client: Client,
     base_url: String,
@@ -25,8 +54,16 @@ impl ClashApiClient {
     pub fn new(base_url: Option<String>) -> Self {
         let port = get_clash_api_port();
         let base = base_url.unwrap_or_else(|| format!("http://127.0.0.1:{}", port));
+
+        // 所有请求默认携带 Authorization: Bearer <secret>
+        let mut headers = HeaderMap::new();
+        let secret = get_clash_api_secret().to_string();
+        if let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", secret)) {
+            headers.insert(AUTHORIZATION, v);
+        }
         let client = Client::builder()
             .no_proxy()
+            .default_headers(headers)
             .timeout(Duration::from_secs(10))
             .pool_idle_timeout(Duration::from_secs(90))
             .pool_max_idle_per_host(50)

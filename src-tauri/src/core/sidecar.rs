@@ -4,29 +4,38 @@
 /// SidecarManager 负责 sing-box 子进程的完整生命周期管理：
 ///
 /// - **启动流程** (`start`):
-///   1. 检查当前状态，避免重复启动
+///   1. 检查当前状态，避免重复启动（Running/Starting 时幂等返回）
 ///   2. 通过 `resolve_binary_path` 多路径搜索定位 sing-box.exe
 ///   3. 使用 `tokio::process::Command` 拉起子进程，捕获 stdout/stderr
-///   4. 等待 1.5 秒检测早期退出（配置错误、权限不足等）
+///   4. 轮询 `try_wait()` 检测早期退出（100ms 间隔、上限 15 次，可提前退出）
 ///   5. Windows 上绑定到 Job Object，确保随主进程退出
 ///   6. 更新状态为 Running
 ///
 /// - **停止流程** (`stop`):
 ///   1. 发送 kill 信号终止子进程
-///   2. 调用 wait() 回收子进程资源，避免僵尸进程
+///   2. 调用 wait()（带 3 秒超时兜底）回收子进程资源，避免僵尸进程与无限挂起
 ///   3. 更新状态为 Stopped
 ///
 /// - **状态查询** (`get_status`):
-///   使用 try_lock 非阻塞获取状态，避免在状态查询时阻塞
+///   使用 try_lock 非阻塞获取状态；锁被占用时返回最近一次缓存状态，而非误报错误
 ///
-/// 线程安全：所有共享字段使用 `tokio::sync::Mutex`，确保 guard 实现 Send，
-/// 可以安全跨 await 边界传递。
+/// 并发安全设计：
+/// - `lifecycle_lock` 串行化 start/stop 全流程（含 spawn 与早期退出检测等待），
+///   避免并发 start 双 spawn、后启动者覆盖 process 槽位产生孤儿进程。
+///   该锁可能被持有约 1.5s（早期退出检测），但 `get_status` 只依赖独立的
+///   status 锁与 last_known_status 缓存，不会被 lifecycle_lock 阻塞。
+/// - 所有共享字段使用 `tokio::sync::Mutex`，确保 guard 实现 Send，
+///   可以安全跨 await 边界传递。
 use crate::error::AppError;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Child;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+
+/// stderr 环形缓冲区容量上限（早期退出诊断时最多回看最近 200 行）
+const STDERR_RING_CAP: usize = 200;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarStatus {
@@ -40,9 +49,12 @@ pub enum SidecarStatus {
 pub struct SidecarManager {
     process: Arc<Mutex<Option<Child>>>,
     status: Arc<Mutex<SidecarStatus>>,
-    /// 标记进程是否通过 osascript 提权启动（macOS TUN 模式）
-    /// 为 true 时 stop() 需通过 PID 文件 kill，而非 child.kill()
-    is_external: Arc<Mutex<bool>>,
+    /// 最近一次已知状态缓存：get_status 的 try_lock 失败时返回它，避免误报 Error
+    last_known_status: Arc<Mutex<Option<SidecarStatus>>>,
+    /// start/stop 串行锁：防止并发 start 双 spawn、并防止 stop 与 start 交错
+    /// 产生孤儿进程。注意：此锁会被持有跨 await（最长约 1.5s 早期退出检测），
+    /// 不能被 get_status 等查询路径依赖。
+    lifecycle_lock: Arc<Mutex<()>>,
     #[cfg(target_os = "windows")]
     job: Option<crate::system::job::JobObject>,
 }
@@ -57,32 +69,37 @@ impl SidecarManager {
         Self {
             process: Arc::new(Mutex::new(None)),
             status: Arc::new(Mutex::new(SidecarStatus::Stopped)),
-            is_external: Arc::new(Mutex::new(false)),
+            last_known_status: Arc::new(Mutex::new(None)),
+            lifecycle_lock: Arc::new(Mutex::new(())),
             #[cfg(target_os = "windows")]
             job,
         }
     }
 
+    /// 更新状态并同时刷新最近已知状态缓存
+    async fn set_status(&self, new_status: SidecarStatus) {
+        *self.status.lock().await = new_status.clone();
+        *self.last_known_status.lock().await = Some(new_status);
+    }
+
     /// 非阻塞获取当前 sidecar 状态
     ///
     /// 使用 `try_lock` 而非 `lock().await`，避免在状态查询时阻塞调用方线程。
-    /// 若锁被占用（例如正在执行 start/stop），返回错误状态而非等待。
+    /// 若锁被短暂占用（例如正在执行 start/stop 的状态变更），返回最近一次
+    /// 已知状态缓存，而非误报 Error；缓存尚无数据时保守返回 Stopped。
     pub fn get_status(&self) -> SidecarStatus {
-        self.status
-            .try_lock()
-            .map(|s| s.clone())
-            .unwrap_or(SidecarStatus::Error("锁获取失败".to_string()))
-    }
-
-    /// 检查当前进程是否通过外部提权启动
-    #[cfg(target_os = "macos")]
-    pub async fn is_external(&self) -> bool {
-        *self.is_external.lock().await
+        match self.status.try_lock() {
+            Ok(s) => s.clone(),
+            Err(_) => match self.last_known_status.try_lock() {
+                Ok(cached) => cached.clone().unwrap_or(SidecarStatus::Stopped),
+                Err(_) => SidecarStatus::Stopped,
+            },
+        }
     }
 
     /// 仅更新状态为 Stopped，不实际终止进程
     pub async fn mark_stopped(&self) {
-        *self.status.lock().await = SidecarStatus::Stopped;
+        self.set_status(SidecarStatus::Stopped).await;
     }
 
     /// 检查 macOS 下指定二进制文件是否已经配置 SUID root 权限
@@ -96,6 +113,27 @@ impl SidecarManager {
         } else {
             false
         }
+    }
+
+    /// 校验二进制路径是否包含 shell 特殊字符
+    ///
+    /// 提权命令通过 `osascript` 拼接 shell 字符串执行，路径会被嵌入单引号内。
+    /// 路径由内部 `resolve_binary_path`（canonicalize 后的绝对路径）生成，
+    /// 正常仅包含字母数字与常规文件名字符；一旦出现引号、反引号、`$`、
+    /// 换行等 shell 元字符，即视为异常来源（注入风险），直接拒绝执行。
+    #[cfg(target_os = "macos")]
+    fn validate_binary_path_for_shell(path_str: &str) -> Result<(), AppError> {
+        let forbidden = [
+            '\'', '"', '$', '`', '\\', '\n', '\r', '\t', '\0', ';', '|', '&', '(', ')',
+            '<', '>', '{', '}', '[', ']', '*', '?', '~', '!', '#',
+        ];
+        if path_str.chars().any(|c| forbidden.contains(&c)) {
+            return Err(AppError::Permission(format!(
+                "sing-box 二进制路径包含 shell 特殊字符，已拒绝执行提权命令: {}",
+                path_str
+            )));
+        }
+        Ok(())
     }
 
     /// 确保 macOS 下 sing-box 二进制文件具备 SUID root 特权（首次运行时请求一次管理员密码）
@@ -117,6 +155,10 @@ impl SidecarManager {
 
         info!("[sidecar] sing-box 未具备 SUID 权限，请求一次性管理员权限赋权: {:?}", abs_path);
         let binary_str = abs_path.to_string_lossy().to_string();
+
+        // P0 安全：路径将被嵌入 osascript shell 命令，含特殊字符即拒绝执行
+        Self::validate_binary_path_for_shell(&binary_str)?;
+
         let shell_cmd = format!(
             "cd /tmp && chown root:admin '{}' && chmod +rx '{}' && chmod u+s '{}'",
             binary_str, binary_str, binary_str
@@ -156,49 +198,95 @@ impl SidecarManager {
     ///
     /// 用于应用退出场景：
     /// 直接通过子进程句柄 kill + wait 回收资源，确保退出后活动监视器零残留。
+    /// wait 带 3 秒超时兜底：SUID root 进程可能拒绝非 root 父进程的 kill 信号
+    /// （EPERM），此时 wait() 将永不返回，必须放弃等待避免退出流程无限挂起。
     pub async fn stop_silent(&self) -> Result<(), AppError> {
+        // 与 start 串行：避免 stop 期间另一个 start 又拉起新进程
+        let _lifecycle = self.lifecycle_lock.lock().await;
+
         let child = self.process.lock().await.take();
 
         if let Some(mut child) = child {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            info!("[sidecar] sing-box 子进程已静默停止并回收");
+            if let Err(e) = child.kill().await {
+                // 不再静默吞掉失败（如 SUID root 进程返回 EPERM），必须留痕
+                error!("[sidecar] 向 sing-box 子进程发送 kill 信号失败: {}", e);
+            }
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                child.wait(),
+            )
+            .await
+            {
+                Ok(_) => {
+                    info!("[sidecar] sing-box 子进程已停止并回收");
+                }
+                Err(_) => {
+                    error!(
+                        "[sidecar] sing-box 子进程 3 秒内未退出（root 进程可能拒绝了终止信号），\
+                         进程已残留，需手动清理"
+                    );
+                }
+            }
         }
 
-        // 清理旧版本可能残留的 PID 文件与外部进程标记
+        // 清理旧版本可能残留的 PID 文件
         #[cfg(target_os = "macos")]
         {
             let pid_file = std::env::temp_dir().join("auroweave-singbox.pid");
             let _ = std::fs::remove_file(&pid_file);
         }
-        *self.is_external.lock().await = false;
 
-        *self.status.lock().await = SidecarStatus::Stopped;
+        self.set_status(SidecarStatus::Stopped).await;
         Ok(())
     }
 
     /// 启动 sing-box 子进程
     ///
     /// 完整启动流程：
-    /// 1. 状态守卫：若已在运行则跳过，否则标记为 Starting
-    /// 2. 定位二进制：通过 `resolve_binary_path` 多路径搜索
-    /// 3. 特权检测（macOS）：若配置包含 TUN 入站，确保具备 SUID 权限（首次请求一次，之后永久免密）
-    /// 4. 拉起进程：`tokio::process::Command` 启动子进程，管道捕获 stdout/stderr
-    /// 5. 日志转发：spawn 异步任务将 stdout/stderr 逐行写入 tracing 日志
-    /// 6. 早期退出检测：等待 1.5 秒后 try_wait，若已退出则收集 stderr 返回错误
-    /// 7. Job Object 绑定（Windows）：确保子进程随主进程退出
-    /// 8. 状态更新：标记为 Running
+    /// 1. 状态守卫：若已在运行/启动中则幂等返回，否则标记为 Starting
+    /// 2. 生命周期串行锁：确保同一时刻只有一个 start/stop 在执行，
+    ///    并发 start 不会双 spawn、不会覆盖 process 槽位产生孤儿进程
+    /// 3. 定位二进制：通过 `resolve_binary_path` 多路径搜索
+    /// 4. 特权检测（macOS）：若配置包含 TUN 入站，确保具备 SUID 权限（首次请求一次，之后永久免密）
+    /// 5. 拉起进程：`tokio::process::Command` 启动子进程，管道捕获 stdout/stderr
+    /// 6. 日志转发：spawn 异步任务将 stdout/stderr 逐行写入 tracing 日志
+    /// 7. 早期退出检测：每 100ms 轮询 `try_wait()`，上限 15 次（总 1.5s，可提前退出）
+    /// 8. Job Object 绑定（Windows）：确保子进程随主进程退出
+    /// 9. 状态更新：标记为 Running
     pub async fn start(&self, config_path: &str) -> Result<(), AppError> {
-        // ---- 阶段1: 状态守卫，避免重复启动 ----
+        // ---- 阶段1: 状态守卫（快速路径），避免重复启动 ----
+        // 若另一个 start 正在进行（Starting），直接幂等返回，不与它竞争
         {
-            let mut status = self.status.lock().await;
-            if *status == SidecarStatus::Running {
-                info!("sing-box 已在运行，跳过启动");
-                return Ok(());
+            let status = self.status.lock().await;
+            match *status {
+                SidecarStatus::Running => {
+                    info!("sing-box 已在运行，跳过启动");
+                    return Ok(());
+                }
+                SidecarStatus::Starting => {
+                    info!("sing-box 正在启动中，跳过重复启动");
+                    return Ok(());
+                }
+                _ => {}
             }
-            *status = SidecarStatus::Starting;
         }
-        *self.is_external.lock().await = false;
+
+        // ---- 阶段1b: 生命周期串行锁 ----
+        // 该锁会跨 spawn 与早期退出检测（最长约 1.5s）持有；
+        // get_status 不依赖此锁，因此不会阻塞状态查询。
+        // 若等待期间另一个 start 已完成，锁内二次检查会幂等返回。
+        let _lifecycle = self.lifecycle_lock.lock().await;
+        {
+            let status = self.status.lock().await;
+            match *status {
+                SidecarStatus::Running | SidecarStatus::Starting => {
+                    info!("sing-box 已由并发请求启动，跳过本次启动");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+        self.set_status(SidecarStatus::Starting).await;
 
         // ---- 阶段2: 定位 sing-box 可执行文件 ----
         let binary_path = Self::resolve_binary_path()?;
@@ -212,7 +300,7 @@ impl SidecarManager {
                 .unwrap_or(false);
             if is_tun {
                 if let Err(e) = Self::ensure_privileged_binary(&binary_path).await {
-                    *self.status.lock().await = SidecarStatus::Stopped;
+                    self.set_status(SidecarStatus::Stopped).await;
                     return Err(e);
                 }
             }
@@ -236,8 +324,10 @@ impl SidecarManager {
             })?;
 
         // ---- 阶段4: 日志转发 ----
+        // stderr 使用固定容量环形缓冲（VecDeque，上限 200 行），
+        // 避免异常进程狂刷日志导致内存无上限增长
         let stdout = child.stdout.take();
-        let stderr_lines_arc = Arc::new(Mutex::new(Vec::<String>::new()));
+        let stderr_lines_arc = Arc::new(Mutex::new(VecDeque::<String>::new()));
         if let Some(stderr) = child.stderr.take() {
             use tokio::io::{AsyncBufReadExt, BufReader};
             let arc_clone = stderr_lines_arc.clone();
@@ -245,7 +335,11 @@ impl SidecarManager {
                 let mut reader = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
                     error!("[sing-box error] {}", line);
-                    arc_clone.lock().await.push(line);
+                    let mut buf = arc_clone.lock().await;
+                    if buf.len() >= STDERR_RING_CAP {
+                        buf.pop_front();
+                    }
+                    buf.push_back(line);
                 }
             });
         }
@@ -261,31 +355,47 @@ impl SidecarManager {
         }
 
         // ---- 阶段5: 早期退出检测 ----
-        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-
-        match child.try_wait() {
-            Ok(Some(exit_status)) => {
-                let mut err_msg = format!(
-                    "sing-box 启动后立即退出，退出码: {:?}",
-                    exit_status.code()
-                );
-                let lines = stderr_lines_arc.lock().await;
-                if !lines.is_empty() {
-                    err_msg = format!("{}\n详情: {}", err_msg, lines.join("\n"));
+        // 每 100ms 轮询一次 try_wait，上限 15 次（总时长 1.5s 不变，
+        // 但进程一旦提前退出即可立即返回，无需睡满全程）
+        let mut early_exit: Option<std::process::ExitStatus> = None;
+        for _ in 0..15 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            match child.try_wait() {
+                Ok(Some(exit_status)) => {
+                    early_exit = Some(exit_status);
+                    break;
                 }
-                drop(lines);
-                *self.status.lock().await = SidecarStatus::Stopped;
-                return Err(AppError::Sidecar(err_msg));
+                Ok(None) => {}
+                Err(e) => {
+                    warn!("检查 sing-box 进程状态时出现警告: {}", e);
+                }
             }
-            Ok(None) => {}
-            Err(e) => {
-                warn!("检查 sing-box 进程状态时出现警告: {}", e);
+        }
+
+        if let Some(exit_status) = early_exit {
+            let mut err_msg = format!(
+                "sing-box 启动后立即退出，退出码: {:?}",
+                exit_status.code()
+            );
+            let lines = stderr_lines_arc.lock().await;
+            if !lines.is_empty() {
+                err_msg = format!("{}\n详情: {}", err_msg, lines.iter().rev().take(30).rev().cloned().collect::<Vec<String>>().join("\n"));
             }
+            drop(lines);
+            self.set_status(SidecarStatus::Stopped).await;
+            return Err(AppError::Sidecar(err_msg));
         }
 
         // ---- 阶段6: 存储子进程句柄 + Job Object 绑定 ----
         {
             let mut proc_guard = self.process.lock().await;
+            // 防御性回收：正常流程 stop 已清空槽位，若此处仍有残留句柄
+            // （历史异常路径遗留），先 kill 回收，避免覆盖槽位产生孤儿进程
+            if let Some(mut stale) = proc_guard.take() {
+                warn!("[sidecar] process 槽位存在残留句柄，启动前先回收旧进程");
+                let _ = stale.kill().await;
+                let _ = stale.wait().await;
+            }
             *proc_guard = Some(child);
 
             #[cfg(target_os = "windows")]
@@ -301,7 +411,7 @@ impl SidecarManager {
         }
 
         // ---- 阶段7: 标记为 Running，启动完成 ----
-        *self.status.lock().await = SidecarStatus::Running;
+        self.set_status(SidecarStatus::Running).await;
         info!("sing-box 子进程启动成功");
         Ok(())
     }
@@ -395,12 +505,12 @@ impl SidecarManager {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if !path.is_file() { continue; }
-                    
+
                     let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-                    
+
                     #[cfg(target_os = "windows")]
                     let is_match = file_name.starts_with("sing-box") && file_name.ends_with(".exe");
-                    
+
                     #[cfg(not(target_os = "windows"))]
                     let is_match = file_name.starts_with("sing-box")
                         && !file_name.ends_with(".tar.gz")
@@ -449,6 +559,18 @@ mod tests {
         let fake_path = std::path::Path::new("/non/existent/path");
         #[cfg(target_os = "macos")]
         assert!(!SidecarManager::is_privileged_binary(fake_path));
+    }
+
+    /// shell 特殊字符路径必须被提权命令拒绝（注入防护）
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_validate_binary_path_rejects_special_chars() {
+        assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing-box").is_ok());
+        assert!(SidecarManager::validate_binary_path_for_shell("/tmp/si'ng-box").is_err());
+        assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing\"box").is_err());
+        assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing-$box").is_err());
+        assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing`box").is_err());
+        assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing\nbox").is_err());
     }
 }
 

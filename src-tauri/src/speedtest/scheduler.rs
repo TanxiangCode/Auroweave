@@ -28,8 +28,10 @@ impl SpeedTestScheduler {
         group_tag: String,
         node_tags: Vec<String>,
     ) {
-        // 取消上一轮任务
+        // 取消上一轮任务，避免两轮并发切换同一 Selector 组导致结果互相污染
         self.cancel();
+        // 等待一个调度周期，让上一轮任务感知取消信号后退出
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let (tx, mut rx) = mpsc::channel::<()>(1);
         *self.cancel_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
@@ -49,8 +51,27 @@ impl SpeedTestScheduler {
                     break;
                 }
 
-                // 1. 切换选择器节点
-                let _ = clash_client.select_node(&group_tag, node_tag).await;
+                // 1. 切换选择器节点。失败时跳过该节点（记录 0 结果），
+                //    避免把当前节点（上一个节点）的测速结果错误归属到目标节点名下
+                if let Err(e) = clash_client.select_node(&group_tag, node_tag).await {
+                    warn!("[speedtest] 切换节点 [{}] 失败，跳过测速: {}", node_tag, e);
+                    let res = ThroughputResult {
+                        download_bps: 0,
+                        upload_bps: 0,
+                        tested_at: chrono::Utc::now().timestamp_millis(),
+                    };
+                    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(node_tag.clone(), res.clone());
+                    let _ = app.emit(
+                        "speedtest-progress",
+                        BatchProgress {
+                            current_index: total,
+                            total,
+                            current_node: node_tag.clone(),
+                            result: Some(res),
+                        },
+                    );
+                    continue;
+                }
 
                 // 进度推送 (开始测速)
                 let _ = app.emit(
@@ -84,6 +105,17 @@ impl SpeedTestScheduler {
                     },
                 );
             }
+
+            // 终止事件：无论正常结束还是取消，均以 current_index == total 通知前端复位状态
+            let _ = app.emit(
+                "speedtest-progress",
+                BatchProgress {
+                    current_index: total,
+                    total,
+                    current_node: String::new(),
+                    result: None,
+                },
+            );
 
             info!("批量测速流程结束");
         });
