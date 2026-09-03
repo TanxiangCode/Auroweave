@@ -20,7 +20,7 @@ import { execSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-const VERSION = "1.14.0-beta.9";
+const VERSION = "1.14.0";
 
 interface TargetConfig {
   platformName: string;

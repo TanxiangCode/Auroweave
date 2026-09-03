@@ -82,6 +82,9 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
             },
             "cache_file": {
                 "enabled": true,
+                // DNS 缓存持久化（1.14.0 新增，experimental/cache-file.md）：
+                // 重启后无需重新解析域名，节点域名冷启动明显加速
+                "store_dns": true,
                 "path": crate::get_data_root().join("cache.db").to_string_lossy().to_string()
             }
         }
@@ -422,6 +425,8 @@ impl ConfigBuilder {
                 },
                 "cache_file": {
                     "enabled": true,
+                    // DNS 缓存持久化（1.14.0 新增，experimental/cache-file.md）
+                    "store_dns": true,
                     "path": crate::get_data_root().join("cache.db").to_string_lossy().to_string()
                 }
             }

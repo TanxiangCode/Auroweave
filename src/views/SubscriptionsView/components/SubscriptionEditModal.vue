@@ -31,7 +31,7 @@ type TabKey = "general" | "filter";
 const activeTab = ref<TabKey>("general");
 
 const DEFAULT_UA = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36";
-const currentSingboxVer = ref("1.14.0-beta.9");
+const currentSingboxVer = ref("1.14.0");
 
 onMounted(async () => {
   try {
