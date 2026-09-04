@@ -52,11 +52,26 @@
         </button>
       </div>
 
-      <!-- 新增规则按钮 -->
+      <!-- 导入 / 导出 / 新增规则按钮 -->
+      <button class="btn-add-rule" title="从 JSON 文件导入分流规则（与现有规则合并去重）" @click="handleImport">
+        <span class="btn-add-content"><BaseIcon name="Download" :size="15" /> 导入</span>
+      </button>
+      <button class="btn-add-rule" title="导出全部分流规则为 JSON 文件" @click="handleExport">
+        <span class="btn-add-content"><BaseIcon name="Share2" :size="15" /> 导出</span>
+      </button>
       <button class="btn-add-rule primary" @click="openAddModal">
         <span class="btn-add-content"><BaseIcon name="Plus" :size="15" /> 添加分流规则</span>
       </button>
     </div>
+
+    <!-- 导入文件选择（隐藏 input） -->
+    <input
+      ref="importFileInput"
+      type="file"
+      accept=".json,application/json"
+      style="display: none"
+      @change="onImportFileSelected"
+    />
 
     <!-- 规则列表 -->
     <div class="rules-body">
@@ -225,6 +240,8 @@ import {
   getCustomRules,
   addCustomRule,
   deleteCustomRule,
+  exportRoutingRules,
+  importRoutingRules,
   type CustomRuleItem,
 } from "@/api/ipc/routing";
 import { useToast } from "@/composables/useToast";
@@ -237,6 +254,54 @@ const loading = ref(false);
 const showModal = ref(false);
 const isEditing = ref(false);
 const toast = useToast();
+const importFileInput = ref<HTMLInputElement | null>(null);
+
+/** 导出全部规则：落盘到用户选择的文件（应用内拼 JSON，经 Blob 下载） */
+async function handleExport() {
+  const res = await exportRoutingRules();
+  if (!res.success || !res.data) {
+    toast.error("导出失败", res.error || "读取规则失败");
+    return;
+  }
+  try {
+    const blob = new Blob([res.data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `auroweave-routing-rules-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("导出完成", "规则备份已下载");
+  } catch (e) {
+    toast.error("导出失败", String(e));
+  }
+}
+
+/** 导入：弹文件选择器，读取 JSON 后合并导入 */
+function handleImport() {
+  importFileInput.value?.click();
+}
+
+async function onImportFileSelected(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  // 允许同一路径重复选择同一文件
+  input.value = "";
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const res = await importRoutingRules(text, true);
+    if (res.success && res.data) {
+      const [imported, skipped] = res.data;
+      toast.success("导入完成", `导入 ${imported} 条，跳过 ${skipped} 条`);
+      await fetchData();
+    } else {
+      toast.error("导入失败", res.error || "文件格式不正确");
+    }
+  } catch (err) {
+    toast.error("导入失败", String(err));
+  }
+}
 
 const formRule = ref<CustomRuleItem>({
   id: "",
