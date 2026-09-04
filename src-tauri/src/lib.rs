@@ -219,6 +219,10 @@ pub fn run() {
             // 启动后台订阅自动静默更新调度器
             commands::subscription::start_auto_update_scheduler(app.handle().clone());
 
+            // 启动系统代理守护（30s 一拍，外部应用篡改代理设置时自动恢复；
+            // 冲突仲裁由期望状态标记承担，见 system::proxy_guard 模块注释）
+            system::proxy_guard::start_guard(app.handle().clone());
+
             Ok(())
 
         })

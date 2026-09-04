@@ -445,8 +445,35 @@ pub fn get_system_proxy_status() -> bool {
     }
 }
 
-#[cfg(target_os = "windows")]
+/// 设置系统代理（各平台统一入口）
+///
+/// 期望状态钩子：成功设置后同步 proxy_guard 期望态——应用内任何路径
+/// （托盘/模式切换/自愈）开代理即视为"用户期望开启"，守护开始校验漂移；
+/// 关代理即期望关闭，守护立即停手。失败时不更新期望态（守护按旧期望继续）。
 pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
+    let result = set_system_proxy_impl(enabled, port);
+    if result.is_ok() {
+        crate::system::proxy_guard::set_desired(enabled);
+    }
+    result
+}
+
+/// 静默设置系统代理 (不弹出提权密码框)
+///
+/// 用于应用退出、启动清理等场景，避免阻塞或打扰用户。
+/// 在 macOS 上仅尝试直接执行 networksetup (无 root 时可能失败)；
+/// 在 Windows/Linux 上与 set_system_proxy 行为一致 (不需要交互提权)。
+/// 期望状态钩子语义与 set_system_proxy 相同（成功才更新期望态）。
+pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
+    let result = set_system_proxy_silent_impl(enabled, port);
+    if result.is_ok() {
+        crate::system::proxy_guard::set_desired(enabled);
+    }
+    result
+}
+
+#[cfg(target_os = "windows")]
+fn set_system_proxy_impl(enabled: bool, port: u16) -> Result<(), String> {
     let server_val = format!("127.0.0.1:{}", port);
     if let Err(e) = win_registry::set_proxy_registry(enabled, &server_val) {
         log::error!("[sysproxy] 写入注册表失败: enabled={}, port={}, 原因: {}", enabled, port, e);
@@ -457,24 +484,19 @@ pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
+fn set_system_proxy_impl(enabled: bool, port: u16) -> Result<(), String> {
     mac_sysproxy::set_proxy(enabled, port, true)
 }
 
 #[cfg(target_os = "linux")]
-pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
+fn set_system_proxy_impl(enabled: bool, port: u16) -> Result<(), String> {
     linux_sysproxy::set_proxy(enabled, port)
 }
 
-/// 静默设置系统代理 (不弹出提权密码框)
-///
-/// 用于应用退出、启动清理等场景，避免阻塞或打扰用户。
-/// 在 macOS 上仅尝试直接执行 networksetup (无 root 时可能失败)；
-/// 在 Windows/Linux 上与 set_system_proxy 行为一致 (不需要交互提权)。
-pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
+fn set_system_proxy_silent_impl(enabled: bool, port: u16) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        set_system_proxy(enabled, port)
+        set_system_proxy_impl(enabled, port)
     }
     #[cfg(target_os = "macos")]
     {
@@ -482,16 +504,11 @@ pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        set_system_proxy(enabled, port)
+        set_system_proxy_impl(enabled, port)
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         let _ = (enabled, port);
         Ok(())
     }
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-pub fn set_system_proxy(_enabled: bool, _port: u16) -> Result<(), String> {
-    Ok(())
 }

@@ -182,10 +182,12 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
         if settings.tun_enabled {
             // TUN 接管下必须关系统代理（双开=流量双重接管+状态混乱）。
             // 失败不吞错：记录 error 并回读校验，用户取消提权时能从日志/UI 定位
+            crate::system::proxy_guard::set_desired(false);
             if let Err(e) = crate::system::sysproxy::set_system_proxy(false, 0) {
                 log::error!("[proxy] TUN 模式下关闭系统代理失败: {}（可能残留双开状态）", e);
             }
         } else {
+            crate::system::proxy_guard::set_desired(true);
             if let Err(e) = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port) {
                 log::error!("[proxy] 设置系统代理失败: {}", e);
             }
@@ -234,6 +236,8 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
 #[tauri::command]
 pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
     log::info!("[proxy] 强制设置系统代理状态: enabled={}, port={}", enabled, port);
+    // 同步守护期望状态：用户显式操作即期望真相源
+    crate::system::proxy_guard::set_desired(enabled);
     match crate::system::sysproxy::set_system_proxy(enabled, port) {
         Ok(_) => ApiResponse::ok(()),
         Err(e) => {

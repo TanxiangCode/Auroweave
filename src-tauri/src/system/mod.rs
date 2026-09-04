@@ -8,4 +8,5 @@ pub mod startup;
 pub mod tray;
 pub mod autostart;
 pub mod subscription_alert;
+pub mod proxy_guard;
 
