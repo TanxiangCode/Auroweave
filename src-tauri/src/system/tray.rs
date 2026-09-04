@@ -300,6 +300,9 @@ fn start_tray_traffic_ticker(app_handle: AppHandle) {
             // 连接长连接 stream
             if let Ok(mut resp) = client.get(&url).send().await {
                 let mut buffer = String::new();
+                // 节流：流每秒推一拍，NSStatusItem 每秒 set_title 有主线程成本
+                // （前端 IPC 路为 3s 节流；此处对齐 3s，双路节奏一致且降 2/3 更新量）
+                let mut last_update = std::time::Instant::now() - std::time::Duration::from_secs(10);
                 while let Ok(Some(chunk)) = resp.chunk().await {
                     if let Ok(text) = std::str::from_utf8(&chunk) {
                         buffer.push_str(text);
@@ -314,7 +317,10 @@ fn start_tray_traffic_ticker(app_handle: AppHandle) {
                                     down: u64,
                                 }
                                 if let Ok(traffic) = serde_json::from_str::<TrafficItem>(&line) {
-                                    update_tray_speed_display(&app_handle, traffic.up, traffic.down, true);
+                                    if last_update.elapsed() >= std::time::Duration::from_secs(3) {
+                                        last_update = std::time::Instant::now();
+                                        update_tray_speed_display(&app_handle, traffic.up, traffic.down, true);
+                                    }
                                 }
                             }
                         }

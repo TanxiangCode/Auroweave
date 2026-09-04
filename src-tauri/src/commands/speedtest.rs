@@ -60,10 +60,12 @@ pub async fn speedtest_run_latency(
             if crate::core::parser::is_announcement_or_fake_node(&tag, None, None) {
                 return (tag, 0u16);
             }
-            let _permit = sem.acquire().await.ok();
+            // 错峰 sleep 在 acquire 之前——在 permit 临界区内睡觉会占用并发槽
+            // （原实现 300 节点浪费 ~30×15ms 槽位时间）
             if idx > 0 && idx % 10 == 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(15)).await;
             }
+            let _permit = sem.acquire().await.ok();
             match client.get_node_delay(&tag, &url, timeout_ms).await {
                 Ok(delay) => (tag, delay),
                 Err(e) => {
@@ -76,12 +78,21 @@ pub async fn speedtest_run_latency(
 
 
     let mut results = HashMap::new();
+    let mut pending_records: Vec<(String, u16)> = Vec::new();
     while let Some(res) = join_set.join_next().await {
         if let Ok((tag, delay)) = res {
-            // 持久化延迟历史（0=失败也留痕，可看节点存活趋势）
-            crate::core::stats_db::add_speedtest_record(&tag, 0, 0, Some(delay as u64));
+            // 持久化延迟历史（0=失败也留痕，可看节点存活趋势）——先攒批
+            pending_records.push((tag.clone(), delay));
             results.insert(tag, delay);
         }
+    }
+    // 攒批写库：300 节点原逐条 fsync，合并为单事务（spawn_blocking 不阻塞 async worker）
+    if !pending_records.is_empty() {
+        tokio::task::spawn_blocking(move || {
+            for (tag, delay) in pending_records {
+                crate::core::stats_db::add_speedtest_record(&tag, 0, 0, Some(delay as u64));
+            }
+        });
     }
 
     // 若当前为 auto / urltest 策略组，显式触发 sing-box 内核进行策略组级优选刷新

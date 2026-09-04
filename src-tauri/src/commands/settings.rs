@@ -187,11 +187,11 @@ fn get_settings_path() -> PathBuf {
     config_dir.join("settings.json")
 }
 
-/// settings.json 读取缓存：mtime 未变时复用上次解析结果
-///
-/// 性能：settings_get_internal 全仓 20+ 调用点（3s 状态轮询/守护/托盘/测速等
-/// 每拍多次），每次读盘+serde 解析；settings.json 仅由本进程原子写（更新时
-/// mtime 必变），mtime 缓存安全。外部手改文件的场景：mtime 变化即可感知。
+// settings.json 读取缓存：mtime 未变时复用上次解析结果
+//
+// 性能：settings_get_internal 全仓 20+ 调用点（3s 状态轮询/守护/托盘/测速等
+// 每拍多次），每次读盘+serde 解析；settings.json 仅由本进程原子写（更新时
+// mtime 必变），mtime 缓存安全。外部手改文件的场景：mtime 变化即可感知。
 lazy_static::lazy_static! {
     static ref SETTINGS_CACHE: std::sync::Mutex<Option<(std::time::SystemTime, AppSettings)>> =
         std::sync::Mutex::new(None);

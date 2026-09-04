@@ -102,8 +102,13 @@ impl SpeedTestScheduler {
                 // 3. 更新缓存
                 cache.lock().unwrap_or_else(|e| e.into_inner()).insert(node_tag.clone(), res.clone());
 
-                // 持久化测速历史（重启不丢，SpeedtestView 可查趋势对比）
-                crate::core::stats_db::add_speedtest_record(node_tag, res.download_bps, res.upload_bps, None);
+                // 持久化测速历史（重启不丢）——spawn_blocking 避免 std Mutex + fsync
+                // 阻塞 async worker（批量测速每节点一次）
+                let record_tag = node_tag.clone();
+                let (dl, ul) = (res.download_bps, res.upload_bps);
+                tokio::task::spawn_blocking(move || {
+                    crate::core::stats_db::add_speedtest_record(&record_tag, dl, ul, None);
+                });
 
                 // 进度推送 (测速完成)
                 let _ = app.emit(

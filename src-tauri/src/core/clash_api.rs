@@ -50,6 +50,10 @@ pub struct ClashApiClient {
     base_url: String,
 }
 
+/// /proxies 全量快照（1s TTL；select_node 写后清除保证读到最新 now）
+static PROXIES_SNAPSHOT: std::sync::OnceLock<std::sync::Mutex<Option<(std::time::Instant, Value)>>> =
+    std::sync::OnceLock::new();
+
 impl ClashApiClient {
     pub fn new(base_url: Option<String>) -> Self {
         let port = get_clash_api_port();
@@ -77,7 +81,22 @@ impl ClashApiClient {
     }
 
     /// 获取所有代理分组与节点
+    ///
+    /// 1 秒 TTL 快照复用：/proxies 全量 JSON 300 节点时约几百 KB，前端视图
+    /// 挂载周期（fetchGroups + fetchGroupNodes）与单节点测速的 selector
+    /// 查找会在同一秒内重复拉取——1s 内直接复用同一份快照。
+    /// （切换节点 select_node 后的读取不受影响：写后清缓存）
     pub async fn get_proxies(&self) -> Result<Value, AppError> {
+        let cache = PROXIES_SNAPSHOT.get_or_init(|| std::sync::Mutex::new(None));
+        {
+            let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((ts, cached)) = guard.as_ref() {
+                if ts.elapsed() < Duration::from_secs(1) {
+                    return Ok(cached.clone());
+                }
+            }
+        }
+
         let url = format!("{}/proxies", self.base_url);
         let resp = self.client.get(&url)
             .send().await
@@ -91,7 +110,16 @@ impl ClashApiClient {
         }
         let val: Value = serde_json::from_str(&body)
             .map_err(|e| AppError::Network(format!("ClashAPI 解析 JSON 失败: {}", e)))?;
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some((std::time::Instant::now(), val.clone()));
         Ok(val)
+    }
+
+    /// 使 /proxies 快照失效（select_node 等写操作后调用，保证下次读到最新 now）
+    fn invalidate_proxies_snapshot(&self) {
+        let cache = PROXIES_SNAPSHOT.get_or_init(|| std::sync::Mutex::new(None));
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = None;
     }
 
     /// 获取单节点延迟。
@@ -177,6 +205,8 @@ impl ClashApiClient {
             return Err(AppError::Network(format!("切换节点返回错误状态: {}", resp.status())));
         }
 
+        // 写后清快照：保证切换后立即读 /proxies 能拿到最新 now
+        self.invalidate_proxies_snapshot();
         Ok(())
     }
 
