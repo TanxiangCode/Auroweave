@@ -10,6 +10,9 @@
  *   2. 清洗后出站节点 (Parsed Nodes) - 协议类型、服务器端口、JSON 结构查看与快速过滤
  *   3. 最终 sing-box 运行时配置 (Final Config) - 该订阅生效后生成的完整 sing-box JSON
  * - 一键复制、节点检索、快捷键关闭 (Esc)
+ *
+ * 样式基于项目公共 modal 体系（modal-backdrop/modal-card）+ scoped token 化样式，
+ * 修复历史版本使用未接入的 Tailwind 原子类导致整窗裸奔渲染的缺陷。
  */
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import BaseIcon from "@/components/common/BaseIcon.vue";
@@ -130,15 +133,15 @@ function toggleNodeExpand(tag: string) {
   expandedNodeTag.value = expandedNodeTag.value === tag ? null : tag;
 }
 
-// 格式化展示协议 Badge 颜色
+// 格式化展示协议 Badge 颜色（token 化语义类，scoped 样式表内定义）
 function getProtocolBadgeClass(type: string) {
   const t = type.toLowerCase();
-  if (t === "vmess") return "bg-blue-500/10 text-blue-400 border-blue-500/20";
-  if (t === "vless") return "bg-purple-500/10 text-purple-400 border-purple-500/20";
-  if (t === "shadowsocks" || t === "ss") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-  if (t === "trojan") return "bg-amber-500/10 text-amber-400 border-amber-500/20";
-  if (t.includes("hysteria") || t.includes("hy2")) return "bg-rose-500/10 text-rose-400 border-rose-500/20";
-  return "bg-gray-500/10 text-gray-400 border-gray-500/20";
+  if (t === "vmess") return "badge badge-vmess";
+  if (t === "vless") return "badge badge-vless";
+  if (t === "shadowsocks" || t === "ss") return "badge badge-ss";
+  if (t === "trojan") return "badge badge-trojan";
+  if (t.includes("hysteria") || t.includes("hy2")) return "badge badge-hy2";
+  return "badge badge-other";
 }
 </script>
 
@@ -146,241 +149,630 @@ function getProtocolBadgeClass(type: string) {
   <Teleport to="body">
     <div
       v-if="visible"
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fade-in"
+      class="modal-backdrop"
+      :class="{ fullscreen: isFullscreen }"
       @click.self="closeModal"
     >
-      <div
-        class="bg-[#12141a] border border-white/10 rounded-2xl shadow-2xl flex flex-col transition-all duration-200 overflow-hidden"
-        :class="[
-          isFullscreen
-            ? 'w-full h-full max-w-none max-h-none rounded-none'
-            : 'w-full max-w-5xl h-[88vh] max-h-[860px]'
-        ]"
-      >
-        <!-- 头部 Header -->
-        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#161922]">
-          <div class="flex items-center gap-3 min-w-0">
-            <div class="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
-              <BaseIcon name="Code" class="w-5 h-5" />
-            </div>
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <h3 class="text-base font-semibold text-white truncate">
-                  {{ subscription?.name || "查看订阅配置" }}
-                </h3>
-                <span
-                  v-if="inspectData"
-                  class="px-2 py-0.5 text-xs font-medium rounded-full bg-white/5 border border-white/10 text-white/70 uppercase shrink-0"
-                >
+      <div class="inspect-modal" :class="{ fullscreen: isFullscreen }">
+        <!-- 头部 -->
+        <div class="inspect-header">
+          <div class="header-left">
+            <div class="header-icon"><BaseIcon name="Code" :size="18" /></div>
+            <div class="header-text">
+              <div class="title-row">
+                <h3 class="modal-title">{{ subscription?.name || "查看订阅配置" }}</h3>
+                <span v-if="inspectData" class="count-chip">
                   {{ inspectData.format }} · {{ inspectData.node_count }} 节点
                 </span>
               </div>
-              <p class="text-xs text-white/40 truncate mt-0.5">
-                {{ subscription?.url || "本地或剪贴板导入" }}
-              </p>
+              <p class="header-sub">{{ subscription?.url || "本地或剪贴板导入" }}</p>
             </div>
           </div>
 
-          <div class="flex items-center gap-2 shrink-0">
-            <!-- 视图切换 Tabs -->
-            <div class="flex p-1 bg-black/30 rounded-xl border border-white/5 text-xs">
+          <div class="header-actions">
+            <!-- 视图切换 -->
+            <div class="tab-switch">
               <button
-                class="px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5"
-                :class="activeTab === 'raw' ? 'bg-primary text-white shadow-sm' : 'text-white/60 hover:text-white'"
+                class="tab-btn"
+                :class="{ active: activeTab === 'raw' }"
                 @click="activeTab = 'raw'"
               >
-                <BaseIcon name="FileText" class="w-3.5 h-3.5" />
+                <BaseIcon name="FileText" :size="13" />
                 <span>清洗前原始数据</span>
               </button>
               <button
-                class="px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5"
-                :class="activeTab === 'nodes' ? 'bg-primary text-white shadow-sm' : 'text-white/60 hover:text-white'"
+                class="tab-btn"
+                :class="{ active: activeTab === 'nodes' }"
                 @click="activeTab = 'nodes'"
               >
-                <BaseIcon name="Server" class="w-3.5 h-3.5" />
+                <BaseIcon name="Server" :size="13" />
                 <span>解析后节点 ({{ inspectData?.node_count || 0 }})</span>
               </button>
               <button
-                class="px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5"
-                :class="activeTab === 'config' ? 'bg-primary text-white shadow-sm' : 'text-white/60 hover:text-white'"
+                class="tab-btn"
+                :class="{ active: activeTab === 'config' }"
                 @click="activeTab = 'config'"
               >
-                <BaseIcon name="FileCode" class="w-3.5 h-3.5" />
+                <BaseIcon name="FileCode" :size="13" />
                 <span>最终运行时配置</span>
               </button>
             </div>
 
-            <!-- 最大化/还原 -->
-            <button
-              class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors"
-              :title="isFullscreen ? '还原窗口' : '最大化窗口'"
-              @click="toggleFullscreen"
-            >
-              <BaseIcon :name="isFullscreen ? 'Minimize2' : 'Maximize2'" class="w-4 h-4" />
+            <button class="icon-btn" :title="isFullscreen ? '还原窗口' : '最大化窗口'" @click="toggleFullscreen">
+              <BaseIcon :name="isFullscreen ? 'Minimize2' : 'Maximize2'" :size="15" />
             </button>
-
-            <!-- 关闭按钮 -->
-            <button
-              class="w-8 h-8 rounded-lg bg-white/5 hover:bg-rose-500/20 text-white/60 hover:text-rose-400 flex items-center justify-center transition-colors"
-              title="关闭 (Esc)"
-              @click="closeModal"
-            >
-              <BaseIcon name="X" class="w-4 h-4" />
+            <button class="icon-btn danger" title="关闭 (Esc)" @click="closeModal">
+              <BaseIcon name="X" :size="15" />
             </button>
           </div>
         </div>
 
-        <!-- 主体区域 Body -->
-        <div class="flex-1 min-h-0 bg-[#0d0f14] overflow-hidden flex flex-col relative">
-          <!-- 加载中骨架屏 -->
-          <div
-            v-if="loading"
-            class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0d0f14]/80 backdrop-blur-sm"
-          >
-            <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-            <p class="text-xs text-white/50 mt-3">正在拉取并反编译订阅配置...</p>
+        <!-- 主体 -->
+        <div class="inspect-body">
+          <!-- 加载中 -->
+          <div v-if="loading" class="loading-mask">
+            <span class="spin-ring"></span>
+            <p>正在拉取并反编译订阅配置...</p>
           </div>
 
-          <!-- TAB 1: 清洗前原始文本 (Raw Content) -->
-          <div v-else-if="activeTab === 'raw'" class="flex-1 flex flex-col min-h-0">
-            <div class="flex items-center justify-between px-6 py-2.5 bg-[#141720] border-b border-white/5 text-xs text-white/60">
-              <div class="flex items-center gap-2">
-                <span>原始文本字符数: {{ inspectData?.raw_content.length || 0 }} 字节</span>
-                <span class="text-white/20">|</span>
-                <span>包含多行协议 URI 或 Base64 编码数据</span>
-              </div>
-              <button
-                class="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors flex items-center gap-1.5 font-medium"
-                @click="copyText(inspectData?.raw_content || '', '原始订阅文本')"
-              >
-                <BaseIcon name="Copy" class="w-3.5 h-3.5" />
-                <span>复制原始数据</span>
+          <!-- TAB 1: 原始文本 -->
+          <div v-else-if="activeTab === 'raw'" class="tab-pane">
+            <div class="pane-toolbar">
+              <span>原始文本字符数: {{ inspectData?.raw_content.length || 0 }} 字节</span>
+              <button class="btn-copy" @click="copyText(inspectData?.raw_content || '', '原始订阅文本')">
+                <BaseIcon name="Copy" :size="13" /> 复制原始数据
               </button>
             </div>
-            <div class="flex-1 overflow-auto p-4 font-mono text-xs text-emerald-400/90 leading-relaxed bg-[#0a0c10] select-text break-all whitespace-pre-wrap">
-              {{ inspectData?.raw_content || "# 暂无原始数据" }}
-            </div>
+            <div class="raw-content">{{ inspectData?.raw_content || "# 暂无原始数据" }}</div>
           </div>
 
-          <!-- TAB 2: 解析后节点列表 (Parsed Nodes) -->
-          <div v-else-if="activeTab === 'nodes'" class="flex-1 flex flex-col min-h-0">
-            <!-- 搜索与操作栏 -->
-            <div class="flex items-center justify-between px-6 py-3 bg-[#141720] border-b border-white/5 gap-4">
-              <div class="relative flex-1 max-w-md">
-                <BaseIcon name="Search" class="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
+          <!-- TAB 2: 解析后节点 -->
+          <div v-else-if="activeTab === 'nodes'" class="tab-pane">
+            <div class="pane-toolbar with-search">
+              <div class="search-wrap">
+                <BaseIcon name="Search" :size="14" class="search-icon" />
                 <input
                   v-model="searchKeyword"
                   type="text"
                   placeholder="搜索节点名称、协议或服务器地址..."
-                  class="w-full bg-[#1c202b] border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary transition-colors"
+                  class="form-input search-input"
                 />
               </div>
-
-              <div class="flex items-center gap-3 text-xs text-white/60">
+              <div class="toolbar-right">
                 <span>显示 {{ filteredNodes.length }} / {{ inspectData?.node_count || 0 }} 个节点</span>
                 <button
-                  class="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-colors flex items-center gap-1.5 font-medium"
+                  class="btn-copy"
                   @click="copyText(JSON.stringify(inspectData?.parsed_nodes || [], null, 2), '全部节点列表 JSON')"
                 >
-                  <BaseIcon name="Copy" class="w-3.5 h-3.5" />
-                  <span>复制全部节点 JSON</span>
+                  <BaseIcon name="Copy" :size="13" /> 复制全部节点 JSON
                 </button>
               </div>
             </div>
 
-            <!-- 节点表格/列表 -->
-            <div class="flex-1 overflow-y-auto p-4 space-y-2 select-text">
+            <div class="nodes-list">
               <div
                 v-for="(node, idx) in filteredNodes"
                 :key="node.tag"
-                class="bg-[#151821] border border-white/5 rounded-xl overflow-hidden transition-all hover:border-white/15"
+                class="node-row"
               >
-                <!-- 节点摘要行 -->
-                <div
-                  class="flex items-center justify-between px-4 py-2.5 cursor-pointer hover:bg-white/[0.02]"
-                  @click="toggleNodeExpand(node.tag)"
-                >
-                  <div class="flex items-center gap-3 min-w-0 flex-1">
-                    <span class="text-xs text-white/30 w-7 font-mono shrink-0">#{{ idx + 1 }}</span>
-                    <span
-                      class="px-2 py-0.5 text-[11px] font-mono rounded border shrink-0 uppercase font-semibold"
-                      :class="getProtocolBadgeClass(node.type)"
-                    >
-                      {{ node.type }}
-                    </span>
-                    <span class="text-sm font-medium text-white/90 truncate">{{ node.tag }}</span>
+                <div class="node-summary" @click="toggleNodeExpand(node.tag)">
+                  <div class="summary-left">
+                    <span class="node-idx">#{{ idx + 1 }}</span>
+                    <span :class="getProtocolBadgeClass(node.type)">{{ node.type }}</span>
+                    <span class="node-tag">{{ node.tag }}</span>
                   </div>
-
-                  <div class="flex items-center gap-4 shrink-0 text-xs text-white/50">
-                    <span v-if="node.server" class="font-mono text-white/40">
+                  <div class="summary-right">
+                    <span v-if="node.server" class="node-endpoint">
                       {{ node.server }}:{{ node.server_port || 0 }}
                     </span>
                     <BaseIcon
                       :name="expandedNodeTag === node.tag ? 'ChevronUp' : 'ChevronDown'"
-                      class="w-4 h-4 text-white/30"
+                      :size="14"
+                      class="chev"
                     />
                   </div>
                 </div>
 
-                <!-- 节点展开后的 JSON 配置详情 -->
-                <div
-                  v-if="expandedNodeTag === node.tag"
-                  class="px-4 py-3 bg-[#0a0c10] border-t border-white/5 text-xs font-mono"
-                >
-                  <div class="flex items-center justify-between mb-2 text-white/40">
+                <div v-if="expandedNodeTag === node.tag" class="node-detail">
+                  <div class="detail-head">
                     <span>sing-box 出站配置规范:</span>
-                    <button
-                      class="text-primary hover:underline flex items-center gap-1"
-                      @click.stop="copyText(JSON.stringify(node.raw_json, null, 2), node.tag)"
-                    >
-                      <BaseIcon name="Copy" class="w-3 h-3" />
-                      <span>复制此节点</span>
+                    <button class="btn-copy small" @click.stop="copyText(JSON.stringify(node.raw_json, null, 2), node.tag)">
+                      <BaseIcon name="Copy" :size="12" /> 复制此节点
                     </button>
                   </div>
-                  <pre class="text-emerald-400 overflow-x-auto p-2 bg-black/40 rounded-lg whitespace-pre-wrap">{{ JSON.stringify(node.raw_json, null, 2) }}</pre>
+                  <pre class="json-block">{{ JSON.stringify(node.raw_json, null, 2) }}</pre>
                 </div>
               </div>
 
-              <!-- 空状态 -->
-              <div v-if="filteredNodes.length === 0" class="py-12 text-center text-white/40 text-xs">
-                没有找到匹配的节点
-              </div>
+              <div v-if="filteredNodes.length === 0" class="empty-pane">没有找到匹配的节点</div>
             </div>
           </div>
 
-          <!-- TAB 3: 最终 sing-box 运行时配置 (Final Config) -->
-          <div v-else-if="activeTab === 'config'" class="flex-1 flex flex-col min-h-0">
-            <div class="flex items-center justify-between px-6 py-2.5 bg-[#141720] border-b border-white/5 text-xs text-white/60">
-              <div class="flex items-center gap-2">
-                <span>完整 sing-box config.json (包含 Inbounds, Outbounds, Route, DNS, ClashAPI)</span>
-              </div>
-              <button
-                class="px-3 py-1 bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors flex items-center gap-1.5 font-medium shadow-sm"
-                @click="copyText(inspectData?.final_config_json || '', '完整 config.json')"
-              >
-                <BaseIcon name="Copy" class="w-3.5 h-3.5" />
-                <span>复制完整配置 JSON</span>
+          <!-- TAB 3: 最终运行时配置 -->
+          <div v-else-if="activeTab === 'config'" class="tab-pane">
+            <div class="pane-toolbar">
+              <span>完整 sing-box config.json (包含 Inbounds, Outbounds, Route, DNS, ClashAPI)</span>
+              <button class="btn-copy primary" @click="copyText(inspectData?.final_config_json || '', '完整 config.json')">
+                <BaseIcon name="Copy" :size="13" /> 复制完整配置 JSON
               </button>
             </div>
-            <div class="flex-1 overflow-auto p-4 font-mono text-xs text-cyan-300 leading-relaxed bg-[#0a0c10] select-text break-all whitespace-pre-wrap">
-              {{ inspectData?.final_config_json || "# 暂无配置 JSON" }}
-            </div>
+            <div class="raw-content cyan">{{ inspectData?.final_config_json || "# 暂无配置 JSON" }}</div>
           </div>
         </div>
 
-        <!-- 底部 Footer -->
-        <div class="flex items-center justify-between px-6 py-3.5 border-t border-white/5 bg-[#161922] text-xs text-white/40">
-          <div>
-            <span>提示: 该视图展示该订阅经解析清洗后的全部出站与最终由 sing-box 执行的配置详情。</span>
-          </div>
-          <button
-            class="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-medium transition-colors"
-            @click="closeModal"
-          >
-            关闭
-          </button>
+        <!-- 底部 -->
+        <div class="inspect-footer">
+          <span>提示: 该视图展示该订阅经解析清洗后的全部出站与最终由 sing-box 执行的配置详情。</span>
+          <button class="btn-copy" @click="closeModal">关闭</button>
         </div>
       </div>
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* 蒙层复用 modal-backdrop 语义，叠加全屏态 */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: var(--blur-panel);
+}
+
+.modal-backdrop.fullscreen {
+  padding: 0;
+}
+
+.inspect-modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 960px;
+  height: 86vh;
+  max-height: 860px;
+  overflow: hidden;
+  background: var(--layer-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-glow, 0 24px 64px rgba(0, 0, 0, 0.6));
+}
+
+.inspect-modal.fullscreen {
+  max-width: none;
+  max-height: none;
+  height: 100%;
+  width: 100%;
+  border-radius: 0;
+  border: none;
+}
+
+/* ---- 头部 ---- */
+.inspect-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--layer-2);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  color: var(--accent-cyan-vivid);
+  background: rgba(0, 242, 254, 0.08);
+  border: 1px solid rgba(0, 242, 254, 0.2);
+  border-radius: var(--radius-md);
+}
+
+.header-text {
+  min-width: 0;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count-chip {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+}
+
+.header-sub {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* 视图切换 tab（青色激活语义） */
+.tab-switch {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--layer-3, rgba(0, 0, 0, 0.3));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  color: var(--accent-cyan-vivid);
+  background: var(--accent-cyan-glow, rgba(0, 242, 254, 0.12));
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.icon-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.icon-btn.danger:hover {
+  color: var(--status-danger);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* ---- 主体 ---- */
+.inspect-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--layer-0);
+}
+
+.loading-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  background: rgba(10, 12, 18, 0.8);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.spin-ring {
+  width: 26px;
+  height: 26px;
+  border: 2px solid rgba(0, 242, 254, 0.25);
+  border-top-color: var(--accent-cyan-vivid);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.tab-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 20px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--layer-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pane-toolbar.with-search {
+  padding: 10px 20px;
+}
+
+.search-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 380px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+}
+
+.search-input {
+  width: 100%;
+  padding-left: 32px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.btn-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.btn-copy:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-copy.primary {
+  color: var(--accent-cyan-vivid);
+  background: var(--accent-cyan-glow, rgba(0, 242, 254, 0.12));
+  border-color: rgba(0, 242, 254, 0.3);
+}
+
+.btn-copy.primary:hover {
+  color: #fff;
+  background: rgba(0, 242, 254, 0.2);
+}
+
+.btn-copy.small {
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
+/* 原始内容/配置 JSON 展示区 */
+.raw-content {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--status-success);
+  background: rgba(10, 12, 16, 0.6);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.raw-content.cyan {
+  color: var(--accent-cyan-vivid);
+}
+
+/* ---- 节点列表 ---- */
+.nodes-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  user-select: text;
+}
+
+.node-row {
+  overflow: hidden;
+  background: var(--layer-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.node-row:hover {
+  border-color: var(--border-normal);
+}
+
+.node-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+.node-summary:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.summary-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.node-idx {
+  flex-shrink: 0;
+  width: 26px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* 协议徽章（token 化色板） */
+.badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  border-radius: var(--radius-xs);
+  border: 1px solid;
+}
+
+.badge-vmess { color: #60a5fa; background: rgba(96, 165, 250, 0.1); border-color: rgba(96, 165, 250, 0.25); }
+.badge-vless { color: #a78bfa; background: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.25); }
+.badge-ss { color: #34d399; background: rgba(52, 211, 153, 0.1); border-color: rgba(52, 211, 153, 0.25); }
+.badge-trojan { color: #fbbf24; background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.25); }
+.badge-hy2 { color: #fb7185; background: rgba(251, 113, 133, 0.1); border-color: rgba(251, 113, 133, 0.25); }
+.badge-other { color: var(--text-tertiary); background: rgba(255, 255, 255, 0.06); border-color: var(--border-subtle); }
+
+.node-tag {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.node-endpoint {
+  font-family: var(--font-mono);
+}
+
+.chev {
+  color: var(--text-tertiary);
+}
+
+.node-detail {
+  padding: 10px 14px;
+  background: rgba(10, 12, 16, 0.7);
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  color: var(--text-tertiary);
+}
+
+.json-block {
+  margin: 0;
+  padding: 8px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--status-success);
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.empty-pane {
+  padding: 48px 0;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* ---- 底部 ---- */
+.inspect-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--layer-2);
+  border-top: 1px solid var(--border-subtle);
+}
+</style>
