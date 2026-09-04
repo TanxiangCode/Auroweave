@@ -103,6 +103,12 @@ pub struct ConfigBuilder {
     /// 分组测速配置覆盖（group tag -> interval/tolerance/url），
     /// 由设置页 GroupEditModal 保存，仅覆盖显式设置的字段
     group_configs: std::collections::HashMap<String, crate::commands::settings::GroupTestConfig>,
+    /// 远端 DoH 服务器地址（DNS 设置页；空串回退默认 8.8.8.8）
+    dns_remote_doh: String,
+    /// DNS 查询超时秒数（1.14.0 optimistic/timeout；timeout<=0 用默认 5s）
+    dns_timeout_secs: u64,
+    /// 乐观 DNS 缓存开关（过期缓存立即返回 + 后台刷新）
+    dns_optimistic_cache: bool,
 }
 
 impl ConfigBuilder {
@@ -116,12 +122,23 @@ impl ConfigBuilder {
             geosite_cn_path: None,
             geoip_cn_path: None,
             group_configs: std::collections::HashMap::new(),
+            dns_remote_doh: String::new(),
+            dns_timeout_secs: 5,
+            dns_optimistic_cache: true,
         }
     }
 
     /// 设置局域网共享模式
     pub fn with_allow_lan(mut self, allow_lan: bool) -> Self {
         self.allow_lan = allow_lan;
+        self
+    }
+
+    /// 设置 DNS 配置（远端 DoH 地址 / 查询超时秒 / 乐观缓存开关）
+    pub fn with_dns(mut self, remote_doh: String, timeout_secs: u64, optimistic: bool) -> Self {
+        self.dns_remote_doh = remote_doh;
+        self.dns_timeout_secs = timeout_secs;
+        self.dns_optimistic_cache = optimistic;
         self
     }
 
@@ -392,7 +409,7 @@ impl ConfigBuilder {
                 "servers": [
                     {
                         "detour": "proxy",
-                        "server": "8.8.8.8",
+                        "server": if self.dns_remote_doh.trim().is_empty() { "8.8.8.8" } else { self.dns_remote_doh.trim() },
                         "tag": "remote",
                         "type": "https"
                     },
@@ -403,7 +420,10 @@ impl ConfigBuilder {
                 ],
                 "rules": dns_rules,
                 "final": "remote",
-                "strategy": "prefer_ipv4"
+                "strategy": "prefer_ipv4",
+                // 1.14.0：乐观缓存（过期立即返回+后台刷新）与查询超时（快速失败）
+                "optimistic": self.dns_optimistic_cache,
+                "timeout": format!("{}s", self.dns_timeout_secs.max(1))
             },
             "inbounds": [
                 {

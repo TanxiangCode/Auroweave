@@ -40,6 +40,11 @@ fn default_latency_test_url() -> String { "http://www.gstatic.com/generate_204".
 fn default_true() -> bool { true }
 fn default_false() -> bool { false }
 
+fn default_dns_remote_doh() -> String { "8.8.8.8".to_string() }
+fn default_dns_timeout_secs() -> u64 { 5 }
+fn default_tun_dns_mode() -> String { "hijack".to_string() }
+fn default_udp_nat_max() -> u64 { 0 }
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     pub theme: String,
@@ -72,6 +77,20 @@ pub struct AppSettings {
     pub speed_test_timeout_secs: u64,
     pub connection_timeout_secs: u64,
     pub enable_app_traffic_tracking: bool,
+
+    // DNS 配置（sing-box 1.14.0：optimistic 缓存 / timeout 快速失败 / 远端 DoH 服务器）
+    #[serde(default = "default_dns_remote_doh")]
+    pub dns_remote_doh: String,
+    #[serde(default = "default_dns_timeout_secs")]
+    pub dns_timeout_secs: u64,
+    #[serde(default = "default_true")]
+    pub dns_optimistic_cache: bool,
+
+    // TUN 进阶选项（sing-box 1.14.0：dns_mode 显式化 + UDP NAT 上限）
+    #[serde(default = "default_tun_dns_mode")]
+    pub tun_dns_mode: String,
+    #[serde(default = "default_udp_nat_max")]
+    pub udp_nat_max: u64,
 
     // 延迟测试并发控制与超时参数
     #[serde(default = "default_latency_test_concurrency")]
@@ -132,6 +151,13 @@ impl Default for AppSettings {
             speed_test_timeout_secs: 5,
             connection_timeout_secs: 15,
             enable_app_traffic_tracking: true,
+
+            // DNS 默认（sing-box 1.14.0）
+            dns_remote_doh: default_dns_remote_doh(),
+            dns_timeout_secs: default_dns_timeout_secs(),
+            dns_optimistic_cache: true,
+            tun_dns_mode: default_tun_dns_mode(),
+            udp_nat_max: default_udp_nat_max(),
 
             // 延迟测试配置
             latency_test_concurrency: 20,
@@ -227,8 +253,17 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
                 "address": ["172.19.0.1/30"],
                 "auto_route": true,
                 "strict_route": true,
-                "stack": "system"
+                "stack": "system",
+                // 1.14.0 起默认 dns_mode 即为 hijack（改写系统每接口 DNS 并劫持），
+                // 显式写入用户设置值，掌控 TUN 下系统 DNS 行为（hijack/disabled）
+                "dns_mode": settings.tun_dns_mode
             });
+            // UDP NAT 会话上限（0 = 内核按内存自适应默认 4096-16384；仅 TUN 进阶场景需要收紧）
+            if settings.udp_nat_max > 0 {
+                if let Some(obj) = tun_inbound.as_object_mut() {
+                    obj.insert("udp_nat_max".to_string(), serde_json::json!(settings.udp_nat_max));
+                }
+            }
             if !iface_name.is_empty() {
                 if let Some(obj) = tun_inbound.as_object_mut() {
                     obj.insert("interface_name".to_string(), serde_json::json!(iface_name));
@@ -356,14 +391,28 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         }
     }
 
-    // 5. 确保 dns 配置规范（校准 local DNS 为系统原生类型并清理错误的静态测速域名规则）
+    // 5. 确保 dns 配置规范（远端 DoH 服务器地址 / timeout / optimistic 缓存 + local 校准）
     if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
         if !dns.contains_key("strategy") {
             dns.insert("strategy".to_string(), serde_json::json!("prefer_ipv4"));
             modified = true;
         }
 
-        // 校准 local dns server 为 type: local，校准 remote dns server 为 type: https
+        // 1.14.0 optimistic 缓存：过期缓存立即返回 + 后台刷新（与 store_dns 持久化配合）
+        let optimistic = settings.dns_optimistic_cache;
+        if dns.get("optimistic").and_then(|v| v.as_bool()) != Some(optimistic) {
+            dns.insert("optimistic".to_string(), serde_json::json!(optimistic));
+            modified = true;
+        }
+        // 1.14.0 DNS 查询超时：上游死亡快速失败，不再拖默认 10s
+        let timeout = format!("{}s", settings.dns_timeout_secs.max(1));
+        if dns.get("timeout").and_then(|v| v.as_str()) != Some(timeout.as_str()) {
+            dns.insert("timeout".to_string(), serde_json::json!(timeout));
+            modified = true;
+        }
+
+        // 校准 local dns server 为 type: local，remote dns server 的 DoH 地址跟随用户设置
+        let remote_doh = settings.dns_remote_doh.trim().to_string();
         if let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for srv in servers.iter_mut() {
                 if srv.get("tag").and_then(|t| t.as_str()) == Some("local") {
@@ -375,11 +424,12 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
                         modified = true;
                     }
                 } else if srv.get("tag").and_then(|t| t.as_str()) == Some("remote") {
-                    if srv.get("type").and_then(|t| t.as_str()) != Some("https") {
+                    if srv.get("type").and_then(|t| t.as_str()) != Some("https")
+                        || !remote_doh.is_empty() && srv.get("server").and_then(|s| s.as_str()) != Some(remote_doh.as_str()) {
                         *srv = serde_json::json!({
                             "tag": "remote",
                             "type": "https",
-                            "server": "8.8.8.8",
+                            "server": if remote_doh.is_empty() { "8.8.8.8".to_string() } else { remote_doh.clone() },
                             "detour": "proxy"
                         });
                         modified = true;
@@ -541,6 +591,14 @@ pub async fn settings_save(app_handle: tauri::AppHandle, patch: serde_json::Valu
         || old_settings.proxy_mode != new_settings.proxy_mode
         || old_settings.tun_enabled != new_settings.tun_enabled
         || old_settings.core.run_mode != new_settings.core.run_mode;
+
+    // 开机自启：字段变化时同步系统注册（LaunchAgent），失败不阻塞设置保存
+    if old_settings.auto_start != new_settings.auto_start {
+        if let Err(e) = crate::system::autostart::sync_autostart(&app_handle, new_settings.auto_start) {
+            log::error!("[settings] {}", e);
+            return ApiResponse::err(e, 500);
+        }
+    }
 
     if core_changed {
         log::info!("[settings] 检测到内核相关字段变化，触发配置重载和内核重启");

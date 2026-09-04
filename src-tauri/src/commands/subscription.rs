@@ -397,7 +397,8 @@ async fn build_and_apply_config(
         .with_ports(mixed_port, clash_api_port)
         .with_allow_lan(settings.allow_lan)
         .with_local_rule_sets(geosite_cn_path, geoip_cn_path)
-        .with_group_configs(settings.group_configs.clone());
+        .with_group_configs(settings.group_configs.clone())
+        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache);
     let config_json = config_builder.build()?;
 
 
@@ -1007,7 +1008,8 @@ pub async fn subscription_inspect(
     let config_builder = ConfigBuilder::new(filtered_outbounds.clone())
         .with_ports(mixed_port, clash_api_port)
         .with_allow_lan(settings.allow_lan)
-        .with_group_configs(settings.group_configs.clone());
+        .with_group_configs(settings.group_configs.clone())
+        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache);
     let final_config = config_builder.build().unwrap_or_default();
     let final_config_json = serde_json::to_string_pretty(&final_config).unwrap_or_default();
 
