@@ -40,6 +40,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   latency_test_concurrency: 20,
   latency_test_timeout_ms: 3000,
   latency_test_url: "http://www.gstatic.com/generate_204",
+
+  // DNS / TUN 进阶（sing-box 1.14.0）
+  dns_remote_doh: "8.8.8.8",
+  dns_timeout_secs: 5,
+  dns_optimistic_cache: true,
+  tun_dns_mode: "hijack",
+  udp_nat_max: 0,
   core: {
 
     runMode: "local",

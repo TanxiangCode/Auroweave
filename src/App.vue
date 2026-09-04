@@ -12,11 +12,15 @@ import SvgIcon from "@/components/common/SvgIcon.vue";
 import CommandPalette from "@/components/command-palette/CommandPalette.vue";
 import Toast from "@/components/common/Toast.vue";
 import { WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@/constants";
+import { useGlobalHotkey } from "@/composables/useGlobalHotkey";
 
 const settingsStore = useSettingsStore();
 const route = useRoute();
 const router = useRouter();
 const isMac = ref(false);
+
+/** 命令框组件引用：全局热键触发时呼出 */
+const paletteRef = ref<InstanceType<typeof CommandPalette> | null>(null);
 
 const showBack = computed(() => {
   return route.path !== "/" && route.path !== "/dashboard";
@@ -29,6 +33,25 @@ const routeTitle = computed(() => {
 function goBack() {
   router.back();
 }
+
+/**
+ * 全局热键回调：确保窗口可见并置前，然后呼出命令框。
+ * 窗口可能被隐藏到托盘（minimize_to_tray / start_minimized），必须先恢复。
+ */
+async function onGlobalHotkeyTriggered() {
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
+    await appWindow.show();
+    await appWindow.setFocus();
+  } catch {
+    // 浏览器预览模式跳过窗口操作
+  }
+  paletteRef.value?.open();
+}
+
+// 注册系统级全局热键（设置加载完成后按 command_palette_hotkey 生效）
+useGlobalHotkey(onGlobalHotkeyTriggered);
 
 onMounted(async () => {
   isMac.value = navigator.userAgent.toLowerCase().includes("mac");
@@ -77,7 +100,7 @@ onMounted(async () => {
     </main>
 
     <!-- 全局 Spotlight 快捷命令框 -->
-    <CommandPalette />
+    <CommandPalette ref="paletteRef" />
 
     <!-- 全局消息 Toast 提示框 -->
     <Toast />

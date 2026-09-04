@@ -5,19 +5,60 @@
       <!-- 远端加密 DNS -->
       <div class="setting-item">
         <div class="item-label">
-          <span>远端加密 DNS (Remote DoH) <span class="readonly-tag">只读</span></span>
-          <span class="sub-label">海外加密解析，防 DNS 污染 (默认: https://1.1.1.1/dns-query)</span>
+          <span>远端加密 DNS (Remote DoH)</span>
+          <span class="sub-label">代理侧加密解析，防 DNS 污染（如 8.8.8.8 / 1.1.1.1），保存后重启内核生效</span>
         </div>
-        <input type="text" value="https://1.1.1.1/dns-query" class="text-input readonly" readonly tabindex="-1" />
+        <input
+          v-model="localRemoteDoh"
+          type="text"
+          class="text-input editable"
+          placeholder="8.8.8.8"
+          @blur="saveRemoteDoh"
+          @keyup.enter="saveRemoteDoh"
+        />
+      </div>
+
+      <!-- DNS 查询超时 -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>DNS 查询超时 (Timeout)</span>
+          <span class="sub-label">sing-box 1.14 新增：上游无响应快速失败，不再拖默认 10 秒（推荐 3~10 秒）</span>
+        </div>
+        <div class="input-with-unit">
+          <input
+            v-model.number="localDnsTimeout"
+            type="number"
+            min="1"
+            max="60"
+            class="text-input number-input editable"
+            @blur="saveDnsTimeout"
+            @keyup.enter="saveDnsTimeout"
+          />
+          <span class="unit-label">s</span>
+        </div>
+      </div>
+
+      <!-- 乐观 DNS 缓存 -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>乐观 DNS 缓存 (Optimistic Cache)</span>
+          <span class="sub-label">sing-box 1.14 新增：过期缓存立即返回 + 后台刷新，重复查询零等待；配合 DNS 持久化冷启动秒解析</span>
+        </div>
+        <input
+          type="checkbox"
+          v-model="localOptimistic"
+          class="switch"
+          @change="toggleOptimistic"
+        />
       </div>
 
       <!-- 本地直连 DNS -->
       <div class="setting-item">
         <div class="item-label">
-          <span>本地直连 DNS (Local UDP) <span class="readonly-tag">只读</span></span>
-          <span class="sub-label">国内零延迟解析 (默认: udp://223.5.5.5)</span>
+          <span>本地直连 DNS (Local)</span>
+          <span class="sub-label">type: local —— 走 macOS 系统原生解析器，自动跟随系统 DNS 配置</span>
         </div>
-        <input type="text" value="223.5.5.5" class="text-input readonly" readonly tabindex="-1" />
+        <input type="text" value="system (type: local)" class="text-input readonly" readonly tabindex="-1" />
       </div>
 
       <!-- 延迟测试目标 URL -->
@@ -107,20 +148,58 @@ const localTestUrl = ref(settingsStore.settings.latency_test_url || DEFAULT_LATE
 const localConcurrency = ref(settingsStore.settings.latency_test_concurrency || 20);
 const localTimeoutMs = ref(settingsStore.settings.latency_test_timeout_ms || 3000);
 
-// 精确监听三个相关字段（数组形式 getter），避免深度 watch 整个 settings
+// DNS 配置（sing-box 1.14.0）
+const localRemoteDoh = ref(settingsStore.settings.dns_remote_doh || "8.8.8.8");
+const localDnsTimeout = ref(settingsStore.settings.dns_timeout_secs || 5);
+const localOptimistic = ref(settingsStore.settings.dns_optimistic_cache !== false);
+
+// 精确监听相关字段（数组形式 getter），避免深度 watch 整个 settings
 // 在无关字段变化时触发无意义的重置
 watch(
   () => [
     settingsStore.settings.latency_test_url,
     settingsStore.settings.latency_test_concurrency,
     settingsStore.settings.latency_test_timeout_ms,
+    settingsStore.settings.dns_remote_doh,
+    settingsStore.settings.dns_timeout_secs,
+    settingsStore.settings.dns_optimistic_cache,
   ] as const,
-  ([url, concurrency, timeoutMs]) => {
+  ([url, concurrency, timeoutMs, doh, dnsTimeout, optimistic]) => {
     localTestUrl.value = url || DEFAULT_LATENCY_TEST_URL;
     localConcurrency.value = concurrency || 20;
     localTimeoutMs.value = timeoutMs || 3000;
+    localRemoteDoh.value = doh || "8.8.8.8";
+    localDnsTimeout.value = dnsTimeout || 5;
+    localOptimistic.value = optimistic !== false;
   }
 );
+
+async function saveRemoteDoh() {
+  const val = localRemoteDoh.value.trim() || "8.8.8.8";
+  localRemoteDoh.value = val;
+  const res = await settingsStore.updateSettings({ dns_remote_doh: val });
+  if (res.success) {
+    toast.success("远端 DoH 已更新", "下次重启内核后生效");
+  }
+}
+
+async function saveDnsTimeout() {
+  const val = Math.max(1, Math.min(60, Math.floor(localDnsTimeout.value || 5)));
+  localDnsTimeout.value = val;
+  const res = await settingsStore.updateSettings({ dns_timeout_secs: val });
+  if (res.success) {
+    toast.success("DNS 查询超时已更新", `当前超时: ${val}s`);
+  }
+}
+
+async function toggleOptimistic() {
+  // v-model 已翻转 localOptimistic，这里只负责持久化
+  const val = localOptimistic.value;
+  const res = await settingsStore.updateSettings({ dns_optimistic_cache: val });
+  if (res.success) {
+    toast.success("乐观 DNS 缓存已" + (val ? "开启" : "关闭"), "下次重启内核后生效");
+  }
+}
 
 async function saveLatencyUrl() {
   const url = localTestUrl.value.trim() || DEFAULT_LATENCY_TEST_URL;

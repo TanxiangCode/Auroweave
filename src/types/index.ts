@@ -267,6 +267,19 @@ export interface AppSettings {
   connection_timeout_secs: number;
   enable_app_traffic_tracking: boolean;
 
+  // DNS 配置（sing-box 1.14.0）
+  /** 远端 DoH 服务器地址（type: https 的 server 字段） */
+  dns_remote_doh?: string;
+  /** DNS 查询超时秒数（内核 dns.timeout） */
+  dns_timeout_secs?: number;
+  /** 乐观 DNS 缓存开关（过期缓存立即返回 + 后台刷新） */
+  dns_optimistic_cache?: boolean;
+  // TUN 进阶（sing-box 1.14.0）
+  /** TUN DNS 模式：hijack（默认劫持接口 DNS）/ disabled（不接管系统 DNS） */
+  tun_dns_mode?: string;
+  /** UDP NAT 会话上限，0 = 内核按内存自适应 */
+  udp_nat_max?: number;
+
   minimize_to_tray?: boolean;
   start_minimized?: boolean;
   hide_dock_on_close?: boolean;
