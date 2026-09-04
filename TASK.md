@@ -1,6 +1,6 @@
 # TASK.md — Auroweave 主任务追踪
 
-> 最后更新：2026-07-16
+> 最后更新：2026-09-05
 > 各模块详细计划见 [`plans/`](plans/) 目录
 
 ---
@@ -21,6 +21,7 @@
 | J | Routing · 拓扑画布 | 🔵 低优先级 | M7 | [plan-J-topology.md](plans/plan-J-topology.md) |
 | K | 视觉设计系统 | ✅ 已完成 | M2 | [plan-K-visual.md](plans/plan-K-visual.md) |
 | L | 数据与安全架构升级 | ✅ 已完成 | M6 | 流量持久化与 IPC Token 加密 |
+| M | 迭代路线图（打磨与深化） | ⏳ 待开始 | M8+ | [plan-M-iteration-roadmap.md](plans/plan-M-iteration-roadmap.md) |
 
 **图例**：✅ 已完成 / 🔄 进行中 / ⏳ 待开始 / 🔵 低优先级（可选）/ ❌ 阻塞
 
@@ -55,6 +56,25 @@
 ### ✅ M6 — 数据与安全架构升级（已完成 2026-07-16）
 - **目标**：实现核心流量追踪的持久化，应用程序流量耗费统计，以及跨端通信的安全加固。
 - **交付物**：基于 `rusqlite` 的 SQLite 本地数据库持久化引擎（`traffic_hourly`与应用表）、`traffic_monitor.rs` 独立循环采集进程、AES-GCM 加密的守护进程令牌（`ipc_token.bin`），以及真实流量驱动的 `StatsView` 动态柱状图和排行榜。
+
+### 🔄 M7 — sing-box 1.14.0 升级与专项审查（2026-09-03 ~ 09-05 已交付，收尾中）
+- **目标**：升级 sing-box 至 1.14.0 正式版并消化其新能力；专项审查 UI 一致性与全链路性能。
+- **交付物**：协议面补齐（TUIC/Snell/hysteria/multiplex/端口跳跃）、DNS/TUN 1.14 能力落地
+  （optimistic/timeout/neighbor_domain/dns_mode）、P0 缺口清偿（多订阅聚合/到期通知/自启/全局热键/
+  mDNS/规则集强更/测速历史/日志落盘/置顶收藏/代理守护/连通检测）、模式审计修复（DNS 模式门控/
+  PATCH 假成功防护）、性能优化（内核拉起 1.5s→230ms 实测）、UI bug 修复（InspectModal 裸奔/
+  拓扑 now 字段）与三线视觉统一（卡片/开关/Tab）。
+- **审查背书**：UI 一致性 18 项发现、性能 12 项发现、1.14 能力分级清单、16 项性能健康确认。
+
+### ⏳ M8 — 打磨冲刺（M1 一致性长尾清偿，见 plan-M-iteration-roadmap.md）
+- **目标**：UI 一致性审查剩余机械项清偿（强调色 token 化 79 处/页面头部统一/空态组件抽取）。
+- **验收**：grep 硬编码色归零、双主题目检通过、formatBytes 单源化。
+
+### ⏳ M9 — 性能深水区（M2 虚拟滚动/转换缓存/客户端单例/测速细节，见 plan-M-iteration-roadmap.md）
+- **目标**：大列表虚拟化、语义转换缓存、ClashAPI 快照合并、测速链路微优化。
+
+### 🔵 M10+ — 深水区能力（M3 各项独立立项，见 plan-M-iteration-roadmap.md）
+- 规则集远程订阅化 / DNS evaluate 体系 / 配置编辑器（JSON Schema）/ 订阅面板收敛 / i18n（决策点）
 
 ---
 
