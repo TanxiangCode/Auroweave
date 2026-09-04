@@ -63,9 +63,14 @@ const totalNodeCount = computed(() => {
   return subscriptions.value.reduce((acc, cur) => acc + (cur.node_count || 0), 0);
 });
 
-/** 当前活跃订阅 */
+/** 当前活跃订阅（多订阅聚合：取第一个活跃项用于标题展示） */
 const activeSub = computed(() => {
   return subscriptions.value.find((s) => s.is_active) || null;
+});
+
+/** 活跃订阅数量（多订阅聚合语义） */
+const activeCount = computed(() => {
+  return subscriptions.value.filter((s) => s.is_active).length;
 });
 
 /** 格式化更新时间 */
@@ -112,15 +117,21 @@ function getSourceBadge(sub: Subscription) {
   return { label: (sub.format || "URL").toUpperCase(), icon: "Globe" };
 }
 
-/** 切换活跃订阅 */
+/** 切换订阅聚合开关（多订阅语义：已激活→移出聚合，未激活→加入聚合） */
 async function handleActivate(id: string) {
+  const target = subscriptions.value.find((s) => s.id === id);
+  const wasActive = target?.is_active ?? false;
   markOperating(id);
   try {
     const res = await subStore.activateSub(id);
     if (res.success) {
-      toast.success("已切换订阅", "核心已完成配置热重载");
+      if (wasActive) {
+        toast.success("已移出聚合", "节点列表已重建，其他活跃订阅不受影响");
+      } else {
+        toast.success("已加入聚合", `当前共 ${activeCount.value} 个订阅参与节点聚合`);
+      }
     } else {
-      toast.error("切换失败", res.error || "配置应用异常");
+      toast.error(wasActive ? "移出失败" : "加入失败", res.error || "配置应用异常");
     }
   } finally {
     unmarkOperating(id);
@@ -357,16 +368,26 @@ async function handleDelete(sub: Subscription) {
             </div>
 
             <div class="action-buttons">
-              <!-- 切换激活按钮 -->
+              <!-- 聚合开关按钮（多订阅：未激活→加入聚合，已激活→移出聚合） -->
               <button
                 v-if="!sub.is_active"
                 class="btn-card-action activate"
                 :disabled="operatingIds.has(sub.id)"
                 @click="handleActivate(sub.id)"
-                title="切换为当前主力订阅"
+                title="加入节点聚合（与其他活跃订阅合并生成配置）"
               >
                 <BaseIcon name="Check" :size="13" />
-                <span>应用</span>
+                <span>加入聚合</span>
+              </button>
+              <button
+                v-else
+                class="btn-card-action deactivate"
+                :disabled="operatingIds.has(sub.id)"
+                @click="handleActivate(sub.id)"
+                title="从节点聚合中移除（其他活跃订阅保留）"
+              >
+                <BaseIcon name="X" :size="13" />
+                <span>移出聚合</span>
               </button>
 
               <!-- 刷新按钮 (仅远程订阅支持刷新) -->
@@ -828,6 +849,19 @@ async function handleDelete(sub: Subscription) {
 .btn-card-action.activate:hover:not(:disabled) {
   background: rgba(0, 242, 254, 0.2);
   color: #fff;
+}
+
+/* 移出聚合按钮：弱化的红调，区别于删除（红色实感） */
+.btn-card-action.deactivate {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--text-secondary);
+}
+
+.btn-card-action.deactivate:hover:not(:disabled) {
+  background: rgba(255, 77, 79, 0.08);
+  border-color: rgba(255, 77, 79, 0.25);
+  color: #ff8f91;
 }
 
 .btn-card-action.delete:hover:not(:disabled) {

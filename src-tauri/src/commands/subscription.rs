@@ -88,7 +88,8 @@ fn sanitize_subscription_url(url: &str) -> String {
 }
 
 /// 从磁盘读取所有已保存的订阅（读侧不加持久化锁：只读单文件 JSON，容忍瞬间值）
-fn load_subscriptions() -> Vec<Subscription> {
+/// pub：system::subscription_alert 告警轮询需要读取订阅 userinfo
+pub fn load_subscriptions() -> Vec<Subscription> {
     let path = get_subscriptions_path();
     if !path.exists() {
         return Vec::new();
@@ -304,18 +305,20 @@ fn collect_active_outbounds() -> Result<Vec<crate::core::parser::ParsedOutbound>
 /// 下载 rule-set .srs 文件到本地缓存目录
 ///
 /// 缓存自愈策略：
-/// - 已存在且大小 > 100 字节 → 直接使用（正常 .srs 不会小于 100 字节，避免半截损坏缓存被永久复用）
-/// - 已存在但过小/缺失 → 下载到 .tmp 临时文件，成功后再 rename 原子替换
+/// - force=false：已存在且大小 > 100 字节 → 直接使用（正常 .srs 不会小于 100 字节，避免半截损坏缓存被永久复用）
+/// - 已存在但过小/缺失/force=true → 下载到 .tmp 临时文件，成功后再 rename 原子替换
 /// - 下载失败 → 返回 None（配置降级为无 rule-set），损坏的旧缓存保留待下次自愈
-async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str) -> Option<String> {
+async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str, force: bool) -> Option<String> {
     let local_path = config_dir.join(format!("{}.srs", name));
 
-    // 缓存有效则直接使用（基本大小校验，防半截文件永久复用）
-    if let Ok(meta) = std::fs::metadata(&local_path) {
-        if meta.len() > 100 {
-            return Some(local_path.to_string_lossy().to_string());
+    // 缓存有效且非强制刷新则直接使用（基本大小校验，防半截文件永久复用）
+    if !force {
+        if let Ok(meta) = std::fs::metadata(&local_path) {
+            if meta.len() > 100 {
+                return Some(local_path.to_string_lossy().to_string());
+            }
+            log::warn!("[subscription] rule-set {} 缓存疑似损坏 ({} 字节)，重新下载", name, meta.len());
         }
-        log::warn!("[subscription] rule-set {} 缓存疑似损坏 ({} 字节)，重新下载", name, meta.len());
     }
 
     log::info!("[subscription] 下载 rule-set: {} from {}", name, url);
@@ -364,6 +367,95 @@ async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str) 
     }
 }
 
+/// 手动强制更新 geosite-cn / geoip-cn 规则集（绕过缓存下载最新 .srs），
+/// 成功后重建 config.json 让新规则集立即生效。
+/// 返回 (geosite_ok, geoip_ok, geosite_size, geoip_size)
+#[tauri::command]
+pub async fn ruleset_force_update(app_handle: AppHandle) -> ApiResponse<(bool, bool, u64, u64)> {
+    let config_dir = crate::get_config_dir();
+    let _ = fs::create_dir_all(&config_dir);
+
+    let geosite = download_rule_set(
+        &config_dir,
+        "geosite-cn",
+        "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
+        true,
+    )
+    .await;
+    let geoip = download_rule_set(
+        &config_dir,
+        "geoip-cn",
+        "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
+        true,
+    )
+    .await;
+
+    let geosite_ok = geosite.is_some();
+    let geoip_ok = geoip.is_some();
+    let size = |p: &Option<String>| {
+        p.as_ref()
+            .and_then(|s| std::fs::metadata(s).ok())
+            .map(|m| m.len())
+            .unwrap_or(0)
+    };
+    let geosite_size = size(&geosite);
+    let geoip_size = size(&geoip);
+
+    if !geosite_ok || !geoip_ok {
+        log::warn!(
+            "[subscription] 规则集更新不完整: geosite={} geoip={}（旧缓存仍有效）",
+            geosite_ok, geoip_ok
+        );
+    }
+
+    // 两个都成功或至少一个成功时重建配置（失败的规则集返回 None 会降级为无该规则——
+    // 与激活订阅路径同语义；部分失败时仍重建，用刚下载成功的那个）
+    if geosite_ok || geoip_ok {
+        if let Err(e) = crate::commands::settings::rebuild_config_from_settings(&app_handle) {
+            log::warn!("[subscription] 规则集更新后重建配置失败: {}", e);
+        }
+    }
+
+    ApiResponse::ok((geosite_ok, geoip_ok, geosite_size, geoip_size))
+}
+
+/// 查询本地规则集缓存状态（文件大小 + 修改时间，供前端展示）
+#[derive(Debug, Serialize)]
+pub struct RuleSetStatus {
+    pub geosite_exists: bool,
+    pub geosite_size: u64,
+    pub geosite_modified: Option<i64>,
+    pub geoip_exists: bool,
+    pub geoip_size: u64,
+    pub geoip_modified: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn ruleset_get_status() -> ApiResponse<RuleSetStatus> {
+    let config_dir = crate::get_config_dir();
+    let stat = |name: &str| -> (bool, u64, Option<i64>) {
+        let path = config_dir.join(format!("{}.srs", name));
+        match std::fs::metadata(&path) {
+            Ok(m) => (
+                true,
+                m.len(),
+                m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64),
+            ),
+            Err(_) => (false, 0, None),
+        }
+    };
+    let (g_exists, g_size, g_mtime) = stat("geosite-cn");
+    let (i_exists, i_size, i_mtime) = stat("geoip-cn");
+    ApiResponse::ok(RuleSetStatus {
+        geosite_exists: g_exists,
+        geosite_size: g_size,
+        geosite_modified: g_mtime,
+        geoip_exists: i_exists,
+        geoip_size: i_size,
+        geoip_modified: i_mtime,
+    })
+}
+
 /// 内部核心函数：根据 outbounds 生成 config.json 并热重载/拉起 sing-box
 async fn build_and_apply_config(
     app_handle: &AppHandle,
@@ -384,11 +476,13 @@ async fn build_and_apply_config(
         &config_dir,
         "geosite-cn",
         "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
+        false,
     ).await;
     let geoip_cn_path = download_rule_set(
         &config_dir,
         "geoip-cn",
         "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
+        false,
     ).await;
 
     let settings = crate::commands::settings::settings_get_internal(app_handle);
@@ -711,16 +805,30 @@ pub async fn subscription_refresh(
     // 实际配置使用所有活跃订阅的聚合结果
     let own_outbounds = apply_filter_rules(outbounds, sub.filter_rule.as_ref());
 
-    // 标记为活跃后聚合所有活跃订阅
+    // 刷新只影响本订阅的活跃状态，不动其他订阅（多订阅聚合语义）：
+    // 被刷新的订阅保持其原有 is_active 值
     for s in all_subs.iter_mut() {
         if s.id == id {
-            s.is_active = true;
-        } else {
-            s.is_active = false;
+            s.last_updated = Some(chrono::Utc::now().timestamp_millis());
+            s.format = format_str.clone();
+            if user_info.is_some() {
+                s.user_info = user_info.clone();
+            }
         }
     }
     if let Err(e) = save_subscriptions(&all_subs) {
         log::warn!("[subscription] 预写订阅列表失败: {}", e);
+    }
+
+    // 全部活跃订阅为空时（该订阅本来就不活跃且无其他活跃订阅），聚合会失败——
+    // 此时自动把本订阅置为活跃，保证刷新后至少有可用配置
+    if !all_subs.iter().any(|s| s.is_active) {
+        for s in all_subs.iter_mut() {
+            if s.id == id {
+                s.is_active = true;
+            }
+        }
+        let _ = save_subscriptions(&all_subs);
     }
 
     let aggregated = match collect_active_outbounds() {
@@ -740,12 +848,9 @@ pub async fn subscription_refresh(
             s.last_updated = Some(chrono::Utc::now().timestamp_millis());
             s.node_count = Some(node_count);
             s.format = format_str.clone();
-            s.is_active = true;
             if user_info.is_some() {
                 s.user_info = user_info.clone();
             }
-        } else {
-            s.is_active = false;
         }
     }
     if let Err(e) = save_subscriptions(&all_subs) {
@@ -762,7 +867,11 @@ pub async fn subscription_refresh(
     Ok(ApiResponse::ok(updated))
 }
 
-/// 切换（激活）订阅 — 重新拉取目标订阅 URL 并替换当前运行配置
+/// 切换订阅聚合开关 — 多订阅同时启用语义
+///
+/// - 目标订阅未激活：重新拉取并加入聚合（其他活跃订阅保留）
+/// - 目标订阅已激活：从聚合中移除（toggle）。移除后若无任何活跃订阅，
+///   拉取结果仍落盘缓存但返回提示，不再切换到其他订阅
 #[tauri::command]
 pub async fn subscription_activate(
     app_handle: AppHandle,
@@ -772,7 +881,7 @@ pub async fn subscription_activate(
     if let Err(e) = validate_subscription_id(&id) {
         return Ok(ApiResponse::err(e, 400));
     }
-    log::info!("[subscription] 激活/切换订阅: {}", id);
+    log::info!("[subscription] 切换订阅聚合开关: {}", id);
 
     let mut all_subs = load_subscriptions();
     let sub = match all_subs.iter().find(|s| s.id == id) {
@@ -780,7 +889,45 @@ pub async fn subscription_activate(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    // 本地文件订阅不通过 HTTP 拉取，直接读取本地文件内容
+    // toggle：当前已激活 → 本次操作为移除聚合
+    let toggling_off = sub.is_active;
+
+    if toggling_off {
+        // 移除聚合：仅翻转状态，无需拉取
+        for s in all_subs.iter_mut() {
+            if s.id == id {
+                s.is_active = false;
+                s.last_updated = Some(chrono::Utc::now().timestamp_millis());
+            }
+        }
+
+        // 仍有其他活跃订阅 → 重建聚合配置；全部移除 → 保留旧配置不动
+        // （无法生成无节点配置，sing-box 会拒载空 outbounds）
+        if all_subs.iter().any(|s| s.is_active) {
+            if let Err(e) = save_subscriptions(&all_subs) {
+                log::warn!("[subscription] 预写订阅列表失败: {}", e);
+            }
+            let aggregated = match collect_active_outbounds() {
+                Ok(a) => a,
+                Err(e) => {
+                    log::error!("[subscription] 聚合活跃订阅失败: {}", e);
+                    return Ok(ApiResponse::err(e, 500));
+                }
+            };
+            if let Err(e) = build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
+                return Ok(ApiResponse::err(e, 500));
+            }
+        }
+
+        if let Err(e) = save_subscriptions(&all_subs) {
+            log::error!("[subscription] 移除聚合后持久化失败: {}", e);
+            return Ok(ApiResponse::err(format!("已移除聚合但持久化失败: {}", e), 500));
+        }
+        let updated = all_subs.iter().find(|s| s.id == id).cloned().unwrap_or(sub);
+        return Ok(ApiResponse::ok(updated));
+    }
+
+    // ---- 加入聚合：拉取最新内容（本地文件源直读） ----
     let (format, outbounds, user_info, raw_text) = if is_local_file_source(&sub) {
         let content = match read_local_subscription_file(&sub) {
             Ok(c) => c,
@@ -816,15 +963,13 @@ pub async fn subscription_activate(
     }
     .to_string();
 
-    // 当前订阅的过滤结果仅用于本订阅统计；配置使用所有活跃订阅聚合结果
+    // 拉取结果仅用于本订阅统计；配置使用所有活跃订阅聚合结果
     let _ = apply_filter_rules(outbounds, sub.filter_rule.as_ref());
 
-    // 标记为活跃后聚合所有活跃订阅
+    // 仅置活本订阅，其他订阅的活跃状态不动（多订阅聚合）
     for s in all_subs.iter_mut() {
         if s.id == id {
             s.is_active = true;
-        } else {
-            s.is_active = false;
         }
     }
     if let Err(e) = save_subscriptions(&all_subs) {
@@ -855,8 +1000,6 @@ pub async fn subscription_activate(
             if user_info.is_some() {
                 s.user_info = user_info.clone();
             }
-        } else {
-            s.is_active = false;
         }
     }
     if let Err(e) = save_subscriptions(&all_subs) {
@@ -1108,8 +1251,13 @@ pub fn apply_filter_rules(
 }
 
 /// 启动后台订阅自动静默更新调度器
+/// 同拍附带订阅到期/流量告警检查（去重持久化，不重复轰炸）
 pub fn start_auto_update_scheduler(app_handle: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        // 启动后 2 分钟做首次告警检查（避开启动高峰，给订阅加载留时间）
+        tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
+        crate::system::subscription_alert::check_subscription_alerts();
+
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1800)); // 每 30 分钟轮询一次
         loop {
             interval.tick().await;
@@ -1132,6 +1280,9 @@ pub fn start_auto_update_scheduler(app_handle: AppHandle) {
                     }
                 }
             }
+
+            // 订阅到期/流量告警（内部去重，仅在跨过阈值时弹一次）
+            crate::system::subscription_alert::check_subscription_alerts();
         }
     });
 }
