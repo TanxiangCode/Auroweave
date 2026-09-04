@@ -85,6 +85,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // 开机自启：macOS 走 LaunchAgent（login item），初始状态由 setup 阶段按设置同步
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::proxy::proxy_get_groups,
             commands::proxy::proxy_get_group_nodes,
@@ -159,6 +164,12 @@ pub fn run() {
             // 初始化系统托盘与右键快捷菜单
             if let Err(e) = system::tray::setup_tray(app.handle()) {
                 log::error!("[tray] 初始化托盘失败: {}", e);
+            }
+
+            // 开机自启状态校准：settings.auto_start 与系统注册（LaunchAgent）对齐
+            let settings_for_autostart = commands::settings::settings_get_internal(app.handle());
+            if let Err(e) = system::autostart::sync_autostart(app.handle(), settings_for_autostart.auto_start) {
+                log::error!("[autostart] 启动时同步自启状态失败: {}", e);
             }
 
             // 监听窗口关闭事件：拦截右上角 X，改为最小化至托盘
