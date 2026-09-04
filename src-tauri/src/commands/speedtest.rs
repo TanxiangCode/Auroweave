@@ -78,6 +78,8 @@ pub async fn speedtest_run_latency(
     let mut results = HashMap::new();
     while let Some(res) = join_set.join_next().await {
         if let Ok((tag, delay)) = res {
+            // 持久化延迟历史（0=失败也留痕，可看节点存活趋势）
+            crate::core::stats_db::add_speedtest_record(&tag, 0, 0, Some(delay as u64));
             results.insert(tag, delay);
         }
     }
@@ -152,6 +154,11 @@ pub async fn speedtest_run_single(
 
     let result = run_single_throughput_test_with_url(&node_tag, 5, port, &test_url).await;
 
+    // 持久化单节点测速历史
+    if let Ok(ref res) = result {
+        crate::core::stats_db::add_speedtest_record(&node_tag, res.download_bps, res.upload_bps, None);
+    }
+
     // 还原用户原选中节点
     if let Some((g_tag, original_now)) = restored {
         if !original_now.is_empty() {
@@ -203,4 +210,17 @@ pub async fn speedtest_get_results(
     scheduler: State<'_, Arc<SpeedTestScheduler>>,
 ) -> Result<ApiResponse<HashMap<String, ThroughputResult>>, AppError> {
     Ok(ApiResponse::ok(scheduler.get_results()))
+}
+
+/// 查询节点测速历史（SQLite 持久化，时间倒序）
+#[tauri::command]
+pub async fn speedtest_get_history(
+    node_tag: String,
+    limit: Option<u32>,
+) -> Result<ApiResponse<Vec<crate::core::stats_db::SpeedtestRecord>>, AppError> {
+    let limit = limit.unwrap_or(20);
+    match crate::core::stats_db::get_speedtest_history(&node_tag, limit) {
+        Ok(records) => Ok(ApiResponse::ok(records)),
+        Err(e) => Ok(ApiResponse::err(format!("查询测速历史失败: {}", e), 500)),
+    }
 }

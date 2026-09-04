@@ -51,6 +51,23 @@ fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // 节点测速历史表（单测结果按节点+时间留痕，重启不丢）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS speedtest_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_tag TEXT NOT NULL,
+            download_bps INTEGER NOT NULL DEFAULT 0,
+            upload_bps INTEGER NOT NULL DEFAULT 0,
+            delay_ms INTEGER, /* null=未测延迟 */
+            tested_at INTEGER NOT NULL /* 毫秒时间戳 */
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_speedtest_node_time ON speedtest_history(node_tag, tested_at DESC)",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -108,8 +125,64 @@ pub fn clear_all_stats() -> Result<()> {
             "BEGIN;
              DELETE FROM traffic_hourly;
              DELETE FROM app_traffic_hourly;
+             DELETE FROM speedtest_history;
              COMMIT;",
         )?;
         Ok(())
+    })
+}
+
+/// 测速历史记录（持久化后的查询视图）
+#[derive(Debug, serde::Serialize)]
+pub struct SpeedtestRecord {
+    pub node_tag: String,
+    pub download_bps: u64,
+    pub upload_bps: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<u64>,
+    pub tested_at: i64,
+}
+
+/// 写入一条测速记录（吞吐或延迟任一即可；失败仅记日志）
+pub fn add_speedtest_record(node_tag: &str, download_bps: u64, upload_bps: u64, delay_ms: Option<u64>) {
+    if let Err(e) = with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO speedtest_history (node_tag, download_bps, upload_bps, delay_ms, tested_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                node_tag,
+                download_bps as i64,
+                upload_bps as i64,
+                delay_ms.map(|d| d as i64),
+                chrono::Utc::now().timestamp_millis()
+            ],
+        )?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 写入测速历史失败: {}", e);
+    }
+}
+
+/// 查询指定节点最近 limit 条测速历史（时间倒序）
+pub fn get_speedtest_history(node_tag: &str, limit: u32) -> Result<Vec<SpeedtestRecord>> {
+    with_conn(|conn| {
+        let limit = limit.clamp(1, 100) as i32;
+        let mut stmt = conn.prepare(
+            "SELECT node_tag, download_bps, upload_bps, delay_ms, tested_at
+             FROM speedtest_history
+             WHERE node_tag = ?1
+             ORDER BY tested_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![node_tag, limit], |row| {
+            Ok(SpeedtestRecord {
+                node_tag: row.get(0)?,
+                download_bps: row.get::<_, i64>(1)? as u64,
+                upload_bps: row.get::<_, i64>(2)? as u64,
+                delay_ms: row.get::<_, Option<i64>>(3)?.map(|d| d as u64),
+                tested_at: row.get(4)?,
+            })
+        })?;
+        rows.collect()
     })
 }

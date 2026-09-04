@@ -60,3 +60,38 @@ export async function deleteCustomRule(id: string): Promise<ApiResponse<void>> {
   return await invokeWithTimeout("routing_delete_custom_rule", { id });
 }
 
+
+/** 导出全部分流规则（App-Matrix + 自定义规则）为 JSON 字符串 */
+export async function exportRoutingRules(): Promise<ApiResponse<string>> {
+  return await invokeWithTimeout("routing_export_rules");
+}
+
+/** 导入分流规则 JSON（merge=true 按合并去重 / false 整体替换），
+ *  返回 [导入条数, 跳过条数] */
+export async function importRoutingRules(
+  jsonContent: string,
+  merge: boolean = true
+): Promise<ApiResponse<[number, number]>> {
+  return await invokeWithTimeout("routing_import_rules", {
+    jsonContent,
+    merge,
+  });
+}
+
+/** 查询节点测速历史（SQLite 持久化） */
+export async function getSpeedtestHistory(
+  nodeTag: string,
+  limit: number = 20
+): Promise<
+  ApiResponse<
+    Array<{
+      node_tag: string;
+      download_bps: number;
+      upload_bps: number;
+      delay_ms?: number;
+      tested_at: number;
+    }>
+  >
+> {
+  return await invokeWithTimeout("speedtest_get_history", { nodeTag, limit });
+}

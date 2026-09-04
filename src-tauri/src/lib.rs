@@ -129,6 +129,7 @@ pub fn run() {
             commands::speedtest::speedtest_run_batch,
             commands::speedtest::speedtest_cancel_batch,
             commands::speedtest::speedtest_get_results,
+            commands::speedtest::speedtest_get_history,
             commands::routing::routing_get_processes,
             commands::routing::routing_get_app_rules,
             commands::routing::routing_save_app_rule,
@@ -136,10 +137,13 @@ pub fn run() {
             commands::routing::routing_save_custom_rules,
             commands::routing::routing_add_custom_rule,
             commands::routing::routing_delete_custom_rule,
+            commands::routing::routing_export_rules,
+            commands::routing::routing_import_rules,
             // 日志管理命令
 
             commands::logging::log_read_app,
             commands::logging::log_read_service,
+            commands::logging::log_read_kernel,
             commands::logging::log_clear_all,
             commands::settings::core_query_running,
             // 流量统计命令
