@@ -156,8 +156,8 @@ onMounted(() => {
   color: rgba(255, 255, 255, 0.9);
 }
 
-.text-cyan { color: #00f2fe !important; }
-.text-green { color: #10b981 !important; }
+.text-cyan { color: var(--accent-cyan-vivid) !important; }
+.text-green { color: var(--accent-green) !important; }
 
 .divider {
   width: 1px;
