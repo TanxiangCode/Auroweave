@@ -362,22 +362,22 @@ defineEmits<{
 
 .view-tab-btn {
   padding: 3px 9px;
-  font-size: 11px;
-  border-radius: 5px;
+  font-size: var(--text-xs);
+  border-radius: var(--radius-xs);
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--duration-fast) var(--ease-out);
 }
 
 .view-tab-btn:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .view-tab-btn.active {
-  background: rgba(0, 242, 254, 0.16);
-  color: #00f2fe;
-  font-weight: 600;
+  background: var(--accent-cyan-glow);
+  color: var(--accent-cyan-vivid);
+  font-weight: var(--weight-semibold);
 }
 </style>

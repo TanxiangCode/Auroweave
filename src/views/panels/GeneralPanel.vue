@@ -274,10 +274,5 @@ async function save(field: keyof AppSettings) {
   border-color: #00f2fe;
 }
 
-.switch {
-  width: 18px;
-  height: 18px;
-  accent-color: #00f2fe;
-  cursor: pointer;
-}
+/* switch 统一走 App.vue 全局胶囊开关（36×20，勾选青色高亮） */
 </style>

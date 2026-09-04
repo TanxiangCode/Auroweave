@@ -167,30 +167,29 @@ async function saveMode() {
 </script>
 
 <style scoped>
-.panel-container { display: flex; flex-direction: column; gap: 16px; }
-h2 { font-size: 18px; font-weight: 700; }
-.panel-desc { font-size: 12px; color: rgba(255,255,255,0.45); margin: 0; line-height: 1.6; }
-.setting-group { display: flex; flex-direction: column; gap: 12px; }
-.setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
-.item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
-.sub-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: normal; }
-.select-input { padding: 6px 12px; background: #121622; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; outline: none; }
-.num-input { padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; width: 100px; outline: none; }
-.switch { width: 18px; height: 18px; cursor: pointer; }
+.panel-container { display: flex; flex-direction: column; gap: var(--space-4); }
+h2 { font-size: var(--text-lg); font-weight: var(--weight-bold); }
+.panel-desc { font-size: var(--text-xs); color: var(--text-tertiary); margin: 0; line-height: 1.6; }
+.setting-group { display: flex; flex-direction: column; gap: var(--space-3); }
+/* setting-item / item-label / sub-label 统一走 panel.css 全局定义 */
+
+.select-input { padding: 6px 12px; background: var(--layer-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); outline: none; }
+.num-input { padding: 6px 12px; background: var(--layer-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); width: 100px; outline: none; }
+/* switch 统一走 App.vue 全局胶囊开关定义 */
 
 /* 规则集区块 */
-.ruleset-item { font-family: var(--font-mono); font-size: 13px; }
+.ruleset-item { font-family: var(--font-mono); font-size: var(--text-sm); }
 .btn-update-ruleset {
   align-self: flex-start;
   padding: 8px 18px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #00f2fe;
-  background: rgba(0, 242, 254, 0.1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--accent-cyan-vivid);
+  background: var(--accent-cyan-glow, rgba(0, 242, 254, 0.1));
   border: 1px solid rgba(0, 242, 254, 0.3);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--duration-fast) var(--ease-out);
 }
 .btn-update-ruleset:hover:not(:disabled) { background: rgba(0, 242, 254, 0.2); color: #fff; }
 .btn-update-ruleset:disabled { opacity: 0.5; cursor: not-allowed; }

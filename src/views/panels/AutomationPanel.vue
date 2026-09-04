@@ -18,22 +18,22 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
 </script>
 
 <style scoped>
-.panel-container { display: flex; flex-direction: column; gap: 16px; }
-h2 { font-size: 18px; font-weight: 700; }
-.setting-group { display: flex; flex-direction: column; gap: 12px; }
-.setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
-.item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
-.sub-label { font-size: 11px; color: rgba(255,255,255,0.4); font-weight: normal; }
-.switch { width: 18px; height: 18px; cursor: not-allowed; opacity: 0.5; }
+.panel-container { display: flex; flex-direction: column; gap: var(--space-4); }
+h2 { font-size: var(--text-lg); font-weight: var(--weight-bold); }
+.setting-group { display: flex; flex-direction: column; gap: var(--space-3); }
+/* setting-item / item-label / sub-label 统一走 panel.css 全局定义 */
+
+/* 未实装功能的禁用态开关：走全局胶囊形态，仅叠加禁用视觉 */
+.switch { cursor: not-allowed; opacity: 0.5; }
 
 /* "即将支持"标注徽标 */
 .coming-soon-tag {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgba(0, 242, 254, 0.8);
   background: rgba(0, 242, 254, 0.1);
   border: 1px solid rgba(0, 242, 254, 0.25);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 5px;
   margin-left: 6px;
   vertical-align: 1px;

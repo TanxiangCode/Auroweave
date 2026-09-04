@@ -260,7 +260,7 @@ function formatTime(ts?: number): string {
 </script>
 
 <style scoped>
-.switch { width: 18px; height: 18px; cursor: pointer; }
+/* switch 统一走 App.vue 全局胶囊开关定义 */
 
 .import-card {
   padding: var(--space-4);

@@ -245,33 +245,10 @@ h2 {
 .setting-group {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
-.setting-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 16px;
-  background: var(--layer-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-}
-
-.item-label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.sub-label {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-weight: normal;
-}
+/* setting-item / item-label / sub-label 统一走 panel.css 全局定义 */
 
 .text-input {
   padding: 6px 12px;

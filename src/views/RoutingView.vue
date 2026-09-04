@@ -175,25 +175,25 @@ onMounted(() => {
 
 .tab-capsule-btn {
   padding: 4px 12px;
-  font-size: 11.5px;
-  border-radius: 6px;
+  font-size: var(--text-xs);
+  border-radius: var(--radius-xs);
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  font-weight: 500;
+  transition: all var(--duration-fast) var(--ease-out);
+  font-weight: var(--weight-medium, 500);
 }
 
 .tab-capsule-btn:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .tab-capsule-btn.active {
-  background: rgba(0, 242, 254, 0.16);
-  color: #00f2fe;
-  font-weight: 600;
-  box-shadow: 0 0 10px rgba(0, 242, 254, 0.2);
+  background: var(--accent-cyan-glow);
+  color: var(--accent-cyan-vivid);
+  font-weight: var(--weight-semibold);
+  box-shadow: 0 0 10px var(--accent-cyan-glow);
 }
 
 .routing-main {

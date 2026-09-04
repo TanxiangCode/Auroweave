@@ -212,14 +212,14 @@ input[type="checkbox"].switch::before {
 }
 
 input[type="checkbox"].switch:checked {
-  background: var(--accent-blue-glow);
-  border-color: var(--accent-blue);
+  background: var(--accent-cyan-glow);
+  border-color: var(--accent-cyan-vivid);
 }
 
 input[type="checkbox"].switch:checked::before {
   left: 18px;
-  background: var(--accent-blue);
-  box-shadow: var(--shadow-glow-blue);
+  background: var(--accent-cyan-vivid);
+  box-shadow: 0 0 6px var(--accent-cyan-glow);
 }
 </style>
 
