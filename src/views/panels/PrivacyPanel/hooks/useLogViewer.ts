@@ -7,6 +7,7 @@
 import { ref, watch, onMounted, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "@/composables/useToast";
+import { useConfirm } from "@/composables/useConfirm";
 import { info as logInfo, error as logError } from "@tauri-apps/plugin-log";
 
 type LogTab = "app" | "service";
@@ -52,8 +53,13 @@ export function useLogViewer() {
 
   /** 一键清理所有日志 */
   async function clearAllLogs() {
-    const confirmClear = confirm("您确定要清空主程序日志、系统服务日志以及内核运行日志吗？(此操作不可逆)");
-    if (!confirmClear) return;
+    const confirmed = await useConfirm().ask({
+      title: "清空所有日志",
+      message: "您确定要清空主程序日志、系统服务日志以及内核运行日志吗？此操作不可逆。",
+      confirmText: "清空",
+      level: "danger",
+    });
+    if (!confirmed) return;
 
     toast.info("正在清空所有日志...");
     try {

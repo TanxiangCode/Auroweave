@@ -8,6 +8,7 @@ import { computed, type Ref } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
+import { useConfirm } from "@/composables/useConfirm";
 import { invoke } from "@tauri-apps/api/core";
 import { info as logInfo, error as logError, warn as logWarn } from "@tauri-apps/plugin-log";
 import type { ApiResponse } from "@/types";
@@ -83,9 +84,12 @@ export function useInboundMode(options: UseInboundModeOptions) {
               }
               // Windows: 提示安装静默提权服务
               logWarn(`[DashboardView] 启动 TUN 失败: ${res.error}，提示用户一键提权安装服务...`);
-              const confirmInstall = confirm(
-                "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。\n\n是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)"
-              );
+              const confirmInstall = await useConfirm().ask({
+                title: "需要管理员权限",
+                message: "启用 TUN 虚拟网卡需要管理员权限来安装静默提权组件。是否允许程序执行一键安装？(此后开启 TUN 将永久免弹窗免重启)",
+                confirmText: "一键安装",
+                level: "normal",
+              });
               if (confirmInstall) {
                 logInfo("[DashboardView] 用户同意提权安装服务，开始调用 service_install...");
                 const installRes: ApiResponse = await invoke("service_install");

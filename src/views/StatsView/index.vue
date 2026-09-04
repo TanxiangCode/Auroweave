@@ -9,6 +9,7 @@ import { onMounted } from "vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { storeToRefs } from "pinia";
 import SvgIcon from "@/components/common/SvgIcon.vue";
+import { useConfirm } from "@/composables/useConfirm";
 
 import StatsOverviewCards from "./components/StatsOverviewCards.vue";
 import TrafficBarChart from "./components/TrafficBarChart.vue";
@@ -34,7 +35,13 @@ const { topApps, fetchAppTraffic } = useAppTraffic();
 
 /** 清空大盘数据（先确保后端数据库清除成功，再清本地，避免前后端不一致） */
 async function clearStats() {
-  if (!confirm("确定要清空累计的历史流量统计与数据库记录吗？该操作不可恢复。")) {
+  const confirmed = await useConfirm().ask({
+    title: "清空流量统计",
+    message: "确定要清空累计的历史流量统计与数据库记录吗？该操作不可恢复。",
+    confirmText: "清空",
+    level: "danger",
+  });
+  if (!confirmed) {
     return;
   }
   try {

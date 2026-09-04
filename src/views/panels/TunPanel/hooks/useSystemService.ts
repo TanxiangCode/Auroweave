@@ -6,6 +6,7 @@
  */
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
+import { useConfirm } from "@/composables/useConfirm";
 import {
   serviceQueryStatus,
   serviceInstall,
@@ -220,7 +221,13 @@ export function useSystemService() {
 
   /** 卸载服务 */
   async function handleUninstall() {
-    if (!confirm("确定要卸载 Auroweave 系统服务吗？此操作需要管理员权限。")) return;
+    const confirmed = await useConfirm().ask({
+      title: "卸载系统服务",
+      message: "确定要卸载 Auroweave 系统服务吗？此操作需要管理员权限。",
+      confirmText: "卸载",
+      level: "danger",
+    });
+    if (!confirmed) return;
     operating.value = true;
     errorMsg.value = "";
     try {

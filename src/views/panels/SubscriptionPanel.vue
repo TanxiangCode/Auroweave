@@ -107,6 +107,7 @@ import { useSettingsStore } from "@/stores/settings.store";
 import { useSubscriptionStore } from "@/stores/subscription.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useToast } from "@/composables/useToast";
+import { useConfirm } from "@/composables/useConfirm";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 
 
@@ -144,8 +145,13 @@ async function handleImport() {
 
   const existing = subStore.subscriptions.find(s => s.url === urlTrimmed);
   if (existing) {
-    const confirmMsg = `订阅「${existing.name}」已存在。\n\n是否要覆盖它并重新导入最新节点？`;
-    if (!confirm(confirmMsg)) {
+    const confirmed = await useConfirm().ask({
+      title: "订阅已存在",
+      message: `订阅「${existing.name}」已存在。是否要覆盖它并重新导入最新节点？`,
+      confirmText: "覆盖导入",
+      level: "normal",
+    });
+    if (!confirmed) {
       return;
     }
   }
@@ -225,7 +231,13 @@ async function handleDelete(id: string) {
   const sub = subscriptions.value.find(s => s.id === id);
   if (!sub) return;
 
-  if (!confirm(`确定要删除订阅「${sub.name}」吗？此操作不可恢复。`)) {
+  const confirmed = await useConfirm().ask({
+    title: "删除订阅",
+    message: `确定要删除订阅「${sub.name}」吗？此操作不可恢复。`,
+    confirmText: "删除",
+    level: "danger",
+  });
+  if (!confirmed) {
     return;
   }
 

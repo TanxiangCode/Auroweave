@@ -14,6 +14,7 @@ import { ref, computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
 import { useSubscriptionStore } from "@/stores/subscription.store";
 import { useToast } from "@/composables/useToast";
+import { useConfirm } from "@/composables/useConfirm";
 import { formatBytes } from "@/utils/format";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import SubscriptionImportModal from "./components/SubscriptionImportModal.vue";
@@ -199,7 +200,13 @@ function handleOpenEdit(sub: Subscription) {
 
 /** 删除订阅 */
 async function handleDelete(sub: Subscription) {
-  if (!confirm(`确定要删除订阅 "${sub.name}" 吗？`)) return;
+  const confirmed = await useConfirm().ask({
+    title: "删除订阅",
+    message: `确定要删除订阅「${sub.name}」吗？此操作不可恢复。`,
+    confirmText: "删除",
+    level: "danger",
+  });
+  if (!confirmed) return;
   markOperating(sub.id);
   try {
     const res = await subStore.removeSub(sub.id);

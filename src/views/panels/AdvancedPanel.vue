@@ -217,6 +217,7 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
+import { useConfirm } from "@/composables/useConfirm";
 import { invoke } from "@tauri-apps/api/core";
 import {
   checkSingboxUpdate,
@@ -331,7 +332,13 @@ async function handlePerfModeChange() {
 }
 
 async function handleRestore() {
-  if (!confirm("确定要恢复上次的配置备份 (config.backup.json) 并重启核心吗？")) {
+  const confirmed = await useConfirm().ask({
+    title: "恢复配置备份",
+    message: "确定要恢复上次的配置备份 (config.backup.json) 并重启核心吗？",
+    confirmText: "恢复并重启",
+    level: "danger",
+  });
+  if (!confirmed) {
     return;
   }
   restoring.value = true;

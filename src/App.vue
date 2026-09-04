@@ -11,8 +11,10 @@ import TrafficLights from "@/components/chrome/TrafficLights.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
 import CommandPalette from "@/components/command-palette/CommandPalette.vue";
 import Toast from "@/components/common/Toast.vue";
+import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
 import { WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT } from "@/constants";
 import { useGlobalHotkey } from "@/composables/useGlobalHotkey";
+import { useConfirm } from "@/composables/useConfirm";
 
 const settingsStore = useSettingsStore();
 const route = useRoute();
@@ -52,6 +54,9 @@ async function onGlobalHotkeyTriggered() {
 
 // 注册系统级全局热键（设置加载完成后按 command_palette_hotkey 生效）
 useGlobalHotkey(onGlobalHotkeyTriggered);
+
+// 全局确认弹窗单例（替换原生 confirm）
+const confirm = useConfirm();
 
 onMounted(async () => {
   isMac.value = navigator.userAgent.toLowerCase().includes("mac");
@@ -104,6 +109,17 @@ onMounted(async () => {
 
     <!-- 全局消息 Toast 提示框 -->
     <Toast />
+
+    <!-- 全局危险操作确认弹窗（useConfirm 单例驱动） -->
+    <ConfirmDialog
+      :visible="confirm.state.visible.value"
+      :title="confirm.state.title.value"
+      :message="confirm.state.message.value"
+      :confirm-text="confirm.state.confirmText.value"
+      :level="confirm.state.level.value"
+      @confirm="confirm.settle(true)"
+      @cancel="confirm.settle(false)"
+    />
   </div>
 </template>
 
