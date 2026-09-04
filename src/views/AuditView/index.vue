@@ -50,16 +50,25 @@ const selectedRecord = ref<SemanticAuditRecord | null>(null);
 const activeIdSet = computed(() => new Set(activeRecords.value.map((r) => r.id)));
 
 // 过滤后的记录列表
+// 性能：/connections WS 每秒推全量快照触发本 computed 重算——无任何过滤
+// 条件时短路返回原引用，跳过整表 filter 链与数组重建
 const filteredRecords = computed(() => {
+  const noStatus = statusFilter.value === "all";
+  const noProtocol = protocolFilter.value === "all";
+  const noSearch = !searchQuery.value.trim();
+  if (noStatus && noProtocol && noSearch) {
+    return allRecords.value;
+  }
+
   let list = allRecords.value;
 
   // 1. 状态胶囊过滤
-  if (statusFilter.value !== "all") {
+  if (!noStatus) {
     list = list.filter((r) => r.type === statusFilter.value);
   }
 
   // 2. 协议过滤
-  if (protocolFilter.value !== "all") {
+  if (!noProtocol) {
     list = list.filter((r) => (r.network || "tcp").toLowerCase() === protocolFilter.value);
   }
 

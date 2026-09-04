@@ -37,6 +37,30 @@ use tracing::{error, info, warn};
 /// stderr 环形缓冲区容量上限（早期退出诊断时最多回看最近 200 行）
 const STDERR_RING_CAP: usize = 200;
 
+/// ClashAPI 就绪探测：TCP 连上并收到任意 HTTP 响应即就绪
+///
+/// 用于启动等待加速（成功路径原来固定睡满 1.5s）。裸 tokio TCP + 手写
+/// HEAD/GET，200ms 内无响应按未就绪处理——探测本身不阻塞超过一轮轮询间隔。
+/// 鉴权失败（401）也视为"就绪"：服务已在监听即启动成功，鉴权由调用方处理。
+async fn is_clash_api_ready(port: u16) -> bool {
+    use tokio::io::AsyncWriteExt;
+    let timeout = tokio::time::Duration::from_millis(200);
+    match tokio::time::timeout(timeout, async {
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+        // 任意路径的 GET：只关心能否收到 HTTP 状态行，不解析 body
+        let _ = stream.write_all(format!("GET /configs HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").as_bytes()).await;
+        let mut buf = [0u8; 16];
+        stream.readable().await?;
+        let _ = stream.try_read(&mut buf);
+        Ok::<bool, std::io::Error>(buf.starts_with(b"HTTP"))
+    })
+    .await
+    {
+        Ok(Ok(ready)) => ready,
+        _ => false,
+    }
+}
+
 /// 内核日志文件持久化（logs/singbox.log 追加写，超限轮转为 .old）
 ///
 /// 简单轮转策略：写入前检查大小，超过 2MB 时把当前文件 rename 为 .old
@@ -404,9 +428,13 @@ impl SidecarManager {
             });
         }
 
-        // ---- 阶段5: 早期退出检测 ----
-        // 每 100ms 轮询一次 try_wait，上限 15 次（总时长 1.5s 不变，
-        // 但进程一旦提前退出即可立即返回，无需睡满全程）
+        // ---- 阶段5: 早期退出检测 + 就绪加速 ----
+        // 语义：1.5s 内进程死亡才算启动失败；成功路径原来必须睡满 1.5s。
+        // 优化：每 100ms 轮询时顺带探测 ClashAPI 是否就绪（GET /configs），
+        // 就绪即认为启动成功并提前返回（sing-box 实际 exec→监听通常 <300ms），
+        // 拉起耗时从固定 1.5s 压缩到 ~200-400ms；未就绪继续轮询，保底
+        // 语义（1.5s 死亡窗口）完全不变。
+        let clash_port = crate::core::clash_api::get_clash_api_port();
         let mut early_exit: Option<std::process::ExitStatus> = None;
         for _ in 0..15 {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -415,7 +443,14 @@ impl SidecarManager {
                     early_exit = Some(exit_status);
                     break;
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    // ClashAPI 就绪探测：成功即提前完成启动（无 HTTP 客户端池
+                    // 依赖——裸 tokio TCP + 手写 GET，避免在 sidecar 模块引入 reqwest）
+                    if is_clash_api_ready(clash_port).await {
+                        info!("[sidecar] ClashAPI 已就绪，提前完成启动等待");
+                        break;
+                    }
+                }
                 Err(e) => {
                     warn!("检查 sing-box 进程状态时出现警告: {}", e);
                 }

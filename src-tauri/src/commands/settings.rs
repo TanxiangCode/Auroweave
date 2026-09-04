@@ -914,18 +914,26 @@ pub async fn core_query_running(app_handle: tauri::AppHandle) -> ApiResponse<boo
             { crate::system::service_control::query_singbox_process_running() }
             #[cfg(target_os = "macos")]
             {
-                // 通过 sysinfo 检查 PID 对应进程是否存活（避免 spawn kill -0 子进程开销）
-                let pid_file = std::env::temp_dir().join("auroweave-singbox.pid");
-                if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                        let mut sys = sysinfo::System::new();
-                        sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
-                        sys.process(sysinfo::Pid::from_u32(pid)).is_some()
+                // 性能：sidecar 内存态已是 Running/Starting 时无需再做进程表级校验
+                // （macOS TUN 同样由 SidecarManager 拉起，状态即事实源）——
+                // 避免 Dashboard 每 3s 一次 sysinfo 全进程表刷新（~20-80ms/次）。
+                // 仅状态显示已停但 PID 文件存在时才做 sysinfo 单 PID 校验
+                // （覆盖外部拉起/状态漂移的兜底场景）。
+                if is_running {
+                    true
+                } else {
+                    let pid_file = std::env::temp_dir().join("auroweave-singbox.pid");
+                    if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                            let mut sys = sysinfo::System::new();
+                            sys.refresh_processes(sysinfo::ProcessesToUpdate::All);
+                            sys.process(sysinfo::Pid::from_u32(pid)).is_some()
+                        } else {
+                            false
+                        }
                     } else {
                         false
                     }
-                } else {
-                    false
                 }
             }
             #[cfg(not(any(target_os = "windows", target_os = "macos")))]

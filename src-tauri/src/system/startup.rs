@@ -129,7 +129,13 @@ pub async fn apply_core_mode_with_fallback(
     // 无论之前处于什么模式，先释放系统代理、停止 sing-box 进程
     // Windows 额外停止计划任务 TUN
     // 使用静默模式清理，避免启动时弹出 macOS 密码框（后续设置新代理时会覆盖旧设置）
-    let _ = crate::system::sysproxy::set_system_proxy_silent(false, 0);
+    //
+    // 性能：系统代理清理是 150-400ms 的 networksetup 批量子进程调用——
+    // proxy_guard 期望态已是关闭（上次正常退出/从未开启）时直接跳过，
+    // 全量清理仅在实际残留开启状态时执行。
+    if crate::system::proxy_guard::is_desired_enabled() {
+        let _ = crate::system::sysproxy::set_system_proxy_silent(false, 0);
+    }
     #[cfg(target_os = "windows")]
     let _ = crate::system::service_control::stop_direct_tun_task();
 
