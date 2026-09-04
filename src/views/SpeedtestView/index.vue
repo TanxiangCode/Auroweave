@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 智能测速大厅 — 主入口
  * 作者: TanXiang
@@ -7,6 +6,8 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
  * 职责：布局拼装、状态绑定
  */
 import { onMounted } from "vue";
+import BaseIcon from "@/components/common/BaseIcon.vue";
+import BatchProgressCard from "@/components/speedtest/BatchProgressCard.vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import NodeCard from "@/components/proxy/NodeCard.vue";
 import { useSpeedtest } from "./hooks/useSpeedtest";
@@ -45,23 +46,12 @@ onMounted(() => {
       </div>
     </header>
 
-    <!-- 批量测速进度条 -->
-    <div
-      v-if="speedtestStore.isBatchTesting && speedtestStore.batchProgress"
-      class="batch-progress-card glass-effect"
-    >
-      <div class="progress-info">
-        <span>正在测速: <strong>{{ speedtestStore.batchProgress.current_node }}</strong></span>
-        <span>进度: {{ speedtestStore.batchProgress.current_index }} / {{ speedtestStore.batchProgress.total }}</span>
-      </div>
-      <div class="progress-bar-bg">
-        <div
-          class="progress-bar-fill"
-          :style="{ width: `${(speedtestStore.batchProgress.current_index / speedtestStore.batchProgress.total) * 100}%` }"
-        ></div>
-      </div>
-      <button class="btn-cancel" @click="speedtestStore.cancelBatch">取消测速</button>
-    </div>
+    <!-- 批量测速进度条（共享组件） -->
+    <BatchProgressCard
+      :visible="speedtestStore.isBatchTesting && !!speedtestStore.batchProgress"
+      :progress="speedtestStore.batchProgress!"
+      @cancel="speedtestStore.cancelBatch"
+    />
 
     <!-- 节点分组与列表 -->
     <div class="nodes-section">

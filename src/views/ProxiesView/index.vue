@@ -10,7 +10,9 @@ import { onMounted, onActivated, onDeactivated, ref } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import { useToast } from "@/composables/useToast";
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
+import BatchProgressCard from "@/components/speedtest/BatchProgressCard.vue";
 
 // 子组件
 import GroupSidebar from "./components/GroupSidebar.vue";
@@ -159,23 +161,20 @@ onDeactivated(() => {
 
 <template>
   <div class="proxies-view">
-    <!-- 批量测速进度条（全局浮层） -->
-    <div
-      v-if="speedtestStore.isBatchTesting && speedtestStore.batchProgress"
-      class="batch-progress-card glass-effect"
-    >
-      <div class="progress-info">
-        <span>正在测速: <strong>{{ speedtestStore.batchProgress.current_node }}</strong></span>
-        <span>进度: {{ speedtestStore.batchProgress.current_index }} / {{ speedtestStore.batchProgress.total }}</span>
+    <!-- 页面头部 -->
+    <header class="page-header">
+      <div class="title-area">
+        <h1><BaseIcon name="Layers" :size="24" class="title-icon" /> 代理节点</h1>
+        <p class="subtitle">分组浏览、切换出站与单点测速；收藏置顶常用节点</p>
       </div>
-      <div class="progress-bar-bg">
-        <div
-          class="progress-bar-fill"
-          :style="{ width: `${(speedtestStore.batchProgress.current_index / speedtestStore.batchProgress.total) * 100}%` }"
-        ></div>
-      </div>
-      <button class="btn-cancel" @click="speedtestStore.cancelBatch">取消测速</button>
-    </div>
+    </header>
+
+    <!-- 批量测速进度条（共享组件） -->
+    <BatchProgressCard
+      :visible="speedtestStore.isBatchTesting && !!speedtestStore.batchProgress"
+      :progress="speedtestStore.batchProgress!"
+      @cancel="speedtestStore.cancelBatch"
+    />
 
     <!-- 双栏布局区域 -->
     <div v-if="groups.length > 0" class="proxies-layout">
