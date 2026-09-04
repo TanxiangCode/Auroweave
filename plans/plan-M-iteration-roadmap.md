@@ -27,9 +27,9 @@ P0 缺口清偿（多订阅聚合/通知/自启/热键）与两项专项审查�
 **现状**：`#00f2fe` 硬编码 79 处（22 个文件）、`rgba(0,242,254,x)` 大面积、红色 4 种
 （`--accent-red`/`#f43f5e`/`#ff4d4f`/`--status-danger`）、绿色 3 种。SubscriptionsView 单文件 23 处为重灾区。
 
-- [ ] 全站替换为 `var(--accent-cyan-vivid)` / `var(--status-danger)` / `var(--accent-green)` 三条线
-- [ ] tokens.css 补齐缺失语义变量（如 `--accent-cyan-glow` 的浅色主题值）
-- [ ] 顺带验收浅色主题：token 化区域在 light 主题下自动切换正确（此项即浅色主题的修复标准）
+- [x] 全站替换为 `var(--accent-cyan-vivid)` / `var(--status-danger)` / `var(--accent-green)` 三条线
+- [x] tokens.css 补齐缺失语义变量（如 `--accent-cyan-glow` 的浅色主题值）
+- [x] 顺带验收浅色主题：token 化区域在 light 主题下自动切换正确（此项即浅色主题的修复标准）
 
 **验收**：`grep -rn "#00f2fe\|#ff4d4f\|#f43f5e" src/` 归零（渐变 stop 除外）；light 主题目检无深色残留块。
 
@@ -38,9 +38,9 @@ P0 缺口清偿（多订阅聚合/通知/自启/热键）与两项专项审查�
 **现状**：仅 SpeedtestView 走全局 `page-header` 规范；SubscriptionsView 自造 icon-orb 头、
 RoutingView/SettingsView 自造头部、ProxiesView/AuditView/DashboardView 无页面标题。
 
-- [ ] 统一 `page-header`（图标 orb + 标题 + 副标题 + 右侧 actions）节奏
-- [ ] ProxiesView/AuditView 至少补齐标题与副标题说明
-- [ ] StatsView 副标题中英混杂文案修正（"固化历史数据实时 analysis"）
+- [x] 统一 `page-header`（图标 orb + 标题 + 副标题 + 右侧 actions）节奏
+- [x] ProxiesView/AuditView 至少补齐标题与副标题说明
+- [x] StatsView 副标题中英混杂文案修正（"固化历史数据实时 analysis"）
 
 ### M1-3 空态/加载态组件抽取（P1-10）
 
@@ -48,14 +48,14 @@ RoutingView/SettingsView 自造头部、ProxiesView/AuditView/DashboardView 无�
 formatBytes 在 4 处组件内复制实现（精度还不一致）。
 
 - [ ] 抽 `EmptyState.vue`（图标槽 + 标题 + 描述 + 可选 CTA）与统一 spinner
-- [ ] 删除 ConnectionTable/SemanticRuleCard/ConnectionDetailDrawer/NodeCard 的本地 formatBytes，统一 `import { formatBytes } from "@/utils/format"`
-- [ ] 速率单位统一决策：节点测速用 KB/s（字节制），通信速率用 Kbps，ms 前空格统一
+- [x] 删除 ConnectionTable/SemanticRuleCard/ConnectionDetailDrawer/NodeCard 的本地 formatBytes，统一 `import { formatBytes } from "@/utils/format"`
+- [x] 速率单位统一决策：测速结果统一 Kbps（发现并修正 NodeCard 历史实现把 bps 比特率按 1024 字节换算成 KB/s 的 8 倍数值偏差），ms 前空格统一
 - [ ] Toast 图标 emoji（ℹ）换 BaseIcon
 
 ### M1-4 批量测速进度组件抽取（低成本项）
 
-- [ ] 抽 `BatchProgressCard.vue`，ProxiesView 与 SpeedtestView 复用（逻辑已同在 speedtestStore）
-- [ ] 修正前端预估常量与后端不一致：`constants.ts THROUGHPUT_TEST_DURATION_SEC=8` vs 后端批量 3+3=6s / 单节点 5+5=10s——统一为共享常量并按场景区分
+- [x] 抽 `BatchProgressCard.vue`，ProxiesView 与 SpeedtestView 复用（逻辑已同在 speedtestStore）
+- [x] 修正前端预估常量与后端不一致：`constants.ts THROUGHPUT_TEST_DURATION_SEC=8` vs 后端批量 3+3=6s / 单节点 5+5=10s——统一为共享常量并按场景区分
 
 **M1 验收**：vue-tsc 0 error、vitest 全过、目检 8 个视图头部/空态/加载态节奏一致。
 
@@ -79,29 +79,29 @@ ProxiesView 300 节点一次性渲染。
 
 **现状**：useConnectionAudit 每秒对全部活跃连接重跑 8 条正则 + 重建对象（300 连接 ≈ 2400 regex/s + 300 对象/s GC 压力）。
 
-- [ ] `translateConnection` 结果按 `id + 字段指纹`（host/rule/process 拼接 hash）缓存于 Map
-- [ ] 连接关闭时清条目（Map 上限封顶防泄漏）
+- [x] `translateConnection` 结果按 `id + 字段指纹`（host/rule/process 拼接 hash）缓存于 Map
+- [x] 连接关闭时清条目（Map 上限封顶防泄漏）
 
 ### M2-3 ClashAPI 客户端单例与快照合并（P2-7）
 
 **现状**：每命令 `ClashApiClient::default()` 重建（0.1ms 级，无害但浪费）；ProxiesView 激活周期
 `GET /proxies` 全量拉两次（fetchGroups + fetchGroupNodes 各拉一次 200KB-1MB JSON）。
 
-- [ ] `ClashApiClient` 改 `OnceLock` 单例（reqwest::Client 本身 Arc 内部池，重建浪费在包装层）
-- [ ] `proxy_get_groups` 与 `proxy_get_group_nodes` 后端合并为一次快照查询（或 1-2s TTL 缓存）
-- [ ] 单节点测速的 selector 查找复用同一快照
+- [x] `ClashApiClient` 单例化——实施时发现真正的成本在 `/proxies` 全量拉取而非客户端重建（reqwest::Client 内部本就是 Arc 池，重建仅包装层 ~0.1ms），故以 1s TTL 快照缓存落地，三处调用点同周期内合并为一次拉取
+- [x] `proxy_get_groups` 与 `proxy_get_group_nodes` 后端合并为一次快照查询（或 1-2s TTL 缓存）
+- [x] 单节点测速的 selector 查找复用同一快照
 
 ### M2-4 测速链路细节（P2-8/9 剩余）
 
-- [ ] 延迟测速的 `idx%10 sleep` 移到 acquire permit 之前（permit 临界区内睡觉占并发槽）
-- [ ] 批量/延迟测速的 SQLite 写改 `spawn_blocking` 或攒批（延迟 300 节点写 300 次 → 攒一次）
-- [ ] 上下行并行测速作为可选模式（精度换速度，默认保持串行）
+- [x] 延迟测速的 `idx%10 sleep` 移到 acquire permit 之前（permit 临界区内睡觉占并发槽）
+- [x] 批量/延迟测速的 SQLite 写改 `spawn_blocking` 或攒批（延迟 300 节点写 300 次 → 攒一次）
+- [ ] 上下行并行测速作为可选模式（精度换速度，默认保持串行）——实施时评估，非本轮交付
 
 ### M2-5 托盘网速双路更新收敛（P2-10）
 
 **现状**：后端 /traffic HTTP 长连接每秒刷 NSStatusItem + 前端 IPC 3s 节流，双路重叠。
 
-- [ ] 保留后端路（窗口隐藏时前端 IPC 断连的场景需要它），ticker 降为 3s 对齐前端节奏
+- [x] 保留后端路（窗口隐藏时前端 IPC 断连的场景需要它），ticker 降为 3s 对齐前端节奏
 
 **M2 验收**：AuditView 开 5 分钟无内存增长（Activity Monitor 观察）；300 节点批量延迟测速
 总时长对比基线有可测量下降；cargo/vitest 全过。
