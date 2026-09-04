@@ -410,8 +410,11 @@ onMounted(async () => {
   }
   if (groupsRes.success && groupsRes.data) {
     const proxyGroup = groupsRes.data.find((g) => g.tag === "proxy" || g.tag === "GLOBAL");
-    if (proxyGroup && proxyGroup.proxies && proxyGroup.proxies.length > 0) {
-      currentProxyNodeName.value = proxyGroup.proxies[0] || "自动优选 (Auto)";
+    // now 才是 selector 当前选中出站；proxies[0] 只是组成员列表第一项（历史缺陷）
+    if (proxyGroup && proxyGroup.now) {
+      currentProxyNodeName.value = proxyGroup.now;
+    } else if (proxyGroup && proxyGroup.proxies && proxyGroup.proxies.length > 0) {
+      currentProxyNodeName.value = proxyGroup.proxies[0];
     }
   }
 });
