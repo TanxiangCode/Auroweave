@@ -1,7 +1,7 @@
 <template>
   <div class="audit-filter-toolbar">
     <!-- 第一行：搜索与多维状态/协议过滤（raw 内核日志视图不参与过滤，整行隐藏） -->
-    <div class="toolbar-primary-row" v-if="viewMode !== 'raw'">
+    <div class="toolbar-primary-row" v-if="viewMode !== 'raw' && viewMode !== 'connectivity'">
       <!-- 搜索框 -->
       <div class="search-box">
         <span class="search-icon"><BaseIcon name="Search" :size="14" /></span>
@@ -124,6 +124,14 @@
           >
              内核日志
           </button>
+          <button
+            class="view-tab-btn"
+            :class="{ active: viewMode === 'connectivity' }"
+            @click="$emit('update:viewMode', 'connectivity')"
+            title="连通性/出口/泄漏检测"
+          >
+             连通检测
+          </button>
         </div>
       </div>
     </div>
@@ -136,7 +144,7 @@ defineProps<{
   searchQuery: string;
   statusFilter: "all" | "proxied" | "direct" | "blocked";
   protocolFilter: "all" | "tcp" | "udp";
-  viewMode: "semantic" | "table" | "raw";
+  viewMode: "semantic" | "table" | "raw" | "connectivity";
   autoPauseOnHover: boolean;
   totalCount: number;
   matchCount: number;
@@ -147,7 +155,7 @@ defineEmits<{
   (e: "update:searchQuery", val: string): void;
   (e: "update:statusFilter", val: "all" | "proxied" | "direct" | "blocked"): void;
   (e: "update:protocolFilter", val: "all" | "tcp" | "udp"): void;
-  (e: "update:viewMode", val: "semantic" | "table" | "raw"): void;
+  (e: "update:viewMode", val: "semantic" | "table" | "raw" | "connectivity"): void;
   (e: "update:autoPauseOnHover", val: boolean): void;
 }>();
 </script>

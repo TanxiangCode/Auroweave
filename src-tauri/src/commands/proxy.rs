@@ -335,3 +335,139 @@ pub async fn proxy_close_all_connections() -> ApiResponse<()> {
     }
 }
 
+
+/// 连通性检测单条路径结果
+#[derive(Debug, Serialize)]
+pub struct ConnectivityPathResult {
+    /// 路径名（"direct" 直连基线 / "proxied" 经代理出口）
+    pub path: String,
+    /// 是否成功取得出口 IP
+    pub ok: bool,
+    /// 出口公网 IP（失败为空）
+    pub egress_ip: String,
+    /// IP 归属地描述（ip-api.com 返回）
+    pub location: String,
+    /// 总耗时毫秒
+    pub elapsed_ms: u64,
+    /// 错误信息（失败时）
+    pub error: String,
+}
+
+/// 连通性检测汇总
+#[derive(Debug, Serialize)]
+pub struct ConnectivityReport {
+    pub direct: ConnectivityPathResult,
+    pub proxied: ConnectivityPathResult,
+    /// DNS 出口判定：直连与代理出口 IP 是否不同（不同=流量确实经代理出去）
+    pub traffic_proxied: bool,
+    /// 泄漏判定：若 direct 成功且其 IP 与 proxied 相同，说明代理路径泄漏直连
+    /// （仅当两条路径都成功才有效；任一失败时 leak_suspect=ok=false 路径的 error）
+    pub leak_suspect: bool,
+    /// 内核是否在运行（proxied 结果的解释依据）
+    pub kernel_running: bool,
+}
+
+/// 探测单条路径：直连 或 经 mixed 端口，取出口 IP 与归属地
+async fn probe_path(proxy_url: Option<String>) -> ConnectivityPathResult {
+    let start = std::time::Instant::now();
+    let builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(8));
+    let client = match &proxy_url {
+        Some(url) => match reqwest::Proxy::all(url) {
+            Ok(p) => builder.proxy(p).build(),
+            Err(e) => Err(e.into()),
+        },
+        None => builder.build(),
+    };
+
+    let client = match client {
+        Ok(c) => c,
+        Err(e) => {
+            return ConnectivityPathResult {
+                path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
+                ok: false, egress_ip: String::new(), location: String::new(),
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                error: format!("构建 HTTP 客户端失败: {}", e),
+            };
+        }
+    };
+
+    // ip-api.com 聚合响应：query=出口IP，多行含国家/城市/ISP
+    match client.get("http://ip-api.com/json?fields=query,country,city,isp&lang=zh-CN").send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(v) => {
+                let ip = v.get("query").and_then(|q| q.as_str()).unwrap_or("").to_string();
+                let country = v.get("country").and_then(|q| q.as_str()).unwrap_or("");
+                let city = v.get("city").and_then(|q| q.as_str()).unwrap_or("");
+                let isp = v.get("isp").and_then(|q| q.as_str()).unwrap_or("");
+                let location = format!("{}{} · {}", country, if city.is_empty() { String::new() } else { format!(" {}", city) }, isp);
+                ConnectivityPathResult {
+                    path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
+                    ok: !ip.is_empty(),
+                    egress_ip: ip,
+                    location,
+                    elapsed_ms: start.elapsed().as_millis() as u64,
+                    error: String::new(),
+                }
+            }
+            Err(e) => ConnectivityPathResult {
+                path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
+                ok: false, egress_ip: String::new(), location: String::new(),
+                elapsed_ms: start.elapsed().as_millis() as u64,
+                error: format!("解析出口信息失败: {}", e),
+            },
+        },
+        Ok(resp) => ConnectivityPathResult {
+            path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
+            ok: false, egress_ip: String::new(), location: String::new(),
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            error: format!("HTTP {}", resp.status()),
+        },
+        Err(e) => ConnectivityPathResult {
+            path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
+            ok: false, egress_ip: String::new(), location: String::new(),
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            error: e.to_string(),
+        },
+    }
+}
+
+/// 连通性 / 出口检测：同时探测直连基线与经 mixed 端口的代理出口，
+/// 对比双路径公网 IP 与归属地，判定流量是否真正经代理、是否存在直连泄漏。
+#[tauri::command]
+pub async fn proxy_connectivity_check(app_handle: tauri::AppHandle) -> ApiResponse<ConnectivityReport> {
+    let settings = crate::commands::settings::settings_get_internal(&app_handle);
+    let mixed_port = if settings.mixed_port > 0 { settings.mixed_port } else { 8890 };
+
+    // 内核运行态：ClashAPI 探测（不要求运行，direct 基线独立有效）
+    let kernel_running = ClashApiClient::default()
+        .get_proxies()
+        .await
+        .map(|v| v.get("proxies").is_some())
+        .unwrap_or(false);
+
+    let (direct, proxied) = tokio::join!(
+        probe_path(None),
+        probe_path(Some(format!("http://127.0.0.1:{}", mixed_port))),
+    );
+
+    let traffic_proxied = direct.ok
+        && proxied.ok
+        && !direct.egress_ip.is_empty()
+        && direct.egress_ip != proxied.egress_ip;
+
+    // 泄漏判定：两条路径都成功且 IP 相同 → 代理路径实际走了直连出口
+    let leak_suspect = direct.ok && proxied.ok && direct.egress_ip == proxied.egress_ip;
+
+    log::info!(
+        "[connectivity] direct={} proxied={} traffic_proxied={} leak_suspect={}",
+        direct.ok, proxied.ok, traffic_proxied, leak_suspect
+    );
+
+    ApiResponse::ok(ConnectivityReport {
+        direct,
+        proxied,
+        traffic_proxied,
+        leak_suspect,
+        kernel_running,
+    })
+}

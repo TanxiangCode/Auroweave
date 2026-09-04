@@ -99,6 +99,7 @@ pub fn run() {
             commands::proxy::proxy_get_singbox_version,
             commands::proxy::proxy_close_connection,
             commands::proxy::proxy_close_all_connections,
+            commands::proxy::proxy_connectivity_check,
             commands::proxy::sysproxy_set,
             commands::proxy::app_restart_as_admin,
             commands::subscription::subscription_import,

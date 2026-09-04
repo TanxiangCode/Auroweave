@@ -14,6 +14,7 @@ import SemanticRuleCard from "@/components/audit/SemanticRuleCard.vue";
 import ConnectionTable from "@/components/audit/ConnectionTable.vue";
 import ConnectionDetailDrawer from "@/components/audit/ConnectionDetailDrawer.vue";
 import RawLogStream from "@/components/audit/RawLogStream.vue";
+import ConnectivityPanel from "@/components/audit/ConnectivityPanel.vue";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
 
 const connectionStore = useConnectionStore();
@@ -27,7 +28,7 @@ const {
 } = useConnectionAudit();
 
 // 视图与过滤状态
-const viewMode = ref<"semantic" | "table" | "raw">("semantic");
+const viewMode = ref<"semantic" | "table" | "raw" | "connectivity">("semantic");
 const searchQuery = ref("");
 const statusFilter = ref<"all" | "proxied" | "direct" | "blocked">("all");
 const protocolFilter = ref<"all" | "tcp" | "udp">("all");
@@ -160,7 +161,10 @@ function handleMouseLeave() {
       />
 
       <!-- 视图 3：底层内核原始日志 -->
-      <RawLogStream v-else />
+      <RawLogStream v-else-if="viewMode === 'raw'" />
+
+      <!-- 视图 4：连通性与出口检测 -->
+      <ConnectivityPanel v-else />
     </main>
 
     <!-- 连接详情与溯源抽屉 -->
