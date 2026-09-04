@@ -100,6 +100,7 @@
  */
 import { ref } from "vue";
 import { invokeWithTimeout } from "@/api/ipc/client";
+import { useToast } from "@/composables/useToast";
 import type { ApiResponse } from "@/types";
 
 interface PathResult {
@@ -121,6 +122,7 @@ interface ConnectivityReport {
 
 const report = ref<ConnectivityReport | null>(null);
 const checking = ref(false);
+const toast = useToast();
 
 async function runCheck() {
   checking.value = true;
@@ -132,6 +134,8 @@ async function runCheck() {
     );
     if (res.success && res.data) {
       report.value = res.data;
+    } else {
+      toast.error("检测失败", res.error || "探测请求异常");
     }
   } finally {
     checking.value = false;
