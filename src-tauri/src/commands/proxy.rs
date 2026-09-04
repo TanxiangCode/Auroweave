@@ -180,9 +180,15 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
         }
 
         if settings.tun_enabled {
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+            // TUN 接管下必须关系统代理（双开=流量双重接管+状态混乱）。
+            // 失败不吞错：记录 error 并回读校验，用户取消提权时能从日志/UI 定位
+            if let Err(e) = crate::system::sysproxy::set_system_proxy(false, 0) {
+                log::error!("[proxy] TUN 模式下关闭系统代理失败: {}（可能残留双开状态）", e);
+            }
         } else {
-            let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+            if let Err(e) = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port) {
+                log::error!("[proxy] 设置系统代理失败: {}", e);
+            }
         }
         log::info!("[proxy] 代理模式已热切换为: {}", mode);
         return ApiResponse::ok(());

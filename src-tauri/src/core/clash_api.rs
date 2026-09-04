@@ -199,6 +199,11 @@ impl ClashApiClient {
     }
 
     /// 更新配置
+    ///
+    /// PATCH /configs 恒返回 204（即使 mode 非法也会静默 no-op）——
+    /// 因此当 body 含 "mode" 时附带回读校验：GET /configs 比对 mode
+    /// （大小写不敏感，sing-box 用 EqualFold 匹配），不一致视为热切换失败，
+    /// 让调用方走自愈重启路径而不是拿到假成功。
     pub async fn patch_configs(&self, body: serde_json::Value) -> Result<(), AppError> {
         let url = format!("{}/configs", self.base_url);
         let resp = self.client.patch(&url).json(&body).send().await
@@ -206,6 +211,26 @@ impl ClashApiClient {
 
         if !resp.status().is_success() {
             return Err(AppError::Network(format!("更新配置返回错误状态: {}", resp.status())));
+        }
+
+        // mode 热切换的假成功防护（204 ≠ 生效）
+        if let Some(target_mode) = body.get("mode").and_then(|m| m.as_str()) {
+            let applied = self.get_configs().await
+                .ok()
+                .and_then(|cfg| cfg.get("mode").and_then(|m| m.as_str()).map(|s| s.to_string()));
+            match applied {
+                Some(current) if current.eq_ignore_ascii_case(target_mode) => {}
+                Some(current) => {
+                    return Err(AppError::Network(format!(
+                        "模式热切换未生效（目标 {}，内核仍为 {}）",
+                        target_mode, current
+                    )));
+                }
+                None => {
+                    // 回读失败（内核刚重启 API 未就绪等）——不阻断，但记录告警
+                    log::warn!("[clash_api] PATCH mode 后回读配置失败，跳过校验");
+                }
+            }
         }
 
         Ok(())

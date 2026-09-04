@@ -1,5 +1,11 @@
 <template>
   <div class="app-matrix-container">
+    <!-- 进程分流生效条件提示：系统代理模式下进程规则静默不匹配 -->
+    <div v-if="!tunEnabled" class="mode-hint-banner">
+      <BaseIcon name="AlertTriangle" :size="14" />
+      <span>当前为系统代理模式：进程分流规则仅在 <strong>TUN 接管模式</strong> 下生效（系统代理下流量源进程是 sing-box 自身，无法按应用区分）。域名/IP 自定义规则不受影响。</span>
+    </div>
+
     <!-- 头部工具栏 -->
     <div class="matrix-toolbar">
       <!-- 搜索框 -->
@@ -157,6 +163,7 @@ import {
 } from "@/api/ipc/routing";
 import { parseProcessInfo, type ParsedAppInfo } from "@/utils/process-helper";
 import { useToast } from "@/composables/useToast";
+import { useSettingsStore } from "@/stores/settings.store";
 import OutboundSelector from "./OutboundSelector.vue";
 
 interface EnhancedProcess {
@@ -173,6 +180,10 @@ const selectedCategory = ref<string>("all");
 const hideSystemProcesses = ref(true);
 const loading = ref(false);
 const toast = useToast();
+const settingsStore = useSettingsStore();
+
+// 进程分流仅在 TUN 模式下可匹配（系统代理下流量源进程是 sing-box 自身）
+const tunEnabled = computed(() => settingsStore.settings.tun_enabled);
 
 const customCount = computed(() => Object.keys(appRules.value).length);
 
@@ -309,6 +320,25 @@ onMounted(() => {
   gap: 10px;
   flex-wrap: wrap;
   flex-shrink: 0;
+}
+
+/* 系统代理模式下的进程分流提示横幅 */
+.mode-hint-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.25);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.mode-hint-banner strong {
+  color: #ffc94d;
 }
 
 .search-box {
