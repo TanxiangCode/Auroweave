@@ -6,6 +6,7 @@
  * 职责：全景仪表盘、多维过滤流控、三重视图协同与溯源抽屉交互
  */
 import { ref, computed } from "vue";
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useConnectionAudit } from "./hooks/useConnectionAudit";
 import AuditOverviewBanner from "@/components/audit/AuditOverviewBanner.vue";
@@ -110,6 +111,14 @@ function handleMouseLeave() {
 
 <template>
   <div class="audit-view">
+    <!-- 页面头部 -->
+    <header class="page-header">
+      <div class="title-area">
+        <h1><BaseIcon name="ShieldCheck" :size="24" class="title-icon" /> 安全审计</h1>
+        <p class="subtitle">实时连接语义流、流量溯源与连通性检测；悬停暂停以细读链路</p>
+      </div>
+    </header>
+
     <!-- 顶部紧凑全景指标看板与流控 -->
     <AuditOverviewBanner
       :active-count="activeRecords.length"

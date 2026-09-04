@@ -26,6 +26,46 @@ export function useConnectionAudit() {
   // 记录已知处理过的 ID 集合，避免重复计入统计
   const seenConnIds = new Set<string>();
 
+  // 语义转换缓存：id -> { fingerprint, record }
+  // /connections WS 每秒推全量快照，原实现每拍对每条活跃连接重跑 8 条正则
+  // + 重建对象（300 连接 ≈ 2400 regex/s + 300 对象/s GC 压力）。
+  // 缓存键为影响转换结果的字段指纹——连接元数据未变时直接复用 record 对象。
+  // 流量计数字段（upload/download bytes/speed）不计入指纹：它们不影响
+  // 语义转换结果，且计数字段变化频繁会导致缓存永远 miss。
+  const translateCache = new Map<
+    string,
+    { fingerprint: string; record: SemanticAuditRecord }
+  >();
+
+  /** 计算连接的语义指纹（转换输入相关的字段子集） */
+  function fingerprintOf(conn: Connection): string {
+    return [
+      conn.destination,
+      conn.destinationIP ?? "",
+      conn.port,
+      conn.outbound,
+      conn.rule ?? "",
+      conn.rulePayload ?? "",
+      conn.process ?? "",
+      conn.processPath ?? "",
+      conn.network ?? "",
+      conn.type ?? "",
+      (conn.chains ?? []).join(">"),
+    ].join("|");
+  }
+
+  /** 带缓存的语义转换：指纹命中直接复用上一拍 record */
+  function translateCached(conn: Connection): SemanticAuditRecord {
+    const fp = fingerprintOf(conn);
+    const cached = translateCache.get(conn.id);
+    if (cached && cached.fingerprint === fp) {
+      return cached.record;
+    }
+    const record = translateConnection(conn);
+    translateCache.set(conn.id, { fingerprint: fp, record });
+    return record;
+  }
+
   let unsub: (() => void) | null = null;
 
   onActivated(() => {
@@ -39,7 +79,7 @@ export function useConnectionAudit() {
 
       for (const conn of rawList) {
         currentIdSet.add(conn.id);
-        const record = translateConnection(conn);
+        const record = translateCached(conn);
         currentActive.push(record);
 
         // 首次发现的新连接，计入统计与历史流
@@ -54,6 +94,13 @@ export function useConnectionAudit() {
       }
 
       activeRecords.value = currentActive;
+
+      // 缓存收敛：移除已关闭连接的条目（与 seenConnIds 同节奏防泄漏）
+      if (translateCache.size > 2000) {
+        for (const id of translateCache.keys()) {
+          if (!currentIdSet.has(id)) translateCache.delete(id);
+        }
+      }
 
       // 限制历史流容量 (200 条)
       if (historyRecords.value.length > 200) {
@@ -102,6 +149,7 @@ export function useConnectionAudit() {
     historyRecords.value = [];
     // 同步清空已见连接 ID 集合：否则清除后同 ID 连接的后续新会话会被当作旧连接漏记
     seenConnIds.clear();
+    translateCache.clear();
     toast.info("历史记录已清空", "连接审计队列已重置");
   }
 
