@@ -291,6 +291,8 @@ export interface AppSettings {
   latency_test_concurrency?: number;
   latency_test_timeout_ms?: number;
   latency_test_url?: string;
+  /** 置顶收藏的节点 tag 列表（排序时恒排最前） */
+  pinned_nodes?: string[];
   core: {
     runMode: string;
     service: {

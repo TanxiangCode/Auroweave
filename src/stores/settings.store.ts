@@ -40,6 +40,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   latency_test_concurrency: 20,
   latency_test_timeout_ms: 3000,
   latency_test_url: "http://www.gstatic.com/generate_204",
+  pinned_nodes: [],
 
   // DNS / TUN 进阶（sing-box 1.14.0）
   dns_remote_doh: "8.8.8.8",

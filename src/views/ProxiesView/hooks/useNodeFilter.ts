@@ -6,6 +6,7 @@
  */
 import { ref, computed } from "vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
+import { useSettingsStore } from "@/stores/settings.store";
 import type { ProxyNode, NodeSortConfig, NodeSortKey } from "@/types";
 
 /** 排序标签映射 */
@@ -26,11 +27,26 @@ const sortKeyCycle: Array<NodeSortKey> = ["default", "name", "latency", "protoco
  */
 export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
   const speedtestStore = useSpeedtestStore();
+  const settingsStore = useSettingsStore();
 
   const searchText = ref("");
   const sortConfig = ref<NodeSortConfig>({ key: "default", order: "asc" });
 
-  /** 经搜索过滤 + 排序后的节点列表 */
+  /** 收藏置顶集合（来自 settings.pinned_nodes，Set 加速查重） */
+  const pinnedSet = computed<Set<string>>(() => new Set(settingsStore.settings.pinned_nodes || []));
+
+  /** 切换节点置顶收藏（持久化到设置） */
+  async function togglePinned(nodeTag: string) {
+    const current = new Set(settingsStore.settings.pinned_nodes || []);
+    if (current.has(nodeTag)) {
+      current.delete(nodeTag);
+    } else {
+      current.add(nodeTag);
+    }
+    await settingsStore.updateSettings({ pinned_nodes: Array.from(current) });
+  }
+
+  /** 经搜索过滤 + 置顶 + 排序后的节点列表 */
   const displayNodes = computed<ProxyNode[]>(() => {
     let nodes = rawNodes.value;
 
@@ -43,14 +59,17 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
       );
     }
 
-    // 排序
-    if (sortConfig.value.key === "default") return nodes;
+    // 置顶分区：收藏节点恒排最前（优先于任何排序键，用户显式意图 > 自动排序）
+    const pinned = nodes.filter((n) => pinnedSet.value.has(n.tag));
+    const normal = nodes.filter((n) => !pinnedSet.value.has(n.tag));
 
-    const sorted = [...nodes];
+    // 排序
+    if (sortConfig.value.key === "default") return [...pinned, ...normal];
+
     const { key, order } = sortConfig.value;
     const multiplier = order === "asc" ? 1 : -1;
 
-    sorted.sort((a, b) => {
+    const sortFn = (a: ProxyNode, b: ProxyNode): number => {
       if (key === "name") {
         return a.tag.localeCompare(b.tag, "zh-CN") * multiplier;
       } else if (key === "protocol") {
@@ -78,9 +97,10 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
         return a.tag.localeCompare(b.tag, "zh-CN");
       }
       return 0;
-    });
+    };
 
-    return sorted;
+    // 置顶区与普通区各自排序后拼接（置顶恒在前，区内保持所选排序语义）
+    return [...pinned].sort(sortFn).concat([...normal].sort(sortFn));
   });
 
   /** 循环切换排序键 */
@@ -110,9 +130,11 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
     sortLabels,
     // 计算属性
     displayNodes,
+    pinnedSet,
     // 方法
     cycleSortKey,
     toggleSortOrder,
     clearSearch,
+    togglePinned,
   };
 }

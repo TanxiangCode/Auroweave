@@ -43,6 +43,7 @@ const {
 const {
   searchText, sortConfig, sortLabels,
   displayNodes, cycleSortKey, toggleSortOrder, clearSearch,
+  pinnedSet, togglePinned,
 } = useNodeFilter(rawNodes);
 
 const {
@@ -221,9 +222,11 @@ onDeactivated(() => {
           :is-selectable="isSelectorGroup"
           :layout-mode="viewMode"
           :fetch-error="proxyStore.error"
+          :pinned-set="pinnedSet"
           @select="handleNodeSelect"
           @test-latency="handleSingleLatency"
           @test-speed="handleSingleSpeed"
+          @toggle-pin="togglePinned"
         />
       </main>
     </div>

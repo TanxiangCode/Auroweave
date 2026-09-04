@@ -49,6 +49,16 @@
 
       <!-- 快捷操作按钮组 -->
       <div class="card-actions">
+        <!-- 置顶收藏星标 -->
+        <button
+          class="card-action-btn pin-btn"
+          :class="{ pinned: isPinned }"
+          :title="isPinned ? '取消置顶收藏' : '置顶收藏（排序时恒排最前）'"
+          @click.stop="$emit('toggle-pin', nodeTag)"
+        >
+          <BaseIcon name="Star" :size="12" />
+        </button>
+
         <button
           class="card-action-btn ping-btn"
           :class="{ active: isLatencyTesting }"
@@ -94,11 +104,14 @@ const props = withDefaults(
     speedBps?: number;
     isSelectable?: boolean;
     layoutMode?: "grid" | "list";
+    /** 是否置顶收藏（星标高亮） */
+    isPinned?: boolean;
   }>(),
   {
     isActive: false,
     isSelectable: true,
     layoutMode: "grid",
+    isPinned: false,
   }
 );
 
@@ -106,6 +119,7 @@ const emit = defineEmits<{
   (e: "select", tag: string): void;
   (e: "test-latency", tag: string): void;
   (e: "test-speed", tag: string): void;
+  (e: "toggle-pin", tag: string): void;
 }>();
 
 function onCardClick() {
@@ -398,6 +412,22 @@ function formatSpeed(bps: number): string {
 .card-action-btn.ping-btn:hover:not(:disabled) {
   color: var(--accent-orange);
   border-color: var(--accent-orange);
+}
+
+/* 置顶收藏星标：常态弱化，激活金色高亮 */
+.card-action-btn.pin-btn {
+  color: var(--text-tertiary);
+}
+
+.card-action-btn.pin-btn:hover:not(:disabled) {
+  color: #f5c518;
+  border-color: #f5c518;
+}
+
+.card-action-btn.pin-btn.pinned {
+  color: #f5c518;
+  border-color: rgba(245, 197, 24, 0.45);
+  background: rgba(245, 197, 24, 0.08);
 }
 
 .card-action-btn.speed-btn:hover:not(:disabled) {

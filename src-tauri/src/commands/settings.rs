@@ -100,6 +100,10 @@ pub struct AppSettings {
     #[serde(default = "default_latency_test_url")]
     pub latency_test_url: String,
 
+    /// 置顶收藏的节点 tag 列表（节点卡片星标，排序时恒排最前）
+    #[serde(default)]
+    pub pinned_nodes: Vec<String>,
+
     /// 分组测速配置覆盖（group tag -> interval 秒 / tolerance 毫秒 / url），
     /// 由 GroupEditModal 保存，ConfigBuilder 生成 urltest 出站时应用
     #[serde(default)]
@@ -163,6 +167,9 @@ impl Default for AppSettings {
             latency_test_concurrency: 20,
             latency_test_timeout_ms: 3000,
             latency_test_url: "http://www.gstatic.com/generate_204".to_string(),
+
+            // 置顶收藏节点（默认空）
+            pinned_nodes: Vec::new(),
 
             // 分组测速配置覆盖（默认空，全部使用内置默认值）
             group_configs: std::collections::HashMap::new(),

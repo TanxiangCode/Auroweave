@@ -25,10 +25,13 @@ withDefaults(
     layoutMode?: "grid" | "list";
     /** 分组数据拉取错误信息（有值时显示错误态而非误导性的空态） */
     fetchError?: string | null;
+    /** 置顶收藏节点集合（星标高亮） */
+    pinnedSet?: Set<string>;
   }>(),
   {
     layoutMode: "grid",
     fetchError: null,
+    pinnedSet: () => new Set<string>(),
   }
 );
 
@@ -36,6 +39,7 @@ const emit = defineEmits<{
   select: [nodeTag: string];
   'test-latency': [nodeTag: string];
   'test-speed': [nodeTag: string];
+  'toggle-pin': [nodeTag: string];
 }>();
 
 const speedtestStore = useSpeedtestStore();
@@ -87,9 +91,11 @@ const speedtestStore = useSpeedtestStore();
         :speed-bps="speedtestStore.throughputMap[node.tag]?.download_bps"
         :is-selectable="isSelectable"
         :layout-mode="layoutMode"
+        :is-pinned="pinnedSet.has(node.tag)"
         @select="emit('select', node.tag)"
         @test-latency="emit('test-latency', node.tag)"
         @test-speed="emit('test-speed', node.tag)"
+        @toggle-pin="emit('toggle-pin', node.tag)"
       />
     </div>
   </div>
