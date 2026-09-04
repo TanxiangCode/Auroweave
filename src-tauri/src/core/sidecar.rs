@@ -37,6 +37,49 @@ use tracing::{error, info, warn};
 /// stderr 环形缓冲区容量上限（早期退出诊断时最多回看最近 200 行）
 const STDERR_RING_CAP: usize = 200;
 
+/// 内核日志文件持久化（logs/singbox.log 追加写，超限轮转为 .old）
+///
+/// 简单轮转策略：写入前检查大小，超过 2MB 时把当前文件 rename 为 .old
+/// （旧 .old 被覆盖），轮转失败不阻断写主日志。写入用 std::fs（行级小量追加，
+/// spawn 的 tokio 任务里阻塞开销可忽略），互斥由调用方每行 append 的粒度保证
+/// 足够（两任务交错至多导致行序微乱，不损文件完整性）。
+#[derive(Clone)]
+struct KernelLogFile {
+    path: PathBuf,
+}
+
+impl KernelLogFile {
+    const MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+    fn open() -> Self {
+        let dir = crate::get_log_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        Self { path: dir.join("singbox.log") }
+    }
+
+    fn append(&mut self, line: &str) {
+        // 轮转检查（追加前，避免超限后再轮转丢最后一行）
+        if let Ok(meta) = std::fs::metadata(&self.path) {
+            if meta.len() >= Self::MAX_BYTES {
+                let old = self.path.with_extension("log.old");
+                let _ = std::fs::remove_file(&old);
+                if std::fs::rename(&self.path, &old).is_err() {
+                    // rename 失败（文件被占用等）：截断重来，保证日志不无限膨胀
+                    let _ = std::fs::write(&self.path, "");
+                }
+            }
+        }
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
+            let _ = writeln!(f, "{}", line);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarStatus {
     Stopped,
@@ -328,13 +371,18 @@ impl SidecarManager {
         // 避免异常进程狂刷日志导致内存无上限增长
         let stdout = child.stdout.take();
         let stderr_lines_arc = Arc::new(Mutex::new(VecDeque::<String>::new()));
+        // 内核日志文件持久化：追加写入 logs/singbox.log，超过 2MB 轮转为 .old
+        // （日志页 WS 流是内存态刷新即丢，落盘后崩溃/拒载问题可事后排查）
+        let kernel_log = KernelLogFile::open();
         if let Some(stderr) = child.stderr.take() {
             use tokio::io::{AsyncBufReadExt, BufReader};
             let arc_clone = stderr_lines_arc.clone();
+            let mut log_file = kernel_log.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
                     error!("[sing-box error] {}", line);
+                    log_file.append(&format!("[ERR] {}", line));
                     let mut buf = arc_clone.lock().await;
                     if buf.len() >= STDERR_RING_CAP {
                         buf.pop_front();
@@ -345,11 +393,13 @@ impl SidecarManager {
         }
 
         if let Some(stdout) = stdout {
+            let mut log_file = kernel_log.clone();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
                 let mut reader = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
                     info!("[sing-box] {}", line);
+                    log_file.append(&format!("[INF] {}", line));
                 }
             });
         }

@@ -45,6 +45,25 @@ pub async fn log_read_service(lines: Option<usize>) -> ApiResponse<String> {
     }
 }
 
+/// 读取内核 sing-box 日志文件（最近 N 行，默认 500 行）
+/// 日志来源：sidecar stdout/stderr 分流写入的 logs/singbox.log（含轮转 .old）
+#[tauri::command]
+pub async fn log_read_kernel(lines: Option<usize>) -> ApiResponse<String> {
+    let limit = lines.unwrap_or(500);
+    let log_path = crate::get_log_dir().join("singbox.log");
+    if !log_path.exists() {
+        return ApiResponse::ok(String::new());
+    }
+    match fs::read_to_string(&log_path) {
+        Ok(content) => {
+            let all_lines: Vec<&str> = content.lines().collect();
+            let start = all_lines.len().saturating_sub(limit);
+            ApiResponse::ok(all_lines[start..].join("\n"))
+        }
+        Err(e) => ApiResponse::err(format!("读取内核日志失败: {}", e), 500),
+    }
+}
+
 
 /// 清空所有日志文件（主程序、服务、内核）
 #[tauri::command]
@@ -54,6 +73,8 @@ pub async fn log_clear_all() -> ApiResponse<()> {
     let files = [
         log_dir.join("auroweave.log"),
         log_dir.join("service.log"),
+        log_dir.join("singbox.log"),
+        log_dir.join("singbox.log.old"),
     ];
     let mut errors: Vec<String> = Vec::new();
     for path in &files {
