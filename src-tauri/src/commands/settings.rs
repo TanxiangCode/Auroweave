@@ -411,16 +411,20 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
             modified = true;
         }
 
-        // 校准 local dns server 为 type: local，remote dns server 的 DoH 地址跟随用户设置
+        // 校准 local dns server 为 type: local（附 1.14 neighbor_domain 局域网解析），
+        // remote dns server 的 DoH 地址跟随用户设置
         let remote_doh = settings.dns_remote_doh.trim().to_string();
         if let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for srv in servers.iter_mut() {
                 if srv.get("tag").and_then(|t| t.as_str()) == Some("local") {
-                    if srv.get("type").and_then(|t| t.as_str()) != Some("local") || srv.get("server").is_some() {
-                        *srv = serde_json::json!({
-                            "tag": "local",
-                            "type": "local"
-                        });
+                    let canonical_local = serde_json::json!({
+                        "tag": "local",
+                        "type": "local",
+                        // 1.14.0：nas / printer.lan 等单标签与局域网后缀走系统邻居解析器
+                        "neighbor_domain": [".", ".lan", ".local"]
+                    });
+                    if *srv != canonical_local {
+                        *srv = canonical_local;
                         modified = true;
                     }
                 } else if srv.get("tag").and_then(|t| t.as_str()) == Some("remote") {

@@ -78,7 +78,9 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
         "experimental": {
             "clash_api": {
                 "external_controller": format!("127.0.0.1:{}", clash_api_port),
-                "secret": super::clash_api::get_clash_api_secret()
+                "secret": super::clash_api::get_clash_api_secret(),
+                // 与完整配置同语义：无订阅场景模式恢复与用户设置一致（否则冷启动恒为 Rule）
+                "default_mode": "Rule"
             },
             "cache_file": {
                 "enabled": true,
@@ -342,6 +344,11 @@ impl ConfigBuilder {
         server_domains.dedup();
 
         let mut dns_rules = Vec::new();
+        // Direct 模式全量本地解析（与 route 的 clash_mode 单一真相源对齐）：
+        // TUN 下系统 DNS 劫持的查询在 Direct 模式走 local，不依赖 remote DoH
+        //（detour "proxy" 引用不经过 route.rules，Direct 前置规则对 DoH 无效，
+        //  节点故障时直连模式域名解析不应随之失败）
+        dns_rules.push(json!({ "clash_mode": "Direct", "action": "route", "server": "local" }));
         if !server_domains.is_empty() {
             dns_rules.push(json!({ "domain": server_domains, "action": "route", "server": "local" }));
         }
@@ -415,7 +422,10 @@ impl ConfigBuilder {
                     },
                     {
                         "tag": "local",
-                        "type": "local"
+                        "type": "local",
+                        // 1.14.0：单标签与 .lan/.local 后缀域名走系统邻居解析器
+                        // （TUN 接管后 nas/打印机/HomePod 等局域网主机名仍可解析）
+                        "neighbor_domain": [".", ".lan", ".local"]
                     }
                 ],
                 "rules": dns_rules,
@@ -502,6 +512,13 @@ fn tokenize_tag(s: &str) -> Vec<&str> {
 /// 6. Custom Rules 自定义 IP 分流规则 (ip_cidr)
 /// 7. 国内 IP 规则集直连（geoip-cn -> direct）
 /// 8. 兜底策略由 route.final 决定（Rule/Global 模式下为 proxy）
+///
+/// 模式门控语义（有意设计）：
+/// - geosite/geoip 通用规则带 clash_mode:"rule" —— Global 模式下整体失效（全局代理=不用智能分流）
+/// - App-Matrix / Custom Rules 用户显式规则不门控 —— 任何模式下都尊重用户意图
+///   （与 Clash Verge Rev 的 Global 行为一致：显式规则优先于模式）
+/// - process_name 规则仅在 TUN 接管下可命中（系统代理下源进程是 sing-box 自身），
+///   前端 AppMatrixList 已做模式提示
 pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> {
     let mut rules = vec![
         json!({ "action": "sniff" }),
@@ -644,6 +661,26 @@ mod tests {
         let local_srv = servers.iter().find(|s| s.get("tag").and_then(|t| t.as_str()) == Some("local")).expect("应该包含 local dns");
         assert_eq!(local_srv.get("type").and_then(|t| t.as_str()), Some("local"));
         assert!(local_srv.get("server").is_none(), "type: local 不应有 server 字段");
+        // 1.14.0 neighbor_domain：局域网单标签/.lan/.local 域名走系统邻居解析器
+        assert_eq!(
+            local_srv.get("neighbor_domain").and_then(|n| n.as_array()).map(|a| a.len()),
+            Some(3),
+            "local dns 应包含 neighbor_domain 3 项"
+        );
+
+        // Direct 模式 DNS 规则必须前置（TUN 下劫持的查询在 Direct 模式走 local，
+        // 不依赖 detour=proxy 的 remote DoH——节点故障时直连解析不受影响）
+        let dns_rules = dns.get("rules").and_then(|r| r.as_array()).expect("dns rules 应存在");
+        assert!(!dns_rules.is_empty());
+        assert_eq!(
+            dns_rules[0].get("clash_mode").and_then(|m| m.as_str()),
+            Some("Direct"),
+            "dns.rules 首条必须是 clash_mode:Direct→local"
+        );
+        assert_eq!(
+            dns_rules[0].get("server").and_then(|s| s.as_str()),
+            Some("local")
+        );
 
         // 验证 auto urltest 策略组中过滤了公告伪节点
         let outbounds_arr = config.get("outbounds").and_then(|o| o.as_array()).expect("outbounds 应该存在");
