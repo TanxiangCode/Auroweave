@@ -663,11 +663,9 @@ pub async fn subscription_import(
     };
     save_raw_subscription(&sub.id, &raw_text);
     {
-        // 事务内：将旧订阅置为非活跃、追加新订阅，用于聚合与最终持久化
+        // 事务内：追加新订阅（直接置活跃加入聚合），其他订阅的活跃状态不动
+        // （多订阅语义：导入不下线已有聚合，与 activate/refresh 一致）
         let mut all_subs = existing.clone();
-        for s in all_subs.iter_mut() {
-            s.is_active = false;
-        }
         all_subs.push(sub.clone());
         // 先持久化一次聚合所需的活跃状态（含新订阅 raw 已落盘）
         if let Err(e) = save_subscriptions(&all_subs) {
@@ -690,9 +688,6 @@ pub async fn subscription_import(
 
     // 6. 持久化：更新最终 node_count（聚合总数）
     let mut all_subs = existing;
-    for s in all_subs.iter_mut() {
-        s.is_active = false;
-    }
     let mut final_sub = sub;
     final_sub.node_count = Some(node_count);
     all_subs.push(final_sub.clone());
@@ -1062,10 +1057,8 @@ pub async fn subscription_import_content(
     };
 
     {
+        // 多订阅语义：直接加入聚合，不动其他订阅的活跃状态
         let mut all_subs = load_subscriptions();
-        for s in all_subs.iter_mut() {
-            s.is_active = false;
-        }
         all_subs.push(sub.clone());
         save_raw_subscription(&sub.id, &content);
         if let Err(e) = save_subscriptions(&all_subs) {
@@ -1091,9 +1084,6 @@ pub async fn subscription_import_content(
 
     // 持久化最终订阅列表（更新聚合后的 node_count）
     let mut all_subs = load_subscriptions();
-    for s in all_subs.iter_mut() {
-        s.is_active = false;
-    }
     let mut final_sub = sub;
     final_sub.node_count = Some(node_count);
     all_subs.push(final_sub.clone());

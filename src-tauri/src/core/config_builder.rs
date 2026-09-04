@@ -48,7 +48,10 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
                     "type": "local"
                 }
             ],
-            "rules": [],
+            // 与完整配置同语义：Direct 模式下劫持查询走本地解析
+            "rules": [
+                { "clash_mode": "Direct", "action": "route", "server": "local" }
+            ],
             "final": "local",
             "strategy": "prefer_ipv4"
         },
