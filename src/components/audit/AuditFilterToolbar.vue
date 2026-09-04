@@ -190,8 +190,8 @@ defineEmits<{
 
 .search-box:focus-within {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(0, 242, 254, 0.4);
-  box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.1);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
 }
 
 .search-icon {
@@ -255,15 +255,15 @@ defineEmits<{
 }
 
 .capsule.proxied.active {
-  background: rgba(0, 242, 254, 0.15);
-  border-color: #00f2fe;
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 15%, transparent);
+  border-color: var(--accent-cyan-vivid);
+  color: var(--accent-cyan-vivid);
 }
 
 .capsule.direct.active {
   background: rgba(16, 185, 129, 0.15);
-  border-color: #10b981;
-  color: #10b981;
+  border-color: var(--accent-green);
+  color: var(--accent-green);
 }
 
 .capsule.blocked.active {
@@ -313,7 +313,7 @@ defineEmits<{
 }
 
 .highlight-num {
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
   font-weight: 600;
 }
 
@@ -347,7 +347,7 @@ defineEmits<{
 }
 
 .hover-pause-toggle input {
-  accent-color: #00f2fe;
+  accent-color: var(--accent-cyan-vivid);
   cursor: pointer;
   margin: 0;
 }

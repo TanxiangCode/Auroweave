@@ -168,8 +168,8 @@ onMounted(() => {
 
 .nav-search-box:focus-within {
   background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(0, 242, 254, 0.4);
-  box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.1);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
 }
 
 .search-svg-icon {
@@ -233,11 +233,11 @@ onMounted(() => {
 }
 
 .nav-item.active {
-  background: rgba(0, 242, 254, 0.12);
-  border-color: rgba(0, 242, 254, 0.3);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  color: var(--accent-cyan-vivid);
   font-weight: 600;
-  box-shadow: 0 0 12px rgba(0, 242, 254, 0.15);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-cyan-vivid) 15%, transparent);
 }
 
 .nav-icon {

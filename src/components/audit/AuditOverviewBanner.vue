@@ -145,11 +145,11 @@ defineEmits<{
 }
 
 .active-val {
-  color: #10b981;
+  color: var(--accent-green);
 }
 
-.text-cyan { color: #00f2fe !important; }
-.text-green { color: #10b981 !important; }
+.text-cyan { color: var(--accent-cyan-vivid) !important; }
+.text-green { color: var(--accent-green) !important; }
 .text-red { color: #f87171 !important; }
 
 .divider {
@@ -167,14 +167,14 @@ defineEmits<{
   font-variant-numeric: tabular-nums;
 }
 
-.speed-down { color: #00f2fe; }
+.speed-down { color: var(--accent-cyan-vivid); }
 .speed-up { color: #a78bfa; }
 
 .badge-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #10b981;
+  background: var(--accent-green);
 }
 
 .badge-dot.pulse {

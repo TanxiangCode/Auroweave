@@ -271,7 +271,7 @@ async function save(field: keyof AppSettings) {
 }
 
 .select-input:focus {
-  border-color: #00f2fe;
+  border-color: var(--accent-cyan-vivid);
 }
 
 /* switch 统一走 App.vue 全局胶囊开关（36×20，勾选青色高亮） */

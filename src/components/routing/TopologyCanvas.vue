@@ -44,11 +44,11 @@
         <svg class="connections-svg">
           <defs>
             <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#00f2fe" stop-opacity="0.8" />
+              <stop offset="0%" stop-color="var(--accent-cyan-vivid)" stop-opacity="0.8" />
               <stop offset="100%" stop-color="#4facfe" stop-opacity="0.9" />
             </linearGradient>
             <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#10b981" stop-opacity="0.8" />
+              <stop offset="0%" stop-color="var(--accent-green)" stop-opacity="0.8" />
               <stop offset="100%" stop-color="#059669" stop-opacity="0.9" />
             </linearGradient>
             <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -459,8 +459,8 @@ onMounted(async () => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #00f2fe;
-  box-shadow: 0 0 8px #00f2fe;
+  background: var(--accent-cyan-vivid);
+  box-shadow: 0 0 8px var(--accent-cyan-vivid);
 }
 
 .canvas-title {
@@ -471,11 +471,11 @@ onMounted(async () => {
 
 .active-badge {
   font-size: 10.5px;
-  color: #00f2fe;
-  background: rgba(0, 242, 254, 0.12);
+  color: var(--accent-cyan-vivid);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
   padding: 2px 6px;
   border-radius: 4px;
-  border: 1px solid rgba(0, 242, 254, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
 }
 
 .toolbar-actions {
@@ -501,9 +501,9 @@ onMounted(async () => {
 }
 
 .btn-tool.active {
-  background: rgba(0, 242, 254, 0.18);
-  border-color: #00f2fe;
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 18%, transparent);
+  border-color: var(--accent-cyan-vivid);
+  color: var(--accent-cyan-vivid);
 }
 
 .viewport {
@@ -611,9 +611,9 @@ onMounted(async () => {
 }
 
 .topo-node-card.selected {
-  border-color: #00f2fe;
-  background: rgba(0, 242, 254, 0.1);
-  box-shadow: 0 0 20px rgba(0, 242, 254, 0.3);
+  border-color: var(--accent-cyan-vivid);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
 }
 
 .node-icon {
@@ -654,11 +654,11 @@ onMounted(async () => {
 }
 
 .status-indicator.online {
-  background: #10b981;
-  box-shadow: 0 0 6px #10b981;
+  background: var(--accent-green);
+  box-shadow: 0 0 6px var(--accent-green);
 }
 
-.text-cyan { color: #00f2fe !important; }
-.text-green { color: #10b981 !important; }
+.text-cyan { color: var(--accent-cyan-vivid) !important; }
+.text-green { color: var(--accent-green) !important; }
 .text-red { color: #f87171 !important; }
 </style>

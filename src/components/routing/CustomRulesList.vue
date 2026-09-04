@@ -450,7 +450,7 @@ onMounted(() => {
 
 .search-box:focus-within {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(0, 242, 254, 0.4);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
 }
 
 .search-icon {
@@ -518,14 +518,14 @@ onMounted(() => {
   border-radius: 8px;
   border: none;
   cursor: pointer;
-  background: rgba(0, 242, 254, 0.18);
-  color: #00f2fe;
-  border: 1px solid rgba(0, 242, 254, 0.35);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 18%, transparent);
+  color: var(--accent-cyan-vivid);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 35%, transparent);
   transition: all 0.2s;
 }
 
 .btn-add-rule:hover {
-  background: #00f2fe;
+  background: var(--accent-cyan-vivid);
   color: #000;
 }
 
@@ -586,8 +586,8 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.type-badge.domain_suffix { color: #10b981; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); }
-.type-badge.domain { color: #00f2fe; background: rgba(0, 242, 254, 0.12); border: 1px solid rgba(0, 242, 254, 0.25); }
+.type-badge.domain_suffix { color: var(--accent-green); background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); }
+.type-badge.domain { color: var(--accent-cyan-vivid); background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent); }
 .type-badge.domain_keyword { color: #fbbf24; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.25); }
 .type-badge.ip_cidr { color: #f472b6; background: rgba(244, 114, 182, 0.12); border: 1px solid rgba(244, 114, 182, 0.25); }
 .type-badge.domain_regex { color: #a78bfa; background: rgba(167, 139, 250, 0.12); border: 1px solid rgba(167, 139, 250, 0.25); }
@@ -774,8 +774,8 @@ onMounted(() => {
 }
 
 .type-radio-btn.active {
-  background: rgba(0, 242, 254, 0.12);
-  border-color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  border-color: var(--accent-cyan-vivid);
 }
 
 .radio-title {
@@ -800,8 +800,8 @@ onMounted(() => {
 }
 
 .form-input:focus {
-  border-color: rgba(0, 242, 254, 0.5);
-  box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.1);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 50%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
 }
 
 .form-input.mono {
@@ -828,7 +828,7 @@ onMounted(() => {
 
 .btn-modal-submit {
   padding: 7px 16px;
-  background: #00f2fe;
+  background: var(--accent-cyan-vivid);
   color: #000;
   border: none;
   border-radius: 8px;

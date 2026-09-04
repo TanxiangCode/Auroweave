@@ -341,9 +341,9 @@ function formatTime(ts?: number): string {
   gap: 6px;
   padding: 6px 12px;
   border-radius: 8px;
-  background: rgba(0, 242, 254, 0.1);
-  border: 1px solid rgba(0, 242, 254, 0.3);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  color: var(--accent-cyan-vivid);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
@@ -351,7 +351,7 @@ function formatTime(ts?: number): string {
 }
 
 .btn-goto-full:hover {
-  background: rgba(0, 242, 254, 0.2);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
   color: #fff;
   transform: translateX(2px);
 }

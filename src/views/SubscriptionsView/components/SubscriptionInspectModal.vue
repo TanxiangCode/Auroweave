@@ -377,8 +377,8 @@ function getProtocolBadgeClass(type: string) {
   height: 36px;
   flex-shrink: 0;
   color: var(--accent-cyan-vivid);
-  background: rgba(0, 242, 254, 0.08);
-  border: 1px solid rgba(0, 242, 254, 0.2);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
   border-radius: var(--radius-md);
 }
 
@@ -462,7 +462,7 @@ function getProtocolBadgeClass(type: string) {
 
 .tab-btn.active {
   color: var(--accent-cyan-vivid);
-  background: var(--accent-cyan-glow, rgba(0, 242, 254, 0.12));
+  background: var(--accent-cyan-glow, color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent));
 }
 
 .icon-btn {
@@ -516,7 +516,7 @@ function getProtocolBadgeClass(type: string) {
 .spin-ring {
   width: 26px;
   height: 26px;
-  border: 2px solid rgba(0, 242, 254, 0.25);
+  border: 2px solid color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
   border-top-color: var(--accent-cyan-vivid);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -597,13 +597,13 @@ function getProtocolBadgeClass(type: string) {
 
 .btn-copy.primary {
   color: var(--accent-cyan-vivid);
-  background: var(--accent-cyan-glow, rgba(0, 242, 254, 0.12));
-  border-color: rgba(0, 242, 254, 0.3);
+  background: var(--accent-cyan-glow, color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent));
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
 }
 
 .btn-copy.primary:hover {
   color: #fff;
-  background: rgba(0, 242, 254, 0.2);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
 }
 
 .btn-copy.small {

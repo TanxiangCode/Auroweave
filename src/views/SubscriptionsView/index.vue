@@ -228,7 +228,7 @@ async function handleDelete(sub: Subscription) {
       <div class="header-left">
         <div class="title-row">
           <div class="icon-orb">
-            <BaseIcon name="Rss" :size="20" color="#00f2fe" />
+            <BaseIcon name="Rss" :size="20" color="var(--accent-cyan-vivid)" />
           </div>
           <div>
             <h1 class="page-title">订阅中心</h1>
@@ -286,7 +286,7 @@ async function handleDelete(sub: Subscription) {
       <!-- 空状态 -->
       <div v-if="subscriptions.length === 0" class="empty-state-card glass-effect">
         <div class="empty-icon-wrap">
-          <BaseIcon name="Rss" :size="48" color="rgba(0, 242, 254, 0.4)" />
+          <BaseIcon name="Rss" :size="48" color="color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent)" />
         </div>
         <h3>尚未导入任何订阅</h3>
         <p>支持导入远程 URL、剪贴板节点集合以及本地 Clash YAML / sing-box JSON 文件</p>
@@ -501,8 +501,8 @@ async function handleDelete(sub: Subscription) {
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: radial-gradient(circle at center, rgba(0, 242, 254, 0.2) 0%, rgba(0, 0, 0, 0) 70%);
-  border: 1px solid rgba(0, 242, 254, 0.3);
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent) 0%, rgba(0, 0, 0, 0) 70%);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -549,11 +549,11 @@ async function handleDelete(sub: Subscription) {
 }
 
 .badge-value.cyan {
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
 }
 
 .badge-value.green {
-  color: #43e97b;
+  color: var(--accent-green);
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -580,9 +580,9 @@ async function handleDelete(sub: Subscription) {
 }
 
 .btn-action.primary {
-  background: linear-gradient(135deg, rgba(0, 242, 254, 0.85) 0%, rgba(79, 172, 254, 0.85) 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-cyan-vivid) 85%, transparent) 0%, rgba(79, 172, 254, 0.85) 100%);
   color: #000;
-  box-shadow: 0 4px 12px rgba(0, 242, 254, 0.2);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
 }
 
 .btn-action.primary:hover {
@@ -639,9 +639,9 @@ async function handleDelete(sub: Subscription) {
 }
 
 .subscription-card.active {
-  border-color: rgba(0, 242, 254, 0.4);
-  background: radial-gradient(circle at top right, rgba(0, 242, 254, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
-  box-shadow: 0 6px 20px rgba(0, 242, 254, 0.08);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
+  background: radial-gradient(circle at top right, color-mix(in srgb, var(--accent-cyan-vivid) 6%, transparent) 0%, rgba(255, 255, 255, 0.02) 100%);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
 }
 
 .card-header {
@@ -689,19 +689,19 @@ async function handleDelete(sub: Subscription) {
   gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(0, 242, 254, 0.12);
-  border: 1px solid rgba(0, 242, 254, 0.25);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
 }
 
 .pulse-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #00f2fe;
-  box-shadow: 0 0 8px #00f2fe;
+  background: var(--accent-cyan-vivid);
+  box-shadow: 0 0 8px var(--accent-cyan-vivid);
   animation: pulseDot 2s infinite ease-in-out;
 }
 
@@ -743,7 +743,7 @@ async function handleDelete(sub: Subscription) {
 
 .traffic-percent {
   font-weight: 700;
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
 }
 
 .progress-bar-track {
@@ -756,7 +756,7 @@ async function handleDelete(sub: Subscription) {
 .progress-bar-fill {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, #00f2fe 0%, #4facfe 100%);
+  background: linear-gradient(90deg, var(--accent-cyan-vivid) 0%, #4facfe 100%);
   transition: width 0.4s ease;
 }
 
@@ -848,13 +848,13 @@ async function handleDelete(sub: Subscription) {
 }
 
 .btn-card-action.activate {
-  background: rgba(0, 242, 254, 0.1);
-  border-color: rgba(0, 242, 254, 0.3);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  color: var(--accent-cyan-vivid);
 }
 
 .btn-card-action.activate:hover:not(:disabled) {
-  background: rgba(0, 242, 254, 0.2);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
   color: #fff;
 }
 
@@ -868,13 +868,13 @@ async function handleDelete(sub: Subscription) {
 .btn-card-action.deactivate:hover:not(:disabled) {
   background: rgba(255, 77, 79, 0.08);
   border-color: rgba(255, 77, 79, 0.25);
-  color: #ff8f91;
+  color: var(--accent-red);
 }
 
 .btn-card-action.delete:hover:not(:disabled) {
   background: rgba(255, 77, 79, 0.15);
   border-color: rgba(255, 77, 79, 0.3);
-  color: #ff4d4f;
+  color: var(--status-danger);
 }
 
 /* 空状态卡片 */
@@ -912,14 +912,14 @@ async function handleDelete(sub: Subscription) {
   gap: 6px;
   padding: 9px 18px;
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(0, 242, 254, 0.9) 0%, rgba(79, 172, 254, 0.9) 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-cyan-vivid) 90%, transparent) 0%, rgba(79, 172, 254, 0.9) 100%);
   color: #000;
   font-size: 13px;
   font-weight: 600;
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 14px rgba(0, 242, 254, 0.25);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
 }
 
 .btn-import-empty:hover {

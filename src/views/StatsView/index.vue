@@ -69,14 +69,15 @@ onMounted(() => {
 
 <template>
   <div class="stats-container">
-    <!-- 头部 -->
-    <header class="stats-header">
-      <div class="header-left">
-        <h2>流量统计大盘</h2>
-        <span class="sub-tip">固化历史数据实时 analysis</span>
+    <!-- 头部（page-header 标准节奏） -->
+    <header class="page-header">
+      <div class="title-area">
+        <h1><SvgIcon name="stats" :size="24" class="title-icon" /> 流量统计大盘</h1>
+        <p class="subtitle">按小时聚合的流量趋势与应用排行，数据本地持久化</p>
       </div>
-      <button class="btn-clear" @click="clearStats" title="清空所有累计历史流量统计">
-        <SvgIcon name="refresh" :size="12" class="icon-gap" />
+      <div class="header-actions">
+        <button class="btn-clear" @click="clearStats" title="清空所有累计历史流量统计">
+          <SvgIcon name="refresh" :size="12" class="icon-gap" />
         重置数据
       </button>
     </header>

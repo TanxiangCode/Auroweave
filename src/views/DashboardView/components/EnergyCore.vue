@@ -73,7 +73,7 @@ const textStyle = computed<{ color?: string; textShadow?: string }>(() => {
 /** 呼吸灯光晕颜色（配合 v-bind 实现动态关键帧） */
 const breathingGlowColor = computed(() => {
   if (!props.proxyActive) return "rgba(255, 255, 255, 0.05)";
-  return currentTheme.value?.breathing || "rgba(0, 242, 254, 0.4)";
+  return currentTheme.value?.breathing || "color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent)";
 });
 </script>
 
@@ -188,7 +188,7 @@ const breathingGlowColor = computed(() => {
 }
 
 .energy-core:hover .energy-ring {
-  box-shadow: 0 0 24px rgba(0, 242, 254, 0.45), var(--shadow-glow-cyan);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent-cyan-vivid) 45%, transparent), var(--shadow-glow-cyan);
 }
 
 .energy-core:not(.connected) .energy-ring {

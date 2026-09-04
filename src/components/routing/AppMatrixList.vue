@@ -356,8 +356,8 @@ onMounted(() => {
 
 .search-box:focus-within {
   background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(0, 242, 254, 0.4);
-  box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.1);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
 }
 
 .search-icon {
@@ -417,9 +417,9 @@ onMounted(() => {
 }
 
 .capsule.active-rules.active {
-  background: rgba(0, 242, 254, 0.16);
-  border-color: #00f2fe;
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 16%, transparent);
+  border-color: var(--accent-cyan-vivid);
+  color: var(--accent-cyan-vivid);
 }
 
 .hide-system-toggle {
@@ -437,7 +437,7 @@ onMounted(() => {
 }
 
 .hide-system-toggle input {
-  accent-color: #00f2fe;
+  accent-color: var(--accent-cyan-vivid);
   cursor: pointer;
   margin: 0;
 }
@@ -508,8 +508,8 @@ onMounted(() => {
 }
 
 .process-card.has-custom-rule {
-  border-left: 3px solid #00f2fe;
-  background: rgba(0, 242, 254, 0.025);
+  border-left: 3px solid var(--accent-cyan-vivid);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 2.5%, transparent);
 }
 
 .card-left {

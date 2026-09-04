@@ -30,9 +30,9 @@ h2 { font-size: var(--text-lg); font-weight: var(--weight-bold); }
 .coming-soon-tag {
   font-size: 10px;
   font-weight: var(--weight-semibold);
-  color: rgba(0, 242, 254, 0.8);
-  background: rgba(0, 242, 254, 0.1);
-  border: 1px solid rgba(0, 242, 254, 0.25);
+  color: color-mix(in srgb, var(--accent-cyan-vivid) 80%, transparent);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
   border-radius: var(--radius-xs);
   padding: 0 5px;
   margin-left: 6px;

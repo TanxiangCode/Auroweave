@@ -124,8 +124,8 @@ onUnmounted(() => {
 
 .confirm-icon.normal {
   color: var(--accent-cyan-vivid);
-  background: var(--accent-cyan-glow, rgba(0, 242, 254, 0.08));
-  border: 1px solid rgba(0, 242, 254, 0.25);
+  background: var(--accent-cyan-glow, color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
 }
 
 .confirm-title {

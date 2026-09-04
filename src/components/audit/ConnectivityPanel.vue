@@ -176,8 +176,8 @@ async function runCheck() {
 }
 
 .pulse-dot.ok {
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
   animation: pulse 2s ease infinite;
 }
 
@@ -204,16 +204,16 @@ async function runCheck() {
   padding: 8px 20px;
   font-size: 12px;
   font-weight: 600;
-  color: #00f2fe;
-  background: rgba(0, 242, 254, 0.1);
-  border: 1px solid rgba(0, 242, 254, 0.3);
+  color: var(--accent-cyan-vivid);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .btn-run:hover:not(:disabled) {
-  background: rgba(0, 242, 254, 0.2);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
   color: #fff;
 }
 
@@ -225,8 +225,8 @@ async function runCheck() {
 .spinner {
   width: 12px;
   height: 12px;
-  border: 2px solid rgba(0, 242, 254, 0.3);
-  border-top-color: #00f2fe;
+  border: 2px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  border-top-color: var(--accent-cyan-vivid);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -251,8 +251,8 @@ async function runCheck() {
   gap: 6px;
 }
 
-.path-card.direct { border-left: 3px solid #10b981; }
-.path-card.proxied { border-left: 3px solid #00f2fe; }
+.path-card.direct { border-left: 3px solid var(--accent-green); }
+.path-card.proxied { border-left: 3px solid var(--accent-cyan-vivid); }
 
 .path-head {
   display: flex;
@@ -274,7 +274,7 @@ async function runCheck() {
 }
 
 .path-status.ok {
-  color: #10b981;
+  color: var(--accent-green);
   background: rgba(16, 185, 129, 0.1);
 }
 
@@ -333,8 +333,8 @@ async function runCheck() {
 }
 
 .verdict.info {
-  background: rgba(0, 242, 254, 0.04);
-  border-color: rgba(0, 242, 254, 0.2);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 4%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
 }
 
 .v-icon {
@@ -344,9 +344,9 @@ async function runCheck() {
   margin-top: 2px;
 }
 
-.verdict.ok .v-icon { color: #10b981; }
+.verdict.ok .v-icon { color: var(--accent-green); }
 .verdict.warn .v-icon { color: #f5a623; }
-.verdict.info .v-icon { color: #00f2fe; }
+.verdict.info .v-icon { color: var(--accent-cyan-vivid); }
 
 .v-title {
   font-size: 13px;

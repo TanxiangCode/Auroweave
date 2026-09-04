@@ -67,7 +67,7 @@ interface RegionBadgeInfo {
 function getRegionBadge(tag: string): RegionBadgeInfo {
   const t = tag.toUpperCase();
   if (t.includes("HK") || tag.includes("香港")) {
-    return { code: "HK", bg: "rgba(0, 242, 254, 0.15)", color: "#00f2fe" };
+    return { code: "HK", bg: "color-mix(in srgb, var(--accent-cyan-vivid) 15%, transparent)", color: "var(--accent-cyan-vivid)" };
   }
   if (t.includes("JP") || tag.includes("日本")) {
     return { code: "JP", bg: "rgba(255, 94, 98, 0.15)", color: "#ff5e62" };
@@ -77,7 +77,7 @@ function getRegionBadge(tag: string): RegionBadgeInfo {
     return { code: "US", bg: "rgba(79, 172, 254, 0.15)", color: "#4facfe" };
   }
   if (t.includes("TW") || tag.includes("台湾") || tag.includes("台灣")) {
-    return { code: "TW", bg: "rgba(67, 233, 123, 0.15)", color: "#43e97b" };
+    return { code: "TW", bg: "color-mix(in srgb, var(--accent-green) 15%, transparent)", color: "var(--accent-green)" };
   }
   if (t.includes("SG") || tag.includes("新加坡") || tag.includes("狮城")) {
     return { code: "SG", bg: "rgba(250, 112, 154, 0.15)", color: "#fa709a" };
@@ -545,9 +545,9 @@ function getGroupTypeLabel(tag: string, type: string): string {
 
 .group-type-badge.auto,
 .group-type-badge.region {
-  background: rgba(0, 242, 254, 0.1);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
   color: var(--accent-cyan);
-  border-color: rgba(0, 242, 254, 0.3);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
 }
 
 .group-type-badge.balance {

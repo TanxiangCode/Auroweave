@@ -386,8 +386,8 @@ onMounted(() => {
 }
 
 .setting-card.highlight-border {
-  border-color: rgba(0, 242, 254, 0.25);
-  background: linear-gradient(180deg, rgba(0, 242, 254, 0.03) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-cyan-vivid) 3%, transparent) 0%, rgba(255, 255, 255, 0.02) 100%);
 }
 
 .card-header {
@@ -424,10 +424,10 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: rgba(0, 242, 254, 0.12);
-  border: 1px solid rgba(0, 242, 254, 0.3);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
   border-radius: 8px;
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -435,7 +435,7 @@ onMounted(() => {
 }
 
 .btn-check-update:hover:not(:disabled) {
-  background: #00f2fe;
+  background: var(--accent-cyan-vivid);
   color: #000;
 }
 
@@ -476,10 +476,10 @@ onMounted(() => {
 
 .version-badge.current {
   padding: 2px 8px;
-  background: rgba(0, 242, 254, 0.15);
-  border: 1px solid rgba(0, 242, 254, 0.35);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 35%, transparent);
   border-radius: 6px;
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
   font-weight: 700;
   font-family: monospace;
 }
@@ -500,14 +500,14 @@ onMounted(() => {
 }
 
 .up-to-date-badge {
-  color: #10b981;
+  color: var(--accent-green);
   font-size: 12px;
   font-weight: 600;
 }
 
 .update-release-box {
-  background: rgba(0, 242, 254, 0.04);
-  border: 1px dashed rgba(0, 242, 254, 0.3);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 4%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
   border-radius: 10px;
   padding: 14px;
   display: flex;
@@ -541,7 +541,7 @@ onMounted(() => {
 
 .btn-upgrade-now {
   padding: 7px 16px;
-  background: #00f2fe;
+  background: var(--accent-cyan-vivid);
   color: #000;
   border: none;
   border-radius: 8px;
@@ -553,7 +553,7 @@ onMounted(() => {
 
 .btn-upgrade-now:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 0 15px rgba(0, 242, 254, 0.4);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
 }
 
 .btn-upgrade-now:disabled {
@@ -635,7 +635,7 @@ onMounted(() => {
 
 .text-input:focus,
 .num-input:focus {
-  border-color: #00f2fe;
+  border-color: var(--accent-cyan-vivid);
 }
 
 .num-input {

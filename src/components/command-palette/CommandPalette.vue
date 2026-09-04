@@ -334,8 +334,8 @@ defineExpose({ open, close });
 }
 
 .command-item.active {
-  background: rgba(0, 242, 254, 0.12);
-  border: 1px solid rgba(0, 242, 254, 0.25);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
 }
 
 .cmd-icon {

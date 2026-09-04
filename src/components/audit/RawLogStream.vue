@@ -199,7 +199,7 @@ function copyAllLogs() {
 }
 
 .log-filter-input:focus {
-  border-color: rgba(0, 242, 254, 0.4);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
 }
 
 .level-pills {
@@ -225,7 +225,7 @@ function copyAllLogs() {
   font-weight: 600;
 }
 
-.level-btn.info.active { color: #00f2fe; }
+.level-btn.info.active { color: var(--accent-cyan-vivid); }
 .level-btn.warn.active { color: #fbbf24; }
 .level-btn.error.active { color: #f87171; }
 
@@ -303,6 +303,6 @@ function copyAllLogs() {
 
 .log-line.error { color: #f87171; }
 .log-line.warn { color: #fbbf24; }
-.log-line.info { color: #00f2fe; }
+.log-line.info { color: var(--accent-cyan-vivid); }
 .log-line.default { color: rgba(255, 255, 255, 0.7); }
 </style>

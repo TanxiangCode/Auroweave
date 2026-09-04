@@ -185,12 +185,12 @@ h2 { font-size: var(--text-lg); font-weight: var(--weight-bold); }
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   color: var(--accent-cyan-vivid);
-  background: var(--accent-cyan-glow, rgba(0, 242, 254, 0.1));
-  border: 1px solid rgba(0, 242, 254, 0.3);
+  background: var(--accent-cyan-glow, color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }
-.btn-update-ruleset:hover:not(:disabled) { background: rgba(0, 242, 254, 0.2); color: #fff; }
+.btn-update-ruleset:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent); color: #fff; }
 .btn-update-ruleset:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

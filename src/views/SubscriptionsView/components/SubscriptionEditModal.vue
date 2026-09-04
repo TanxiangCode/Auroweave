@@ -139,7 +139,7 @@ async function handleSave() {
           <!-- 头部 -->
           <div class="modal-header">
             <div class="modal-title">
-              <BaseIcon name="Settings2" :size="18" color="#00f2fe" />
+              <BaseIcon name="Settings2" :size="18" color="var(--accent-cyan-vivid)" />
               <h3>配置订阅属性</h3>
             </div>
             <button class="btn-close" @click="emit('update:visible', false)">
@@ -407,9 +407,9 @@ async function handleSave() {
 }
 
 .tab-btn.active {
-  background: rgba(0, 242, 254, 0.12);
-  border-color: rgba(0, 242, 254, 0.25);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
+  color: var(--accent-cyan-vivid);
 }
 
 .modal-body {
@@ -441,7 +441,7 @@ async function handleSave() {
 .btn-text-action {
   background: transparent;
   border: none;
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
   font-size: 11px;
   cursor: pointer;
   padding: 0;
@@ -474,7 +474,7 @@ async function handleSave() {
 }
 
 .form-input:focus {
-  border-color: #00f2fe;
+  border-color: var(--accent-cyan-vivid);
 }
 
 .rename-row {
@@ -516,9 +516,9 @@ async function handleSave() {
 }
 
 .chip-btn.active {
-  background: rgba(0, 242, 254, 0.15);
-  border-color: rgba(0, 242, 254, 0.3);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  color: var(--accent-cyan-vivid);
 }
 
 .interval-select-row {
@@ -545,9 +545,9 @@ async function handleSave() {
 }
 
 .interval-btn.active {
-  background: rgba(0, 242, 254, 0.12);
-  border-color: rgba(0, 242, 254, 0.3);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  color: var(--accent-cyan-vivid);
   font-weight: 600;
 }
 
@@ -576,7 +576,7 @@ async function handleSave() {
   gap: 6px;
   padding: 7px 16px;
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(0, 242, 254, 0.9) 0%, rgba(79, 172, 254, 0.9) 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-cyan-vivid) 90%, transparent) 0%, rgba(79, 172, 254, 0.9) 100%);
   color: #000;
   font-size: 12px;
   font-weight: 600;
