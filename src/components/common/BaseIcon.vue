@@ -70,6 +70,7 @@ import {
   Key,
   Lock,
   BookOpen,
+  Database,
 } from "lucide-vue-next";
 
 
@@ -156,6 +157,7 @@ const iconMap: Record<string, any> = {
   Key,
   Lock,
   BookOpen,
+  Database,
 };
 
 

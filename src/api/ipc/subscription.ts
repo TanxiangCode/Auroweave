@@ -115,3 +115,29 @@ export async function inspectSubscription(
     { id }
   );
 }
+
+/** 本地规则集缓存状态（geosite-cn / geoip-cn .srs） */
+export interface RuleSetStatus {
+  geosite_exists: boolean;
+  geosite_size: number;
+  geosite_modified: number | null;
+  geoip_exists: boolean;
+  geoip_size: number;
+  geoip_modified: number | null;
+}
+
+/** 查询本地规则集缓存状态 */
+export async function getRuleSetStatus(): Promise<ApiResponse<RuleSetStatus>> {
+  return invokeWithTimeout<ApiResponse<RuleSetStatus>>("ruleset_get_status");
+}
+
+/** 强制更新规则集（绕过缓存下载最新 .srs 并重建配置） */
+export async function forceUpdateRuleSets(): Promise<
+  ApiResponse<[boolean, boolean, number, number]>
+> {
+  return invokeWithTimeout<ApiResponse<[boolean, boolean, number, number]>>(
+    "ruleset_force_update",
+    {},
+    30000
+  );
+}

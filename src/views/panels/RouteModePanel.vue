@@ -42,18 +42,112 @@
         />
       </div>
     </div>
+
+    <h2><BaseIcon name="Database" :size="20" class="panel-header-icon" /> 分流规则集 (Rule-Set)</h2>
+    <p class="panel-desc">geosite-cn / geoip-cn 决定国内域名与 IP 的直连判定，订阅激活时自动下载缓存。可手动强制更新到最新版本：</p>
+    <div class="setting-group">
+      <div class="setting-item ruleset-item">
+        <div class="item-label">
+          <span>geosite-cn.srs</span>
+          <span class="sub-label">{{ geositeDesc }}</span>
+        </div>
+      </div>
+      <div class="setting-item ruleset-item">
+        <div class="item-label">
+          <span>geoip-cn.srs</span>
+          <span class="sub-label">{{ geoipDesc }}</span>
+        </div>
+      </div>
+      <button
+        class="btn-update-ruleset"
+        :disabled="updatingRuleset"
+        @click="handleUpdateRuleSets"
+      >
+        {{ updatingRuleset ? "正在更新…" : "强制更新规则集" }}
+      </button>
+    </div>
   </div>
   </template>
 
 <script setup lang="ts">
 import BaseIcon from "@/components/common/BaseIcon.vue";
+import { onMounted, ref, computed } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useToast } from "@/composables/useToast";
+import {
+  getRuleSetStatus,
+  forceUpdateRuleSets,
+  type RuleSetStatus,
+} from "@/api/ipc/subscription";
 
 const settingsStore = useSettingsStore();
 const proxyStore = useProxyStore();
 const toast = useToast();
+
+const rulesetStatus = ref<RuleSetStatus | null>(null);
+const updatingRuleset = ref(false);
+
+function formatSize(bytes: number): string {
+  if (bytes <= 0) return "0 KB";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatTime(ms: number | null): string {
+  if (!ms) return "未知";
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+const geositeDesc = computed(() => {
+  const s = rulesetStatus.value;
+  if (!s?.geosite_exists) return "未缓存（订阅激活时自动下载）";
+  return `${formatSize(s.geosite_size)} · 更新于 ${formatTime(s.geosite_modified)}`;
+});
+
+const geoipDesc = computed(() => {
+  const s = rulesetStatus.value;
+  if (!s?.geoip_exists) return "未缓存（订阅激活时自动下载）";
+  return `${formatSize(s.geoip_size)} · 更新于 ${formatTime(s.geoip_modified)}`;
+});
+
+async function loadRuleSetStatus() {
+  const res = await getRuleSetStatus();
+  if (res.success && res.data) {
+    rulesetStatus.value = res.data;
+  }
+}
+
+async function handleUpdateRuleSets() {
+  updatingRuleset.value = true;
+  try {
+    const res = await forceUpdateRuleSets();
+    if (res.success && res.data) {
+      const [geositeOk, geoipOk, geositeSize, geoipSize] = res.data;
+      if (geositeOk && geoipOk) {
+        toast.success(
+          "规则集已更新",
+          `geosite ${formatSize(geositeSize)} · geoip ${formatSize(geoipSize)}，配置已重建`
+        );
+      } else if (geositeOk || geoipOk) {
+        toast.error(
+          "部分更新成功",
+          `geosite ${geositeOk ? "✓" : "✗"} · geoip ${geoipOk ? "✓" : "✗"}，失败项保留旧缓存`
+        );
+      } else {
+        toast.error("更新失败", "网络不可达，旧缓存仍有效");
+      }
+      await loadRuleSetStatus();
+    } else {
+      toast.error("更新失败", res.error || "下载异常");
+    }
+  } finally {
+    updatingRuleset.value = false;
+  }
+}
+
+onMounted(loadRuleSetStatus);
 
 async function save() {
   // 局部 patch：仅提交本面板涉及的端口字段，避免全量 settings 覆盖其他未保存修改
@@ -75,6 +169,7 @@ async function saveMode() {
 <style scoped>
 .panel-container { display: flex; flex-direction: column; gap: 16px; }
 h2 { font-size: 18px; font-weight: 700; }
+.panel-desc { font-size: 12px; color: rgba(255,255,255,0.45); margin: 0; line-height: 1.6; }
 .setting-group { display: flex; flex-direction: column; gap: 12px; }
 .setting-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }
 .item-label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600; }
@@ -82,4 +177,21 @@ h2 { font-size: 18px; font-weight: 700; }
 .select-input { padding: 6px 12px; background: #121622; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; outline: none; }
 .num-input { padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; width: 100px; outline: none; }
 .switch { width: 18px; height: 18px; cursor: pointer; }
+
+/* 规则集区块 */
+.ruleset-item { font-family: var(--font-mono); font-size: 13px; }
+.btn-update-ruleset {
+  align-self: flex-start;
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #00f2fe;
+  background: rgba(0, 242, 254, 0.1);
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-update-ruleset:hover:not(:disabled) { background: rgba(0, 242, 254, 0.2); color: #fff; }
+.btn-update-ruleset:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

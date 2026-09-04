@@ -111,6 +111,8 @@ pub fn run() {
             commands::subscription::subscription_refresh,
             commands::subscription::subscription_activate,
             commands::subscription::subscription_inspect,
+            commands::subscription::ruleset_force_update,
+            commands::subscription::ruleset_get_status,
             commands::settings::settings_get_all,
             commands::settings::settings_save,
             commands::settings::settings_inject_terminal_proxy,
