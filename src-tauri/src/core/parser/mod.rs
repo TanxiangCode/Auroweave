@@ -168,8 +168,8 @@ pub fn is_announcement_or_fake_node(tag: &str, server: Option<&str>, port: Optio
 
 /// 判断 ParsedOutbound 是否为真实有效的代理节点
 pub fn is_valid_proxy_node(out: &ParsedOutbound) -> bool {
-    // 基础协议检查
-    let valid_types = ["ss", "shadowsocks", "vmess", "vless", "trojan", "hysteria2", "hy2", "tuic", "wireguard", "socks", "http", "anytls"];
+    // 基础协议检查（snell 自 sing-box 1.14.0 起原生支持）
+    let valid_types = ["ss", "shadowsocks", "vmess", "vless", "trojan", "hysteria2", "hy2", "tuic", "wireguard", "socks", "http", "anytls", "snell", "hysteria"];
     if !valid_types.contains(&out.r#type.to_lowercase().as_str()) {
         return false;
     }

@@ -334,7 +334,27 @@ fn convert_clash_proxy_to_singbox(proxy: &YamlValue) -> Option<ParsedOutbound> {
                 if !ports.is_empty() {
                     obj["server_ports"] = json!(ports);
                     obj.as_object_mut().unwrap().remove("server_port");
+                    // 端口跳跃间隔与随机化上限（1.14.0 hop_interval_max）
+                    if let Some(hi) = proxy.get("hop-interval").or_else(|| proxy.get("hop_interval")).and_then(|v| v.as_str()) {
+                        if !hi.is_empty() { obj["hop_interval"] = json!(hi); }
+                    }
+                    if let Some(him) = proxy.get("hop-interval-max").or_else(|| proxy.get("hop_interval_max")).and_then(|v| v.as_str()) {
+                        if !him.is_empty() { obj["hop_interval_max"] = json!(him); }
+                    }
                 }
+            }
+            // BBR 档位白名单（1.14.0 bbr_profile：conservative/standard/aggressive）
+            if let Some(bp) = proxy.get("bbr-profile").or_else(|| proxy.get("bbr_profile")).and_then(|v| v.as_str()) {
+                const BBR_PROFILES: &[&str] = &["conservative", "standard", "aggressive"];
+                if BBR_PROFILES.contains(&bp) {
+                    obj["bbr_profile"] = json!(bp);
+                } else {
+                    log::warn!("[parser] Clash hy2 节点 [{}] 的非法 BBR 档位 {} 已丢弃", name, bp);
+                }
+            }
+            // 1.14.0 兼容刚需：默认伪装 Chrome QUIC 握手对 Ed25519 证书服务器不可用
+            if proxy.get("disable-chrome-parrot").or_else(|| proxy.get("disable_chrome_parrot")).and_then(|v| v.as_bool()).unwrap_or(false) {
+                obj["disable_chrome_parrot"] = json!(true);
             }
             ("hysteria2".to_string(), obj)
         }
@@ -667,6 +687,25 @@ proxies:
         let raw = &outbounds[0].raw_json;
         assert_eq!(raw["server_ports"][0], "2080:3000");
         assert!(raw.get("server_port").is_none(), "server_port 与 server_ports 互斥，必须移除");
+    }
+
+    #[test]
+    fn test_parse_clash_hy2_v14_params() {
+        // 1.14.0 新参数：hop-interval-max / bbr-profile / disable-chrome-parrot
+        let yaml = r#"
+proxies:
+  - { name: 'hy2-v14', type: hysteria2, server: h2.example.com, port: 443, password: pw, ports: ['2080:3000'], hop-interval: 30s, hop-interval-max: 60s, bbr-profile: conservative, disable-chrome-parrot: true }
+  - { name: 'hy2-badbbr', type: hysteria2, server: h3.example.com, port: 443, password: pw, bbr-profile: bogus }
+"#;
+        let outbounds = parse_clash_yaml(yaml).unwrap();
+        let raw = &outbounds[0].raw_json;
+        assert_eq!(raw["server_ports"][0], "2080:3000");
+        assert_eq!(raw["hop_interval"], "30s");
+        assert_eq!(raw["hop_interval_max"], "60s");
+        assert_eq!(raw["bbr_profile"], "conservative");
+        assert_eq!(raw["disable_chrome_parrot"], true);
+        // 非法 BBR 档位被白名单丢弃
+        assert!(outbounds[1].raw_json.get("bbr_profile").is_none());
     }
 
     #[test]

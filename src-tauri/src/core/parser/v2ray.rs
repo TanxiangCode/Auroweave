@@ -542,6 +542,11 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     // 端口跳跃：mport=2080:3000 或 mport=2080,3001（Hysteria2 官方 URI 生态惯例）
     // sing-box 对应字段为 server_ports 列表，与 server_port 互斥（outbound/hysteria2.md）
     let mut mport: Option<Vec<String>> = None;
+    // 1.14.0 新参数：端口跳跃随机化区间 / BBR 档位 / Chrome QUIC 指纹伪装关闭
+    let mut hop_interval: Option<String> = None;
+    let mut hop_interval_max: Option<String> = None;
+    let mut bbr_profile: Option<String> = None;
+    let mut disable_chrome_parrot = false;
 
     for (k, v) in parsed_url.query_pairs() {
         match k.as_ref() {
@@ -554,6 +559,11 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
                     mport = Some(list);
                 }
             }
+            "hop-interval" | "hop_interval" => hop_interval = Some(v.to_string()),
+            "hop-interval-max" | "hop_interval_max" => hop_interval_max = Some(v.to_string()),
+            "bbr-profile" | "bbr_profile" => bbr_profile = Some(v.to_string()),
+            // 兼容刚需：1.14 默认伪装 Chrome QUIC 握手，Ed25519 证书服务器握手会失败
+            "disable-chrome-parrot" | "disable_chrome_parrot" => disable_chrome_parrot = v == "1" || v == "true",
             "obfs-password" => {
                 obfs_pass = Some(
                     urlencoding::decode(&v)
@@ -576,6 +586,29 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     if let Some(ports) = mport {
         raw_json["server_ports"] = json!(ports);
         raw_json.as_object_mut().unwrap().remove("server_port");
+        // 端口跳跃间隔（默认 30s）；随机化上限仅在显式提供时写入
+        if let Some(hi) = hop_interval {
+            if !hi.is_empty() {
+                raw_json["hop_interval"] = json!(hi);
+            }
+        }
+        if let Some(him) = hop_interval_max {
+            if !him.is_empty() {
+                raw_json["hop_interval_max"] = json!(him);
+            }
+        }
+    }
+    // BBR 拥塞控制档位白名单（outbound/hysteria2.md：conservative/standard/aggressive）
+    if let Some(bp) = bbr_profile {
+        const BBR_PROFILES: &[&str] = &["conservative", "standard", "aggressive"];
+        if BBR_PROFILES.contains(&bp.as_str()) {
+            raw_json["bbr_profile"] = json!(bp);
+        } else {
+            log::warn!("[parser] hy2 节点 [{}] 的非法 BBR 档位 {} 已丢弃", tag, bp);
+        }
+    }
+    if disable_chrome_parrot {
+        raw_json["disable_chrome_parrot"] = json!(true);
     }
 
     // hy2 始终基于 TLS：无条件启用 tls 块，sni 缺省回退 server 地址
@@ -846,6 +879,33 @@ mod tests {
         assert!(parsed.raw_json.get("congestion_control").is_none());
         // 无 password 字段时不生成空串
         assert!(parsed.raw_json.get("password").is_none());
+    }
+
+    #[test]
+    fn test_parse_hy2_port_hopping_and_v14_params() {
+        // mport 端口跳跃 + 1.14.0 新参数（hop_interval/hop_interval_max/bbr_profile/disable_chrome_parrot）
+        let uri = "hy2://pw@h2.example.com:443?mport=2080:3000&hop-interval=30s&hop-interval-max=60s&bbr-profile=aggressive&disable-chrome-parrot=1&sni=h2.example.com#hy2-hop";
+        let parsed = parse_hysteria2_uri(uri).expect("hy2 应该解析成功");
+        let raw = &parsed.raw_json;
+        assert_eq!(raw["server_ports"][0], "2080:3000");
+        assert!(raw.get("server_port").is_none(), "server_port 与 server_ports 互斥必须移除");
+        assert_eq!(raw["hop_interval"], "30s");
+        assert_eq!(raw["hop_interval_max"], "60s");
+        assert_eq!(raw["bbr_profile"], "aggressive");
+        assert_eq!(raw["disable_chrome_parrot"], true);
+        assert_eq!(raw["tls"]["server_name"], "h2.example.com");
+    }
+
+    #[test]
+    fn test_parse_hy2_invalid_bbr_profile_dropped() {
+        // 非法 BBR 档位不透传（拒载防护）
+        let uri = "hy2://pw@h2.example.com:443?bbr-profile=bogus#t";
+        let parsed = parse_hysteria2_uri(uri).expect("hy2 应该解析成功");
+        assert!(parsed.raw_json.get("bbr_profile").is_none());
+        // 非法 disable_chrome_parrot 值不生效
+        let uri2 = "hy2://pw@h2.example.com:443?disable-chrome-parrot=yes#t";
+        let parsed2 = parse_hysteria2_uri(uri2).expect("hy2 应该解析成功");
+        assert!(parsed2.raw_json.get("disable_chrome_parrot").is_none());
     }
 
     #[test]
