@@ -121,6 +121,7 @@
 
 <script setup lang="ts">
 import BaseIcon from "@/components/common/BaseIcon.vue";
+import { formatBytes } from "@/utils/format";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
 
 
@@ -136,13 +137,6 @@ defineEmits<{
 
 function isActive(id: string): boolean {
   return props.activeIdSet.has(id);
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function getDuration(startTime: number): string {
@@ -218,7 +212,7 @@ td {
 }
 
 .status-dot.online {
-  background: #10b981;
+  background: var(--accent-green);
   box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
 }
 
@@ -297,8 +291,8 @@ td {
   font-weight: 600;
 }
 
-.outbound-badge.proxied { color: #00f2fe; background: rgba(0, 242, 254, 0.1); }
-.outbound-badge.direct { color: #10b981; background: rgba(16, 185, 129, 0.1); }
+.outbound-badge.proxied { color: var(--accent-cyan-vivid); background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent); }
+.outbound-badge.direct { color: var(--accent-green); background: rgba(16, 185, 129, 0.1); }
 .outbound-badge.blocked { color: #f87171; background: rgba(248, 113, 113, 0.1); }
 
 .node-tag {
@@ -326,7 +320,7 @@ td {
   font-variant-numeric: tabular-nums;
 }
 
-.traffic-down { color: #00f2fe; }
+.traffic-down { color: var(--accent-cyan-vivid); }
 .traffic-up { color: #a78bfa; }
 
 .duration-text {

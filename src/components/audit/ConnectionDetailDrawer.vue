@@ -150,6 +150,7 @@
 
 <script setup lang="ts">
 import BaseIcon from "@/components/common/BaseIcon.vue";
+import { formatBytes } from "@/utils/format";
 import { useRouter } from "vue-router";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
 import { useToast } from "@/composables/useToast";
@@ -171,13 +172,6 @@ const toast = useToast();
 function copyText(text: string) {
   navigator.clipboard.writeText(text);
   toast.success("已复制到剪贴板", text);
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function getDuration(startTime: number): string {
@@ -284,7 +278,7 @@ function handleClose(id: string) {
 
 .status-badge.online {
   background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
+  color: var(--accent-green);
   border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
@@ -322,8 +316,8 @@ function handleClose(id: string) {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.semantic-box.proxied { border-left: 4px solid #00f2fe; }
-.semantic-box.direct { border-left: 4px solid #10b981; }
+.semantic-box.proxied { border-left: 4px solid var(--accent-cyan-vivid); }
+.semantic-box.direct { border-left: 4px solid var(--accent-green); }
 .semantic-box.blocked { border-left: 4px solid #f87171; }
 
 .semantic-title-row {
@@ -387,9 +381,9 @@ function handleClose(id: string) {
 }
 
 .node-step.highlight {
-  background: rgba(0, 242, 254, 0.15);
-  border: 1px solid rgba(0, 242, 254, 0.3);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  color: var(--accent-cyan-vivid);
 }
 
 .arrow-right {
@@ -455,7 +449,7 @@ function handleClose(id: string) {
   opacity: 1;
 }
 
-.text-cyan { color: #00f2fe; }
+.text-cyan { color: var(--accent-cyan-vivid); }
 .text-purple { color: #a78bfa; }
 
 .drawer-footer {
@@ -477,13 +471,13 @@ function handleClose(id: string) {
 }
 
 .btn-footer-action.primary {
-  background: rgba(0, 242, 254, 0.18);
-  color: #00f2fe;
-  border: 1px solid rgba(0, 242, 254, 0.35);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 18%, transparent);
+  color: var(--accent-cyan-vivid);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 35%, transparent);
 }
 
 .btn-footer-action.primary:hover {
-  background: #00f2fe;
+  background: var(--accent-cyan-vivid);
   color: #000;
 }
 

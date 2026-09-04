@@ -73,7 +73,7 @@
             >
               <span class="opt-icon"></span>
               <span class="opt-name mono">{{ node.tag }}</span>
-              <span class="node-delay" v-if="node.latency?.latency && node.latency.latency > 0">{{ node.latency.latency }}ms</span>
+              <span class="node-delay" v-if="node.latency?.latency && node.latency.latency > 0">{{ node.latency.latency }} ms</span>
               <span class="check-icon" v-if="modelValue === node.tag"></span>
             </div>
 
@@ -185,15 +185,15 @@ onUnmounted(() => {
 }
 
 .selector-trigger.direct {
-  color: #10b981;
+  color: var(--accent-green);
   border-color: rgba(16, 185, 129, 0.3);
   background: rgba(16, 185, 129, 0.08);
 }
 
 .selector-trigger.proxy {
-  color: #00f2fe;
-  border-color: rgba(0, 242, 254, 0.3);
-  background: rgba(0, 242, 254, 0.08);
+  color: var(--accent-cyan-vivid);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
 }
 
 .selector-trigger.block {
@@ -281,8 +281,8 @@ onUnmounted(() => {
 }
 
 .menu-item.active {
-  background: rgba(0, 242, 254, 0.12);
-  color: #00f2fe;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent);
+  color: var(--accent-cyan-vivid);
   font-weight: 600;
 }
 
@@ -305,11 +305,11 @@ onUnmounted(() => {
 
 .check-icon {
   font-size: 11px;
-  color: #00f2fe;
+  color: var(--accent-cyan-vivid);
 }
 
-.text-green { color: #10b981 !important; }
-.text-cyan { color: #00f2fe !important; }
+.text-green { color: var(--accent-green) !important; }
+.text-cyan { color: var(--accent-cyan-vivid) !important; }
 .text-red { color: #f87171 !important; }
 
 /* 动画 */

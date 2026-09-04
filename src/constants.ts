@@ -34,8 +34,16 @@ export const DEFAULT_LATENCY_TEST_TOLERANCE_MS = 50;
 // 吞吐量测速参数
 // ============================================================
 
-/** 单节点测速时长上限（秒） */
-export const THROUGHPUT_TEST_DURATION_SEC = 8;
+/**
+ * 吞吐测速时长事实源（秒）——与 Rust 侧 speedtest/scheduler.rs、commands/speedtest.rs 对齐：
+ * 批量测速每节点下载 3s + 上传 3s = 6s；单节点测速下载 5s + 上传 5s = 10s。
+ * 历史单常量 8s 与两端实现均不符（预估显示偏差，已修正）。
+ */
+export const THROUGHPUT_BATCH_DURATION_PER_NODE_SEC = 6;
+export const THROUGHPUT_SINGLE_DURATION_SEC = 10;
+
+/** 兼容别名（旧调用方引用）：批量预估口径 */
+export const THROUGHPUT_TEST_DURATION_SEC = THROUGHPUT_BATCH_DURATION_PER_NODE_SEC;
 
 /** 测速数据包默认大小（字节，用于估算流量消耗提示） */
 export const THROUGHPUT_TEST_CHUNK_BYTES = 10 * 1024 * 1024; // 10 MB

@@ -43,7 +43,7 @@
         <!-- 吞吐量带宽 -->
         <div v-if="speedBps !== undefined && speedBps > 0" class="speed-box" title="历史下行测速结果">
           <SvgIcon name="wifi" :size="10" />
-          <span>{{ formatSpeed(speedBps) }}</span>
+          <span>{{ formatThroughputCompact(speedBps) }}</span>
         </div>
       </div>
 
@@ -130,6 +130,9 @@ function onCardClick() {
 
 const speedtestStore = useSpeedtestStore();
 
+// 测速结果为 bps 比特率，统一 Kbps 展示（历史本地实现误按字节换算）
+import { formatThroughputCompact } from "@/utils/format";
+
 function getProtocolBadge(type: string): string {
   const t = type.toLowerCase();
   if (t.includes("vmess")) return "VM";
@@ -159,11 +162,6 @@ function getLatencyColor(ms?: number): string {
 const isTesting = computed(() => speedtestStore.testingNodes.has(props.nodeTag));
 const isLatencyTesting = computed(() => speedtestStore.testingLatencyNodes.has(props.nodeTag));
 const latencyColor = computed(() => getLatencyColor(props.latency));
-
-function formatSpeed(bps: number): string {
-  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
-  return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
-}
 </script>
 
 <style scoped>
@@ -378,7 +376,7 @@ function formatSpeed(bps: number): string {
   font-size: 10px;
   color: var(--accent-cyan);
   font-family: var(--font-mono);
-  background: rgba(0, 242, 254, 0.08);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
   padding: 1px 4px;
   border-radius: var(--radius-xs);
 }

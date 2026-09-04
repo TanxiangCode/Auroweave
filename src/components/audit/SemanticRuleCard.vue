@@ -58,6 +58,7 @@
 
 <script setup lang="ts">
 import BaseIcon from "@/components/common/BaseIcon.vue";
+import { formatBytes } from "@/utils/format";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
 
 
@@ -68,13 +69,6 @@ defineProps<{
 defineEmits<{
   (e: "select", record: SemanticAuditRecord): void;
 }>();
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function getBadgeClass(badge: string): string {
   if (badge.includes("TLS") || badge.includes("加密") || badge.includes("防护")) return "safe";
@@ -112,10 +106,10 @@ function getBadgeClass(badge: string): string {
 }
 
 .semantic-rule-card.proxied {
-  border-left: 3px solid #00f2fe;
+  border-left: 3px solid var(--accent-cyan-vivid);
 }
 .semantic-rule-card.direct {
-  border-left: 3px solid #10b981;
+  border-left: 3px solid var(--accent-green);
 }
 .semantic-rule-card.blocked {
   border-left: 3px solid #f87171;
@@ -206,13 +200,13 @@ function getBadgeClass(badge: string): string {
 }
 
 .security-badge.safe {
-  color: #00f2fe;
-  background: rgba(0, 242, 254, 0.08);
-  border-color: rgba(0, 242, 254, 0.2);
+  color: var(--accent-cyan-vivid);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
 }
 
 .security-badge.direct {
-  color: #10b981;
+  color: var(--accent-green);
   background: rgba(16, 185, 129, 0.08);
   border-color: rgba(16, 185, 129, 0.2);
 }
@@ -244,13 +238,13 @@ function getBadgeClass(badge: string): string {
 }
 
 .outbound-pill.proxied {
-  color: #00f2fe;
-  border-color: rgba(0, 242, 254, 0.25);
-  background: rgba(0, 242, 254, 0.08);
+  color: var(--accent-cyan-vivid);
+  border-color: color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
 }
 
 .outbound-pill.direct {
-  color: #10b981;
+  color: var(--accent-green);
   border-color: rgba(16, 185, 129, 0.25);
   background: rgba(16, 185, 129, 0.08);
 }
@@ -269,7 +263,7 @@ function getBadgeClass(badge: string): string {
   font-variant-numeric: tabular-nums;
 }
 
-.traffic-text.down { color: #00f2fe; }
+.traffic-text.down { color: var(--accent-cyan-vivid); }
 .traffic-text.up { color: #a78bfa; }
 
 .time-stamp {
