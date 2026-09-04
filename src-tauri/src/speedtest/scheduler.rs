@@ -1,6 +1,6 @@
 /// 串行批量测速调度器
 /// 作者: TanXiang
-use super::{throughput::run_single_throughput_test, BatchProgress, ThroughputResult};
+use super::{throughput::run_single_throughput_test_with_url, BatchProgress, ThroughputResult};
 use crate::core::clash_api::ClashApiClient;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -39,6 +39,8 @@ impl SpeedTestScheduler {
         let cache = self.results_cache.clone();
         let clash_client = ClashApiClient::default();
         let port = super::get_mixed_port(&app);
+        // 用户设置的测速数据源（设置页 speed_test_url；空串回退内置 Cloudflare）
+        let test_url = crate::commands::settings::settings_get_internal(&app).speed_test_url;
 
         tokio::spawn(async move {
             let total = node_tags.len();
@@ -70,7 +72,7 @@ impl SpeedTestScheduler {
                     let _ = app.emit(
                         "speedtest-progress",
                         BatchProgress {
-                            current_index: total,
+                            current_index: index + 1,
                             total,
                             current_node: node_tag.clone(),
                             result: Some(res),
@@ -90,8 +92,8 @@ impl SpeedTestScheduler {
                     },
                 );
 
-                // 2. 测量 3 秒速度
-                let res = run_single_throughput_test(node_tag, 3, port).await.unwrap_or(ThroughputResult {
+                // 2. 测量 3 秒速度（用户设置的测速 URL）
+                let res = run_single_throughput_test_with_url(node_tag, 3, port, &test_url).await.unwrap_or(ThroughputResult {
                     download_bps: 0,
                     upload_bps: 0,
                     tested_at: chrono::Utc::now().timestamp_millis(),

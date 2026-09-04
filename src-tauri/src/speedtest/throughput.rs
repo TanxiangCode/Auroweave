@@ -9,11 +9,21 @@ use tokio::time::timeout;
 const DEFAULT_TEST_URL: &str = "https://speed.cloudflare.com/__down?bytes=25000000";
 
 /// 针对单个节点或当前代理，进行限定时长的下载与上传吞吐量测速
-pub async fn run_single_throughput_test(
+///
+/// `test_url` 为用户设置的下载数据源（空串回退 Cloudflare 默认）；
+/// 上传统一走 Cloudflare /__up（生态内无通用上传端点，不暴露为设置）。
+pub async fn run_single_throughput_test_with_url(
     _node_tag: &str,
     duration_secs: u64,
     mixed_port: u16,
+    test_url: &str,
 ) -> Result<ThroughputResult, AppError> {
+    let test_url = if test_url.trim().is_empty() {
+        DEFAULT_TEST_URL
+    } else {
+        test_url.trim()
+    };
+
     let proxy_url = format!("http://127.0.0.1:{}", mixed_port);
     let proxy = Proxy::all(&proxy_url)
         .map_err(|e| AppError::Network(format!("创建本地代理客户端失败: {}", e)))?;
@@ -25,7 +35,7 @@ pub async fn run_single_throughput_test(
         .map_err(|e| AppError::Network(e.to_string()))?;
 
     // 1. 下载测速（失败记日志，与真实 0 带宽区分）
-    let download_bps = match measure_download(&client, duration_secs).await {
+    let download_bps = match measure_download(&client, duration_secs, test_url).await {
         Ok(b) => b,
         Err(e) => {
             log::warn!("[throughput] 下载测速失败: {}", e);
@@ -49,12 +59,12 @@ pub async fn run_single_throughput_test(
     })
 }
 
-async fn measure_download(client: &reqwest::Client, duration_secs: u64) -> Result<u64, AppError> {
+async fn measure_download(client: &reqwest::Client, duration_secs: u64, test_url: &str) -> Result<u64, AppError> {
     let start = Instant::now();
     let duration = Duration::from_secs(duration_secs);
 
     let res = client
-        .get(DEFAULT_TEST_URL)
+        .get(test_url)
         .send()
         .await;
 

@@ -3,7 +3,7 @@
 use crate::core::clash_api::ClashApiClient;
 use crate::error::{ApiResponse, AppError};
 use crate::speedtest::scheduler::SpeedTestScheduler;
-use crate::speedtest::throughput::run_single_throughput_test;
+use crate::speedtest::throughput::run_single_throughput_test_with_url;
 use crate::speedtest::ThroughputResult;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -118,6 +118,8 @@ pub async fn speedtest_run_single(
     }
     info!("开始对节点 [{}] 运行单体吞吐量测速...", node_tag);
     let port = crate::speedtest::get_mixed_port(&app_handle);
+    // 用户设置的测速数据源（设置页 speed_test_url；空串回退内置 Cloudflare）
+    let test_url = crate::commands::settings::settings_get_internal(&app_handle).speed_test_url;
 
     // 吞吐测速经本地 mixed 端口发起，流量走 selector 当前选中节点。
     // 单节点测速必须先把所在 selector 组切换到目标节点，否则测的是
@@ -148,7 +150,7 @@ pub async fn speedtest_run_single(
         }
     }
 
-    let result = run_single_throughput_test(&node_tag, 5, port).await;
+    let result = run_single_throughput_test_with_url(&node_tag, 5, port, &test_url).await;
 
     // 还原用户原选中节点
     if let Some((g_tag, original_now)) = restored {
