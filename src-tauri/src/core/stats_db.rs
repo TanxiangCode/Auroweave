@@ -29,6 +29,10 @@ fn get_db_path() -> PathBuf {
 }
 
 fn init_schema(conn: &Connection) -> Result<()> {
+    // WAL 模式：写不阻塞读（流量监控写拍与前端统计查询并发不再串行竞争），
+    // synchronous=NORMAL 在 WAL 下安全且大幅减少 fsync（默认 FULL 每条 autocommit 一次）
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
     // 流量每小时聚合表
     conn.execute(
         "CREATE TABLE IF NOT EXISTS traffic_hourly (

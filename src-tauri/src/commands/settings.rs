@@ -187,17 +187,44 @@ fn get_settings_path() -> PathBuf {
     config_dir.join("settings.json")
 }
 
+/// settings.json 读取缓存：mtime 未变时复用上次解析结果
+///
+/// 性能：settings_get_internal 全仓 20+ 调用点（3s 状态轮询/守护/托盘/测速等
+/// 每拍多次），每次读盘+serde 解析；settings.json 仅由本进程原子写（更新时
+/// mtime 必变），mtime 缓存安全。外部手改文件的场景：mtime 变化即可感知。
+lazy_static::lazy_static! {
+    static ref SETTINGS_CACHE: std::sync::Mutex<Option<(std::time::SystemTime, AppSettings)>> =
+        std::sync::Mutex::new(None);
+}
+
 /// 内部加载设置函数 (供各 Rust 模块使用)
 pub fn settings_get_internal(_app_handle: &tauri::AppHandle) -> AppSettings {
     let path = get_settings_path();
-    if path.exists() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
-                return settings;
-            }
+    let mtime = fs::metadata(&path).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+    let mut cache = SETTINGS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((cached_mtime, ref cached)) = *cache {
+        if cached_mtime == mtime {
+            return cached.clone();
         }
     }
-    AppSettings::default()
+
+    let loaded = if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
+                settings
+            } else {
+                AppSettings::default()
+            }
+        } else {
+            AppSettings::default()
+        }
+    } else {
+        AppSettings::default()
+    };
+
+    *cache = Some((mtime, loaded.clone()));
+    loaded
 }
 
 /// 核心重构函数：将 AppSettings 中的全部可配置项（端口、TUN、路由等）统一同步到 config.json
