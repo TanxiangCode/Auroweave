@@ -293,6 +293,11 @@ export interface AppSettings {
   latency_test_url?: string;
   /** 置顶收藏的节点 tag 列表（排序时恒排最前） */
   pinned_nodes?: string[];
+  /** 首页右翼统计胶囊显隐开关（设置-首页显示；缺省视为开启） */
+  dashboard_show_connections?: boolean;
+  dashboard_show_current_node?: boolean;
+  dashboard_show_egress_ip?: boolean;
+  dashboard_show_total_traffic?: boolean;
   core: {
     runMode: string;
     service: {

@@ -6,6 +6,7 @@
 import { ref, computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import GeneralPanel from "./panels/GeneralPanel.vue";
+import DashboardPanel from "./panels/DashboardPanel.vue";
 import SubscriptionPanel from "./panels/SubscriptionPanel.vue";
 import RouteModePanel from "./panels/RouteModePanel.vue";
 import DnsPanel from "./panels/DnsPanel.vue";
@@ -19,6 +20,7 @@ const route = useRoute();
 
 type PanelKey =
   | "general"
+  | "dashboard"
   | "subscription"
   | "routemode"
   | "dns"
@@ -43,6 +45,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { key: "general", icon: "Sliders", label: "通用设置", keywords: ["通用", "主题", "语言", "自启", "托盘", "最小化", "局域网", "共享", "allow lan", "general", "theme"] },
+  { key: "dashboard", icon: "Layers", label: "首页显示", keywords: ["首页", "主页", "显示", "胶囊", "卡片", "出口", "ip", "节点", "延迟", "dashboard", "widget"] },
   { key: "subscription", icon: "Rss", label: "订阅管理", keywords: ["订阅", "节点", "更新", "导入", "sub", "node"] },
   { key: "routemode", icon: "GitFork", label: "代理模式", keywords: ["模式", "规则", "全局", "直连", "mode", "rule", "global"] },
 
@@ -118,6 +121,7 @@ onMounted(() => {
     <!-- 右侧设置呈现区 -->
     <main class="settings-main glass-effect">
       <GeneralPanel v-if="activePanel === 'general'" />
+      <DashboardPanel v-else-if="activePanel === 'dashboard'" />
       <SubscriptionPanel v-else-if="activePanel === 'subscription'" />
       <RouteModePanel v-else-if="activePanel === 'routemode'" />
       <DnsPanel v-else-if="activePanel === 'dns'" />

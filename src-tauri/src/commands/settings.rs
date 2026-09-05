@@ -104,6 +104,17 @@ pub struct AppSettings {
     #[serde(default)]
     pub pinned_nodes: Vec<String>,
 
+    /// 首页右翼统计胶囊显隐开关（设置-首页显示；true=显示，缺省视为 true
+    /// 兼容旧 settings.json）
+    #[serde(default = "default_true")]
+    pub dashboard_show_connections: bool,
+    #[serde(default = "default_true")]
+    pub dashboard_show_current_node: bool,
+    #[serde(default = "default_true")]
+    pub dashboard_show_egress_ip: bool,
+    #[serde(default = "default_true")]
+    pub dashboard_show_total_traffic: bool,
+
     /// 分组测速配置覆盖（group tag -> interval 秒 / tolerance 毫秒 / url），
     /// 由 GroupEditModal 保存，ConfigBuilder 生成 urltest 出站时应用
     #[serde(default)]
@@ -170,6 +181,12 @@ impl Default for AppSettings {
 
             // 置顶收藏节点（默认空）
             pinned_nodes: Vec::new(),
+
+            // 首页右翼统计胶囊（默认全开，可到设置-首页显示关闭）
+            dashboard_show_connections: true,
+            dashboard_show_current_node: true,
+            dashboard_show_egress_ip: true,
+            dashboard_show_total_traffic: true,
 
             // 分组测速配置覆盖（默认空，全部使用内置默认值）
             group_configs: std::collections::HashMap::new(),
