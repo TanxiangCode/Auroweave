@@ -81,7 +81,7 @@
 
     <!-- 空态 -->
     <div v-else class="empty-state">
-      <span class="empty-icon">📡</span>
+      <span class="empty-icon"><BaseIcon name="Radio" :size="40" /></span>
       <p>点击「立即检测」发起双路径出口探测</p>
       <p class="empty-sub">检测目标：ip-api.com · 判定依据：双路径出口 IP 对比</p>
     </div>
@@ -99,6 +99,7 @@
  * 对比判定：IP 不同=流量经代理 ✓；IP 相同=疑似直连泄漏
  */
 import { ref } from "vue";
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { invokeWithTimeout } from "@/api/ipc/client";
 import { useToast } from "@/composables/useToast";
 import type { ApiResponse } from "@/types";
@@ -108,6 +109,8 @@ interface PathResult {
   ok: boolean;
   egress_ip: string;
   location: string;
+  /** 国家/地区代码（ISO 3166-1 alpha-2，供国旗渲染） */
+  country_code: string;
   elapsed_ms: number;
   error: string;
 }

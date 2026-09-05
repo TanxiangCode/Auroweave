@@ -56,7 +56,7 @@
         @click="$emit('toggle-pause')"
         :title="isPaused ? '点击恢复实时连接流' : '点击暂停实时连接流'"
       >
-        <span class="btn-icon">{{ isPaused ? '▶️' : '⏸️' }}</span>
+        <span class="btn-icon"><BaseIcon :name="isPaused ? 'Play' : 'Pause'" :size="12" /></span>
         <span>{{ isPaused ? '已暂停流' : '暂停流' }}</span>
       </button>
 

@@ -62,7 +62,7 @@ const emit = defineEmits<{
         :disabled="operating"
         @click="emit('start')"
       >
-        ▶ 启动服务
+        <BaseIcon name="Play" :size="12" /> 启动服务
       </button>
       <button
         v-if="serviceStatus.lastKnownStatus === 'running'"
@@ -70,7 +70,7 @@ const emit = defineEmits<{
         :disabled="operating"
         @click="emit('stop')"
       >
-        ⏹ 停止服务
+        <BaseIcon name="Square" :size="12" /> 停止服务
       </button>
       <button
         class="control-btn secondary"

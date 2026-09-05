@@ -83,7 +83,7 @@
       <!-- 左侧：事件统计与暂停提示 -->
       <div class="sub-left">
         <span class="match-info">共匹配 <strong class="highlight-num">{{ matchCount }}</strong> 条语义化安全事件</span>
-        <span class="pause-state-pill" v-if="isPaused">⏸️ 实时流已处于暂停状态</span>
+        <span class="pause-state-pill" v-if="isPaused"><BaseIcon name="Pause" :size="10" /> 实时流已处于暂停状态</span>
       </div>
 
       <!-- 右侧：悬停暂停开关 + 视图切换 Tabs -->

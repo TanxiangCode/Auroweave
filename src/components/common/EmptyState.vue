@@ -78,7 +78,7 @@ const emit = defineEmits<{ (e: "cta"): void }>();
   font-weight: var(--weight-semibold);
   color: var(--accent-cyan-vivid);
   background: var(--accent-cyan-glow);
-  border: 1px solid rgba(0, 242, 254, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);

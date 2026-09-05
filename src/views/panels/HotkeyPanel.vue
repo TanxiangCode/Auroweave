@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2>⌨️ 全局快捷键</h2>
+    <h2><BaseIcon name="Command" :size="18" class="title-icon" /> 全局快捷键</h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -25,6 +25,7 @@
  * 热键值来自 settings.command_palette_hotkey。
  */
 import { computed, onMounted, ref } from "vue";
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useSettingsStore } from "@/stores/settings.store";
 
 const settingsStore = useSettingsStore();

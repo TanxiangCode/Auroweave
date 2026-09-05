@@ -72,6 +72,9 @@ import {
   BookOpen,
   Database,
   Info,
+  Play,
+  Pause,
+  Square,
 } from "lucide-vue-next";
 
 
@@ -160,6 +163,9 @@ const iconMap: Record<string, any> = {
   BookOpen,
   Database,
   Info,
+  Play,
+  Pause,
+  Square,
 };
 
 
