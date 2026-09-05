@@ -94,6 +94,8 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
 import { computed } from "vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import SvgIcon from "@/components/common/SvgIcon.vue";
+// 测速结果为 bps 比特率，统一 Kbps 展示（历史本地实现误按字节换算成 KB/s）
+import { formatThroughputCompact } from "@/utils/format";
 
 const props = withDefaults(
   defineProps<{
@@ -129,9 +131,6 @@ function onCardClick() {
 }
 
 const speedtestStore = useSpeedtestStore();
-
-// 测速结果为 bps 比特率，统一 Kbps 展示（历史本地实现误按字节换算）
-import { formatThroughputCompact } from "@/utils/format";
 
 function getProtocolBadge(type: string): string {
   const t = type.toLowerCase();

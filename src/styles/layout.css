@@ -22,6 +22,13 @@
   align-items: center;
 }
 
+/* 头部标题图标：统一与标题的间距与垂直对齐（各视图 h1 内 BaseIcon/SvgIcon） */
+.page-header .title-icon {
+  margin-right: var(--space-2);
+  vertical-align: -4px;
+  color: var(--accent-cyan-vivid);
+}
+
 .title-area h1 {
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
