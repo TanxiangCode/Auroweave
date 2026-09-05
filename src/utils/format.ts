@@ -62,20 +62,21 @@ export function formatSpeed(bps: number): string {
 }
 
 /**
- * 节点吞吐展示（紧凑 1 位小数 Kbps）
+ * 节点吞吐展示（紧凑 1 位小数，1024 进制 KB/s）
  *
- * 测速结果 download_bps 是比特率，节点卡片此前误按 1024 字节换算成
- * "KB/s"（数值偏大 8 倍），统一为 Kbps 语义。
+ * 后端 download_bps 实际为字节/秒（throughput.rs：downloaded_bytes / elapsed），
+ * 字段名 bps 是历史误称——全站消费方（useSpeedtest/useSpeedtestActions 的
+ * MB/s toast）均按 1024 字节进制换算，此处保持同一口径。
  */
-export function formatThroughputCompact(bps: number): string {
-  if (!Number.isFinite(bps) || bps <= 0) return "0 Kbps";
-  const k = 1000;
-  const sizes = ["bps", "Kbps", "Mbps", "Gbps"];
+export function formatThroughputCompact(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "0 KB/s";
+  const k = 1024;
+  const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
   const i = Math.min(
-    Math.floor(Math.log(bps) / Math.log(k)),
+    Math.floor(Math.log(bytesPerSec) / Math.log(k)),
     sizes.length - 1
   );
-  return parseFloat((bps / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
 /**

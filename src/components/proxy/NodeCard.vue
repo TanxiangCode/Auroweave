@@ -86,15 +86,15 @@
 </template>
 
 <script setup lang="ts">
-import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
  * 策略组节点卡片组件 (支持 Grid / List 视图)
  * 作者: TanXiang
  */
 import { computed } from "vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
+import BaseIcon from "@/components/common/BaseIcon.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
-// 测速结果为 bps 比特率，统一 Kbps 展示（历史本地实现误按字节换算成 KB/s）
+// 测速结果为字节/秒（字段名 download_bps 为历史误称），按 1024 进制 KB/s 展示
 import { formatThroughputCompact } from "@/utils/format";
 
 const props = withDefaults(
