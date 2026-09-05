@@ -6,6 +6,7 @@
  * 支持 Grid (网格) / List (紧凑列表) 视图模式
  */
 import NodeCard from "@/components/proxy/NodeCard.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import type { ProxyNode } from "@/types";
 
@@ -40,41 +41,45 @@ const emit = defineEmits<{
   'test-latency': [nodeTag: string];
   'test-speed': [nodeTag: string];
   'toggle-pin': [nodeTag: string];
+  'refresh-groups': [];
 }>();
 
 const speedtestStore = useSpeedtestStore();
 </script>
 
 <template>
+  <!-- 拉取失败错误态（区别于空态：明确告知是获取失败，而非没有订阅） -->
+  <EmptyState
+    v-else-if="fetchError"
+    icon="AlertTriangle"
+    title="节点列表获取失败"
+    :description="fetchError ?? undefined"
+  />
+
+  <!-- 暂无节点 -->
+  <EmptyState
+    v-else-if="rawCount === 0"
+    icon="Database"
+    title="暂无可用节点"
+    description="请确保订阅已导入并点击刷新"
+    cta-text="重新拉取分组"
+    cta-icon="RefreshCw"
+    @cta="emit('refresh-groups')"
+  />
+
+  <!-- 搜索无匹配 -->
+  <EmptyState
+    v-else-if="nodes.length === 0"
+    icon="Search"
+    title="没有找到匹配的节点"
+    :description="`搜索「${searchText}」无结果，试试其他关键词`"
+  />
+
   <!-- 加载中 -->
-  <div v-if="loading" class="state-tip">
+  <div v-else-if="loading" class="state-tip">
     <div class="state-inner">
       <span class="loading-spin"></span>
       <span>正在加载代理节点列表...</span>
-    </div>
-  </div>
-
-  <!-- 拉取失败错误态（区别于空态：明确告知是获取失败，而非没有订阅） -->
-  <div v-else-if="fetchError" class="state-tip">
-    <div class="state-inner">
-      <span class="state-icon">⚠️</span>
-      <span>节点列表获取失败：{{ fetchError }}</span>
-    </div>
-  </div>
-
-  <!-- 暂无节点 -->
-  <div v-else-if="rawCount === 0" class="state-tip">
-    <div class="state-inner">
-      <span class="state-icon"></span>
-      <span>暂无可用节点，请确保订阅已导入并点击刷新</span>
-    </div>
-  </div>
-
-  <!-- 搜索无匹配 -->
-  <div v-else-if="nodes.length === 0" class="state-tip">
-    <div class="state-inner">
-      <span class="state-icon"></span>
-      <span>没有找到匹配「{{ searchText }}」的节点</span>
     </div>
   </div>
 

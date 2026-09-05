@@ -226,6 +226,7 @@ onDeactivated(() => {
           @test-latency="handleSingleLatency"
           @test-speed="handleSingleSpeed"
           @toggle-pin="togglePinned"
+          @refresh-groups="proxyStore.fetchGroups"
         />
       </main>
     </div>

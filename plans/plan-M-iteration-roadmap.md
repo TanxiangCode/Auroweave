@@ -47,10 +47,10 @@ RoutingView/SettingsView 自造头部、ProxiesView/AuditView/DashboardView 无�
 **现状**：空态四种结构（豪华卡/SvgIcon/纯文字/一行字）、错误态用 emoji ⚠️、加载 spinner 三套、
 formatBytes 在 4 处组件内复制实现（精度还不一致）。
 
-- [ ] 抽 `EmptyState.vue`（图标槽 + 标题 + 描述 + 可选 CTA）与统一 spinner
+- [x] 抽 `EmptyState.vue`（图标槽 + 标题 + 描述 + 可选 CTA）：组件落地，NodeListPanel 三态（含 ⚠️ emoji 清除）与 ConnectionTable 空态接入；加载态保留各视图轻量 spinner（单一 AppSpinner 抽取收益有限，成本大于收益）
 - [x] 删除 ConnectionTable/SemanticRuleCard/ConnectionDetailDrawer/NodeCard 的本地 formatBytes，统一 `import { formatBytes } from "@/utils/format"`
 - [x] 速率单位统一决策：测速结果统一 Kbps（发现并修正 NodeCard 历史实现把 bps 比特率按 1024 字节换算成 KB/s 的 8 倍数值偏差），ms 前空格统一
-- [ ] Toast 图标 emoji（ℹ）换 BaseIcon
+- [x] Toast 图标 emoji（ℹ）换 BaseIcon（Info）
 
 ### M1-4 批量测速进度组件抽取（低成本项）
 
@@ -71,9 +71,9 @@ formatBytes 在 4 处组件内复制实现（精度还不一致）。
 **现状**：/connections WS 每秒全量快照 → 数百行连接表 + AuditView 历史 200 条无虚拟化全量 diff；
 ProxiesView 300 节点一次性渲染。
 
-- [ ] AuditView 连接表引入虚拟滚动（现有 filteredRecords 短路已降低无谓重算，此为 DOM 层根治）
-- [ ] 评估 `useVirtualList`（VueUse）vs 手写窗口化，选引入成本低的
-- [ ] ProxiesView 节点网格 >100 节点时验证是否需要（grid 虚拟化复杂，先量化再决策）
+- [x] AuditView 连接表引入虚拟滚动（窗口化方案：scroll 监听 + 上下占位行 + 8 行缓冲，DOM 数量与总行数解耦）
+- [x] 评估结论：手写窗口化（60 行零依赖），VueUse 引入为整库依赖不划算
+- [ ] ProxiesView 节点网格 >100 节点时验证是否需要（grid 虚拟化复杂，先量化再决策——保留待实测）
 
 ### M2-2 语义转换结果缓存（P1-5）
 

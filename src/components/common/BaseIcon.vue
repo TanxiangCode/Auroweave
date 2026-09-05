@@ -71,6 +71,7 @@ import {
   Lock,
   BookOpen,
   Database,
+  Info,
 } from "lucide-vue-next";
 
 
@@ -158,6 +159,7 @@ const iconMap: Record<string, any> = {
   Lock,
   BookOpen,
   Database,
+  Info,
 };
 
 
