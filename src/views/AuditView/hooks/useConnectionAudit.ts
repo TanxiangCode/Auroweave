@@ -54,12 +54,21 @@ export function useConnectionAudit() {
     ].join("|");
   }
 
-  /** 带缓存的语义转换：指纹命中直接复用上一拍 record */
+  /** 带缓存的语义转换：指纹命中时浅拷贝复用，同步刷新流量计数字段 */
   function translateCached(conn: Connection): SemanticAuditRecord {
     const fp = fingerprintOf(conn);
     const cached = translateCache.get(conn.id);
     if (cached && cached.fingerprint === fp) {
-      return cached.record;
+      // 语义字段（进程/域名/出站等）命中复用，但流量计数每拍都在涨——
+      // 直接复用缓存对象会让连接表的"累计传输"列冻结在首拍数值。
+      // 浅拷贝 + 仅更新 4 个计数字段：保留正则复用收益，恢复实时性。
+      return {
+        ...cached.record,
+        upload_bytes: conn.upload_bytes || 0,
+        download_bytes: conn.download_bytes || 0,
+        upload_speed: conn.upload_speed,
+        download_speed: conn.download_speed,
+      };
     }
     const record = translateConnection(conn);
     translateCache.set(conn.id, { fingerprint: fp, record });
