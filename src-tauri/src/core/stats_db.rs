@@ -167,7 +167,44 @@ pub fn add_speedtest_record(node_tag: &str, download_bps: u64, upload_bps: u64, 
     }
 }
 
+/// 批量写入测速记录（单事务 + 一次 fsync；延迟测速攒批等场景使用）
+///
+/// 逐条调用 add_speedtest_record 时每条为独立 autocommit（WAL 下每次 fsync），
+/// 300 节点批量场景合并为单事务提交。
+pub fn add_speedtest_records_batch(records: Vec<(String, u64, u64, Option<u64>)>) {
+    if records.is_empty() {
+        return;
+    }
+    if let Err(e) = with_conn(|conn| {
+        // 事务由 with_conn 外层连接保证原子性；失败整体回滚（攒批场景可整批重试）
+        conn.execute_batch("BEGIN;")?;
+        {
+            let mut stmt = conn.prepare(
+                "INSERT INTO speedtest_history (node_tag, download_bps, upload_bps, delay_ms, tested_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for (tag, download_bps, upload_bps, delay_ms) in &records {
+                stmt.execute(rusqlite::params![
+                    tag,
+                    *download_bps as i64,
+                    *upload_bps as i64,
+                    delay_ms.map(|d| d as i64),
+                    chrono::Utc::now().timestamp_millis()
+                ])?;
+            }
+        }
+        conn.execute_batch("COMMIT;")?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 批量写入测速历史失败: {}", e);
+    }
+}
+
 /// 查询指定节点最近 limit 条测速历史（时间倒序）
+///
+/// 排除纯延迟测试写入的零吞吐记录（download_bps=0 AND upload_bps=0 AND delay_ms
+/// 非空）——它们用于节点存活趋势，混入会把吞吐趋势图画成 0 速度拐点。
+/// 真实吞吐测速失败时 dl/ul 同为 0 但 delay_ms 为 NULL，予以保留。
 pub fn get_speedtest_history(node_tag: &str, limit: u32) -> Result<Vec<SpeedtestRecord>> {
     with_conn(|conn| {
         let limit = limit.clamp(1, 100) as i32;
@@ -175,6 +212,7 @@ pub fn get_speedtest_history(node_tag: &str, limit: u32) -> Result<Vec<Speedtest
             "SELECT node_tag, download_bps, upload_bps, delay_ms, tested_at
              FROM speedtest_history
              WHERE node_tag = ?1
+               AND NOT (download_bps = 0 AND upload_bps = 0 AND delay_ms IS NOT NULL)
              ORDER BY tested_at DESC
              LIMIT ?2",
         )?;

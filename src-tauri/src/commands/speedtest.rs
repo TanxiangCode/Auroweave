@@ -89,9 +89,12 @@ pub async fn speedtest_run_latency(
     // 攒批写库：300 节点原逐条 fsync，合并为单事务（spawn_blocking 不阻塞 async worker）
     if !pending_records.is_empty() {
         tokio::task::spawn_blocking(move || {
-            for (tag, delay) in pending_records {
-                crate::core::stats_db::add_speedtest_record(&tag, 0, 0, Some(delay as u64));
-            }
+            crate::core::stats_db::add_speedtest_records_batch(
+                pending_records
+                    .into_iter()
+                    .map(|(tag, delay)| (tag, 0, 0, Some(delay as u64)))
+                    .collect(),
+            );
         });
     }
 
