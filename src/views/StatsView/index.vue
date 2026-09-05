@@ -78,8 +78,9 @@ onMounted(() => {
       <div class="header-actions">
         <button class="btn-clear" @click="clearStats" title="清空所有累计历史流量统计">
           <SvgIcon name="refresh" :size="12" class="icon-gap" />
-        重置数据
-      </button>
+          重置数据
+        </button>
+      </div>
     </header>
 
     <!-- 顶部核心累计看板 -->

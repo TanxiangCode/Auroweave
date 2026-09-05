@@ -48,6 +48,14 @@ const speedtestStore = useSpeedtestStore();
 </script>
 
 <template>
+  <!-- 加载中（首分支：v-if 锚点，加载完成前不闪错误/空态） -->
+  <div v-if="loading" class="state-tip">
+    <div class="state-inner">
+      <span class="loading-spin"></span>
+      <span>正在加载代理节点列表...</span>
+    </div>
+  </div>
+
   <!-- 拉取失败错误态（区别于空态：明确告知是获取失败，而非没有订阅） -->
   <EmptyState
     v-else-if="fetchError"
@@ -74,14 +82,6 @@ const speedtestStore = useSpeedtestStore();
     title="没有找到匹配的节点"
     :description="`搜索「${searchText}」无结果，试试其他关键词`"
   />
-
-  <!-- 加载中 -->
-  <div v-else-if="loading" class="state-tip">
-    <div class="state-inner">
-      <span class="loading-spin"></span>
-      <span>正在加载代理节点列表...</span>
-    </div>
-  </div>
 
   <!-- 节点列表 / 网格容器 -->
   <div v-else class="nodes-scroll">
