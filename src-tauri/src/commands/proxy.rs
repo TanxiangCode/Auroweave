@@ -347,6 +347,8 @@ pub struct ConnectivityPathResult {
     pub egress_ip: String,
     /// IP 归属地描述（ip-api.com 返回）
     pub location: String,
+    /// 国家/地区代码（ISO 3166-1 alpha-2，如 "JP"/"US"，供前端渲染国旗）
+    pub country_code: String,
     /// 总耗时毫秒
     pub elapsed_ms: u64,
     /// 错误信息（失败时）
@@ -384,47 +386,49 @@ async fn probe_path(proxy_url: Option<String>) -> ConnectivityPathResult {
         Err(e) => {
             return ConnectivityPathResult {
                 path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
-                ok: false, egress_ip: String::new(), location: String::new(),
+                ok: false, egress_ip: String::new(), location: String::new(), country_code: String::new(),
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 error: format!("构建 HTTP 客户端失败: {}", e),
             };
         }
     };
 
-    // ip-api.com 聚合响应：query=出口IP，多行含国家/城市/ISP
-    match client.get("http://ip-api.com/json?fields=query,country,city,isp&lang=zh-CN").send().await {
+    // ip-api.com 聚合响应：query=出口IP，多行含国家/城市/ISP/国家代码
+    match client.get("http://ip-api.com/json?fields=query,country,countryCode,city,isp&lang=zh-CN").send().await {
         Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
             Ok(v) => {
                 let ip = v.get("query").and_then(|q| q.as_str()).unwrap_or("").to_string();
                 let country = v.get("country").and_then(|q| q.as_str()).unwrap_or("");
                 let city = v.get("city").and_then(|q| q.as_str()).unwrap_or("");
                 let isp = v.get("isp").and_then(|q| q.as_str()).unwrap_or("");
+                let country_code = v.get("countryCode").and_then(|q| q.as_str()).unwrap_or("").to_string();
                 let location = format!("{}{} · {}", country, if city.is_empty() { String::new() } else { format!(" {}", city) }, isp);
                 ConnectivityPathResult {
                     path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
                     ok: !ip.is_empty(),
                     egress_ip: ip,
                     location,
+                    country_code,
                     elapsed_ms: start.elapsed().as_millis() as u64,
                     error: String::new(),
                 }
             }
             Err(e) => ConnectivityPathResult {
                 path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
-                ok: false, egress_ip: String::new(), location: String::new(),
+                ok: false, egress_ip: String::new(), location: String::new(), country_code: String::new(),
                 elapsed_ms: start.elapsed().as_millis() as u64,
                 error: format!("解析出口信息失败: {}", e),
             },
         },
         Ok(resp) => ConnectivityPathResult {
             path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
-            ok: false, egress_ip: String::new(), location: String::new(),
+            ok: false, egress_ip: String::new(), location: String::new(), country_code: String::new(),
             elapsed_ms: start.elapsed().as_millis() as u64,
             error: format!("HTTP {}", resp.status()),
         },
         Err(e) => ConnectivityPathResult {
             path: if proxy_url.is_some() { "proxied".into() } else { "direct".into() },
-            ok: false, egress_ip: String::new(), location: String::new(),
+            ok: false, egress_ip: String::new(), location: String::new(), country_code: String::new(),
             elapsed_ms: start.elapsed().as_millis() as u64,
             error: e.to_string(),
         },
