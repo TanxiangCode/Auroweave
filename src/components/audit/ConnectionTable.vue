@@ -1,10 +1,8 @@
 <template>
   <div class="connection-table-container glass-effect">
-    <div v-if="records.length === 0" class="empty-state">
-      暂无匹配的网络连接记录
-    </div>
+    <EmptyState v-if="records.length === 0" icon="Globe" title="暂无匹配的网络连接记录" description="发起请求或浏览网页时将实时显示会话" />
 
-    <div v-else class="table-wrap">
+    <div v-else ref="tableWrap" class="table-wrap" @scroll.passive="onScroll">
       <table class="data-table">
         <thead>
           <tr>
@@ -19,8 +17,12 @@
           </tr>
         </thead>
         <tbody>
+          <!-- 虚拟滚动：窗口外上占位（撑起滚动高度） -->
+          <tr v-if="topPadPx > 0" :style="{ height: topPadPx + 'px' }" aria-hidden="true">
+            <td colspan="8" class="pad-cell"></td>
+          </tr>
           <tr
-            v-for="rec in records"
+            v-for="rec in visibleRecords"
             :key="rec.id"
             class="table-row"
             :class="{ active: isActive(rec.id) }"
@@ -113,6 +115,10 @@
               </div>
             </td>
           </tr>
+          <!-- 虚拟滚动：窗口外下占位 -->
+          <tr v-if="bottomPadPx > 0" :style="{ height: bottomPadPx + 'px' }" aria-hidden="true">
+            <td colspan="8" class="pad-cell"></td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -121,6 +127,8 @@
 
 <script setup lang="ts">
 import BaseIcon from "@/components/common/BaseIcon.vue";
+import EmptyState from "@/components/common/EmptyState.vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { formatBytes } from "@/utils/format";
 import type { SemanticAuditRecord } from "@/utils/semantic-translator";
 
@@ -134,6 +142,63 @@ defineEmits<{
   (e: "select", record: SemanticAuditRecord): void;
   (e: "close", id: string): void;
 }>();
+
+// ---- 窗口化虚拟滚动 ----
+// /connections WS 每秒推全量快照，历史+活跃最多 ~500 行原全量渲染 DOM。
+// 表格虚拟化方案：滚动容器监听 scrollTop，只渲染可见窗口 + 上下缓冲，
+// 窗口外以单个撑高占位行代替（上占位/下占位），DOM 数量与总行数解耦。
+const ROW_HEIGHT = 58; // td padding 10px×2 + 双行内容（实测布局）
+const BUFFER_ROWS = 8; // 上下缓冲行数（快速滚动不露白）
+
+const tableWrap = ref<HTMLElement | null>(null);
+const scrollTop = ref(0);
+const viewportHeight = ref(600);
+
+function onScroll() {
+  if (tableWrap.value) {
+    scrollTop.value = tableWrap.value.scrollTop;
+  }
+}
+
+let ro: ResizeObserver | null = null;
+onMounted(() => {
+  if (tableWrap.value) {
+    viewportHeight.value = tableWrap.value.clientHeight;
+    ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        viewportHeight.value = entry.contentRect.height;
+      }
+    });
+    ro.observe(tableWrap.value);
+  }
+});
+onUnmounted(() => ro?.disconnect());
+
+const startIndex = computed(() =>
+  Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - BUFFER_ROWS)
+);
+const endIndex = computed(() => {
+  const visible = Math.ceil(viewportHeight.value / ROW_HEIGHT) + BUFFER_ROWS * 2;
+  return Math.min(props.records.length, startIndex.value + visible);
+});
+const visibleRecords = computed(() =>
+  props.records.slice(startIndex.value, endIndex.value)
+);
+const topPadPx = computed(() => startIndex.value * ROW_HEIGHT);
+const bottomPadPx = computed(() =>
+  Math.max(0, (props.records.length - endIndex.value) * ROW_HEIGHT)
+);
+
+// 记录数变化时收敛滚动位置（过滤后列表变短防越界空白）
+watch(() => props.records.length, () => {
+  if (tableWrap.value) {
+    const maxScroll = Math.max(0, props.records.length * ROW_HEIGHT - viewportHeight.value);
+    if (tableWrap.value.scrollTop > maxScroll) {
+      tableWrap.value.scrollTop = maxScroll;
+      scrollTop.value = maxScroll;
+    }
+  }
+});
 
 function isActive(id: string): boolean {
   return props.activeIdSet.has(id);
@@ -198,6 +263,13 @@ td {
 .table-row {
   cursor: pointer;
   transition: background 0.15s ease;
+}
+
+/* 虚拟滚动占位行：无边框无内容，仅撑滚动高度 */
+.pad-cell {
+  padding: 0 !important;
+  border: none !important;
+  line-height: 0;
 }
 
 .table-row:hover {
@@ -352,12 +424,5 @@ td {
 .btn-icon-action.danger:hover {
   background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
-}
-
-.empty-state {
-  padding: 60px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 13px;
 }
 </style>
