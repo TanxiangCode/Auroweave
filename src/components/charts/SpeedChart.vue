@@ -7,7 +7,7 @@
       </div>
       <div class="speed-indicators">
         <div class="indicator download">
-          <span class="dot-badge cyan"></span>
+          <span class="dot-badge blue"></span>
           <span class="label">下载</span>
           <span class="val">{{ connectionStore.formatSpeed(connectionStore.rawDownloadSpeed) }}</span>
         </div>
@@ -126,15 +126,15 @@ const renderChart = () => {
   ctx.lineTo(0, baselineY);
   ctx.closePath();
 
-  // 下载填充渐变色（深邃科技感蓝绿）
+  // 下载填充渐变色（与图例/描边同源的科技蓝）
   const downFillGrad = ctx.createLinearGradient(0, topGuideY, 0, baselineY);
-  downFillGrad.addColorStop(0, "rgba(6, 182, 212, 0.65)");
-  downFillGrad.addColorStop(0.5, "rgba(8, 145, 178, 0.6)");
-  downFillGrad.addColorStop(1, "rgba(22, 78, 99, 0.75)");
+  downFillGrad.addColorStop(0, "rgba(0, 127, 249, 0.55)");
+  downFillGrad.addColorStop(0.5, "rgba(0, 100, 200, 0.45)");
+  downFillGrad.addColorStop(1, "rgba(10, 60, 130, 0.55)");
   ctx.fillStyle = downFillGrad;
   ctx.fill();
 
-  // 下载折线描边 (亮天青色 #22d3ee)
+  // 下载折线描边 (下载蓝 rgb(0,127,249))
   ctx.beginPath();
   for (let i = 0; i < points.length; i++) {
     const x = i * stepX;
@@ -146,7 +146,7 @@ const renderChart = () => {
       ctx.lineTo(x, y);
     }
   }
-  ctx.strokeStyle = "#22d3ee";
+  ctx.strokeStyle = "rgb(0, 127, 249)";
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
@@ -168,15 +168,15 @@ const renderChart = () => {
   ctx.lineTo(0, baselineY);
   ctx.closePath();
 
-  // 上传填充渐变色（深邃酒红）
+  // 上传填充渐变色（与图例/描边同源的上传红）
   const upFillGrad = ctx.createLinearGradient(0, baselineY, 0, height);
-  upFillGrad.addColorStop(0, "rgba(159, 18, 57, 0.7)");
-  upFillGrad.addColorStop(0.6, "rgba(190, 18, 60, 0.55)");
-  upFillGrad.addColorStop(1, "rgba(136, 19, 55, 0.65)");
+  upFillGrad.addColorStop(0, "rgba(180, 20, 30, 0.55)");
+  upFillGrad.addColorStop(0.6, "rgba(220, 30, 40, 0.4)");
+  upFillGrad.addColorStop(1, "rgba(140, 15, 25, 0.5)");
   ctx.fillStyle = upFillGrad;
   ctx.fill();
 
-  // 上传折线描边 (亮珊瑚红 #f43f5e)
+  // 上传折线描边 (上传红 rgb(254,49,56))
   ctx.beginPath();
   for (let i = 0; i < points.length; i++) {
     const x = i * stepX;
@@ -188,7 +188,7 @@ const renderChart = () => {
       ctx.lineTo(x, y);
     }
   }
-  ctx.strokeStyle = "#f43f5e";
+  ctx.strokeStyle = "rgb(254, 49, 56)";
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
@@ -269,8 +269,8 @@ onUnmounted(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #22d3ee;
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.8);
+  background: rgb(0, 127, 249);
+  box-shadow: 0 0 8px rgba(0, 127, 249, 0.8);
   animation: pulse 2s infinite;
 }
 
@@ -299,23 +299,23 @@ onUnmounted(() => {
   border-radius: 50%;
 }
 
-.dot-badge.cyan {
-  background: #22d3ee;
-  box-shadow: 0 0 6px rgba(34, 211, 238, 0.7);
+.dot-badge.blue {
+  background: rgb(0, 127, 249);
+  box-shadow: 0 0 6px rgba(0, 127, 249, 0.7);
 }
 
 .dot-badge.red {
-  background: #f43f5e;
-  box-shadow: 0 0 6px rgba(244, 63, 94, 0.7);
+  background: rgb(254, 49, 56);
+  box-shadow: 0 0 6px rgba(254, 49, 56, 0.7);
 }
 
 .indicator.download .val {
-  color: #22d3ee;
+  color: rgb(0, 127, 249);
   font-weight: var(--weight-bold, 700);
 }
 
 .indicator.upload .val {
-  color: #f43f5e;
+  color: rgb(254, 49, 56);
   font-weight: var(--weight-bold, 700);
 }
 

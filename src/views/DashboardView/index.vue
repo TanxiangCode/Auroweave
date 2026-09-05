@@ -6,11 +6,13 @@
  * 职责：布局拼装、状态绑定、Hook 协调
  */
 import { storeToRefs } from "pinia";
-import { onActivated } from "vue";
+import { computed, onActivated, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSubscriptionStore } from "@/stores/subscription.store";
+import { useSettingsStore } from "@/stores/settings.store";
+import { useSpeedtestStore } from "@/stores/speedtest.store";
 import { useFluidWave } from "@/composables/useFluidWave";
 
 import EnergyCore from "./components/EnergyCore.vue";
@@ -21,11 +23,14 @@ import SpeedChart from "@/components/charts/SpeedChart.vue";
 import { useProxyToggle } from "./hooks/useProxyToggle";
 import { useInboundMode } from "./hooks/useInboundMode";
 import { useCoreStatus } from "./hooks/useCoreStatus";
+import { useEgressInfo } from "./hooks/useEgressInfo";
 
 const router = useRouter();
 const connectionStore = useConnectionStore();
 const proxyStore = useProxyStore();
 const subStore = useSubscriptionStore();
+const speedtestStore = useSpeedtestStore();
+const settingsStore = useSettingsStore();
 
 const { smoothDownloadSpeed, activeConnectionCount, totalDownload, totalUpload } =
   storeToRefs(connectionStore);
@@ -37,6 +42,26 @@ const { proxyActive, coreStarting, operating, recentToggleUntil, toggleProxy, ch
 const { inboundMode } = useInboundMode({ proxyActive, operating });
 
 useCoreStatus({ proxyActive, coreStarting, operating, recentToggleUntil });
+
+// === 首页出口与节点信息 ===
+
+// 当前工作节点（含负载均衡/自动组递归解析）
+const { workingNodeName } = storeToRefs(proxyStore);
+
+// 当前节点延迟：测速 store 的 latencyMap（用户点过测延迟/批量测延迟后缓存）
+const currentNodeLatency = computed(
+  () => speedtestStore.latencyMap[workingNodeName.value] ?? undefined
+);
+
+// 出口 IP + 归属地 + 国旗（激活时探测一次，节点切换防抖重探）
+const { egress, egressLoading, refresh: refreshEgress } = useEgressInfo(workingNodeName);
+
+// 首页胶囊显隐开关（设置-首页显示；字段缺失视为开启，兼容旧 settings.json）
+const dash = storeToRefs(settingsStore).settings;
+const showConnections = computed(() => dash.value.dashboard_show_connections !== false);
+const showCurrentNode = computed(() => dash.value.dashboard_show_current_node !== false);
+const showEgressIp = computed(() => dash.value.dashboard_show_egress_ip !== false);
+const showTotalTraffic = computed(() => dash.value.dashboard_show_total_traffic !== false);
 
 // === 流体波浪旋转角度 ===
 
@@ -50,8 +75,15 @@ function navigate(path: string) {
 
 // KeepAlive 激活时拉取订阅列表，供 IdleTipsPanel 判断是否显示订阅入口按钮
 // （避免 setup 顶层执行导致缓存后不再刷新）
+// 出口探测同样在激活时触发（代理开着才有意义；出口胶囊被关闭时跳过）
 onActivated(() => {
   subStore.fetchAll();
+  if (proxyActive.value && showEgressIp.value) refreshEgress();
+});
+
+// 代理从关到开时补一次探测（首次进入时 proxyActive 可能尚未就绪）
+watch(proxyActive, (active) => {
+  if (active && showEgressIp.value) refreshEgress();
 });
 </script>
 
@@ -84,7 +116,16 @@ onActivated(() => {
         :active-connection-count="activeConnectionCount"
         :total-download="totalDownload"
         :total-upload="totalUpload"
+        :current-node="workingNodeName === '直连' ? undefined : workingNodeName"
+        :current-node-latency="currentNodeLatency"
+        :egress-info="egress"
+        :egress-loading="egressLoading"
+        :show-connections="showConnections"
+        :show-current-node="showCurrentNode"
+        :show-egress-ip="showEgressIp"
+        :show-total-traffic="showTotalTraffic"
         @navigate="navigate"
+        @refresh-egress="refreshEgress"
       />
     </div>
 
