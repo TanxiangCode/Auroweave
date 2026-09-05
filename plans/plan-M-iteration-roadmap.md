@@ -115,9 +115,17 @@ ProxiesView 300 节点一次性渲染。
 ### M3-1 规则集远程订阅化（1.14 initial_path）
 
 - 现状：.srs 由应用层 reqwest 下载缓存（已支持手动强更），内核不自动更新
-- 方案：切 `type: remote` + `download_detour` → 内核后台自动更新；`initial_path` 指向现有本地缓存保证断网冷启动不阻塞
-- 前置核对：1.14 的 `download_detour` 已废弃改 `http_client` 语义，按当前文档实施
-- 验收：规则集变更后无应用层干预自动更新；断网冷启动不阻塞
+- [x] 切 `type: remote` + `http_client.detour: proxy` → 内核后台自动更新（规则集变更无应用层干预）
+- [x] `initial_path` 指向现有本地缓存保证断网冷启动不阻塞（实测 dead-URL 下 0.10s 起、ClashAPI 就绪；更新失败不破坏本地缓存文件）
+- [x] 前置核对（实测结论，非文档推演）：`download_detour` 在 1.14 deprecated（1.16 移除，运行时 WARN）→ 用 `http_client` 新语义；remote 更新持久化在 sing-box `cache_file`（bolt db）**不回写 initial_path**，应用层缓存与内核 cache.db 各司其职无漂移——真实配置已启 cache_file（store_dns 轮），架构自洽
+- [x] 两条配置生成路径同步切换（ConfigBuilder::build 与 settings.rs rebuild 路径，防双路径语义漂移）；builder 生成的完整配置经真实 1.14.0 二进制 check + 起内核实测通过
+- 验收：规则集变更后无应用层干预自动更新 ✅；断网冷启动不阻塞 ✅
+
+### M3-4 订阅面板双入口收敛（已完成）
+
+- [x] SubscriptionPanel 退化为"开关 + 只读概览 + 跳转订阅中心"（458→288 行），切换聚合/刷新/编辑/删除/导入/批量更新全收敛到 SubscriptionsView
+- [x] 修复双入口行为漂移：面板原为单订阅切换旧语义（"订阅已切换"），订阅中心为多订阅聚合 toggle 新语义——收敛后语义单一真相源
+- 验收：两入口无行为分歧 ✅；面板代码量显著缩减 ✅
 
 ### M3-2 DNS 进阶面板（evaluate/respond 体系）
 
@@ -131,12 +139,6 @@ ProxiesView 300 节点一次性渲染。
 - 现状：AdvancedPanel 仅备份恢复；sing-box 1.14 支持 `$schema` 字段与 `sing-box schema` 命令
 - 方案：内核升级命令旁挂 `schema` 导出 → 高级用户提供带 schema 校验的 config.json 编辑入口（编辑前自动 `check`）
 - 验收：手改配置保存前被校验拦截，拒载错误给出定位行号
-
-### M3-4 订阅面板双入口收敛
-
-- 现状：SubscriptionsView（全功能卡片流）与设置页 SubscriptionPanel（列表）双入口，交互与文案已发生漂移（本轮已统一确认弹窗，结构漂移仍在）
-- 方案：SubscriptionPanel 退化为"开关 + 跳转订阅中心入口"，编辑/删除全收敛到 SubscriptionsView
-- 验收：两入口无行为分歧；SubscriptionPanel 代码量显著缩减
 
 ### M3-5 i18n 多语言（视需求决定是否立项）
 
