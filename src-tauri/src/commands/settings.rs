@@ -395,23 +395,27 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
 
         // 同步 rule_set 注册：geosite 与 geoip 各自独立判断（与 build_full_route_rules
         // 的独立布尔语义对齐；旧实现 geoip 被 geosite 门控，geosite 丢失而 geoip
-        // 存在时会引用未注册的 rule-set 导致内核拒载）
+        // 存在时会引用未注册的 rule-set 导致内核拒载）。
+        // M3-1 remote 化与 ConfigBuilder::build 同源：remote + initial_path +
+        // http_client.detour=proxy（内核后台自动更新，断网冷启动走本地缓存）
+        let mk_remote_rule_set = |tag: &str| serde_json::json!({
+            "tag": tag,
+            "type": "remote",
+            "format": "binary",
+            "url": if tag == "geosite-cn" {
+                "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs"
+            } else {
+                "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs"
+            },
+            "initial_path": config_dir.join(format!("{}.srs", tag)).to_string_lossy().to_string(),
+            "http_client": { "detour": "proxy" }
+        });
         let mut rule_sets = Vec::new();
         if geosite_exists {
-            rule_sets.push(serde_json::json!({
-                "tag": "geosite-cn",
-                "type": "local",
-                "format": "binary",
-                "path": config_dir.join("geosite-cn.srs").to_string_lossy().to_string()
-            }));
+            rule_sets.push(mk_remote_rule_set("geosite-cn"));
         }
         if geoip_exists {
-            rule_sets.push(serde_json::json!({
-                "tag": "geoip-cn",
-                "type": "local",
-                "format": "binary",
-                "path": config_dir.join("geoip-cn.srs").to_string_lossy().to_string()
-            }));
+            rule_sets.push(mk_remote_rule_set("geoip-cn"));
         }
         if !rule_sets.is_empty() {
             route.insert("rule_set".to_string(), serde_json::json!(rule_sets));

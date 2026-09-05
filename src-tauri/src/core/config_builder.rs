@@ -101,9 +101,10 @@ pub struct ConfigBuilder {
     mixed_port: u16,
     clash_api_port: u16,
     allow_lan: bool,
-    /// geosite-cn.srs 本地文件路径（如果存在则使用 type:local，否则跳过 rule-set）
+    /// geosite-cn.srs 本地缓存路径（存在时作为 remote rule-set 的
+    /// initial_path——内核启动直接加载本地、后台按 url 自动更新）
     geosite_cn_path: Option<String>,
-    /// geoip-cn.srs 本地文件路径
+    /// geoip-cn.srs 本地缓存路径
     geoip_cn_path: Option<String>,
     /// 分组测速配置覆盖（group tag -> interval/tolerance/url），
     /// 由设置页 GroupEditModal 保存，仅覆盖显式设置的字段
@@ -369,22 +370,31 @@ impl ConfigBuilder {
         }
 
         let mut rule_set_config = Vec::new();
-        // geosite 与 geoip 各自独立注册（与 build_full_route_rules 的独立布尔语义对齐）
+        // geosite 与 geoip 各自独立注册（与 build_full_route_rules 的独立布尔语义对齐）。
+        // M3-1 remote 化：type:local → remote + initial_path——
+        //   - 应用层首启拉取 .srs 缓存（download_rule_set），内核启动经 initial_path
+        //     直接加载本地（断网冷启动不阻塞，实测 0.01s 起）
+        //   - 之后内核按 url 后台自动更新（规则集变更无应用层干预），
+        //     http_client.detour=proxy：规则源（jsdelivr/GitHub raw）直连常不可达，
+        //     经代理下载保证可达；缓存文件为内核回写与 initial_path 共用同一份
+        //   - download_detour 为 1.14 deprecated 字段（1.16 移除，实测有警告），用 http_client 新语义
+        let mk_remote_rule_set = |tag: &str, path: &str| json!({
+            "tag": tag,
+            "type": "remote",
+            "format": "binary",
+            "url": if tag == "geosite-cn" {
+                "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs"
+            } else {
+                "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs"
+            },
+            "initial_path": path,
+            "http_client": { "detour": "proxy" }
+        });
         if has_geosite {
-            rule_set_config.push(json!({
-                "tag": "geosite-cn",
-                "type": "local",
-                "format": "binary",
-                "path": self.geosite_cn_path.as_ref().unwrap()
-            }));
+            rule_set_config.push(mk_remote_rule_set("geosite-cn", self.geosite_cn_path.as_ref().unwrap()));
         }
         if has_geoip {
-            rule_set_config.push(json!({
-                "tag": "geoip-cn",
-                "type": "local",
-                "format": "binary",
-                "path": self.geoip_cn_path.as_ref().unwrap()
-            }));
+            rule_set_config.push(mk_remote_rule_set("geoip-cn", self.geoip_cn_path.as_ref().unwrap()));
         }
         if rule_set_config.is_empty() {
             log::warn!("[config] geosite-cn.srs / geoip-cn.srs 本地文件均不存在，跳过国内直连规则，所有流量走代理");
