@@ -76,6 +76,9 @@
 ### 🔵 M10+ — 深水区能力（M3 各项独立立项，见 plan-M-iteration-roadmap.md）
 - 规则集远程订阅化 / DNS evaluate 体系 / 配置编辑器（JSON Schema）/ 订阅面板收敛 / i18n（决策点）
 
+### 🔵 M11+ — 测试内核实例模式（解锁检测零打扰改造，见 plan-N-test-core.md）
+- 目标：批量解锁检测从 selector 轮换升级为独立 test-core 实例（N 入站/N 出站/inbound 路由钉死），用户流量零打扰；selector 路径降级为 fallback。
+
 ---
 
 ## 模块执行批次（依赖关系纠正）
