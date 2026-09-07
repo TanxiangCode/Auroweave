@@ -15,7 +15,7 @@ interface UseUnlockActionsOptions {
   rawNodes: ComputedRef<ProxyNode[]>;
 }
 
-/** 单节点检测时长上限（三服务串行 15s/请求 + ip-api 8s） */
+/** 单节点检测时长上限（O-1 并行化后墙钟≈最慢一路：三服务并行 15s 上限 + ip 层 8s） */
 const SINGLE_CHECK_TIMEOUT_MS = 60_000;
 
 /** 批量预估：test-core 并发 8 路探测，每节点三服务约 8-12s，取均值 10s/8 路 */

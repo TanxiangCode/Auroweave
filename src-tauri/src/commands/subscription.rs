@@ -707,6 +707,9 @@ pub async fn subscription_get_all() -> ApiResponse<Vec<Subscription>> {
 }
 
 /// 删除订阅（从 subscriptions.json 中移除对应记录）
+///
+/// 联动清理该订阅节点的解锁/测速历史（plan-O O-3）：节点随订阅消失后
+/// 其历史记录成为孤儿数据（按 tag 查询永远查不到消费者）。
 #[tauri::command]
 pub async fn subscription_delete(id: String) -> ApiResponse<()> {
     if let Err(e) = validate_subscription_id(&id) {
@@ -717,29 +720,57 @@ pub async fn subscription_delete(id: String) -> ApiResponse<()> {
     let before_len = all_subs.len();
     all_subs.retain(|s| s.id != id);
     if all_subs.len() < before_len {
+        // 删除前快照该订阅的节点 tag（raw 缓存仍在，可解析出 tag 列表）
+        let deleted_tags: Vec<String> = load_raw_subscription(&id)
+            .and_then(|raw| parse_subscription_content(&raw).ok())
+            .map(|(_, nodes)| nodes.into_iter().map(|n| n.tag).collect())
+            .unwrap_or_default();
         let _ = fs::remove_file(get_raw_subscription_path(&id));
         if let Err(e) = save_subscriptions(&all_subs) {
             return ApiResponse::err(format!("删除订阅失败: {}", e), 500);
+        }
+        if !deleted_tags.is_empty() {
+            crate::core::stats_db::delete_history_by_tags(&deleted_tags);
+            log::info!(
+                "[subscription] 已联动清理订阅 {} 的 {} 个节点历史记录",
+                id,
+                deleted_tags.len()
+            );
         }
         log::info!("[subscription] 订阅 {} 已删除", id);
     }
     ApiResponse::ok(())
 }
 
-/// 批量删除所有订阅（清空订阅列表）
+/// 批量删除所有订阅（清空订阅列表；同 subscription_delete 联动清理全部历史）
 #[tauri::command]
 pub async fn subscription_delete_all() -> ApiResponse<()> {
     log::info!("[subscription] 删除所有订阅");
+
+    // 删除前快照全部节点 tag（跨订阅含去重后缀的最终 tag）
+    let all_tags: Vec<String> = collect_active_outbounds()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|n| n.tag)
+        .collect();
 
     let raw_dir = crate::get_config_dir().join("subscriptions_raw");
     let _ = fs::remove_dir_all(&raw_dir);
 
     if !get_subscriptions_path().exists() {
+        if !all_tags.is_empty() {
+            crate::core::stats_db::delete_history_by_tags(&all_tags);
+        }
         return ApiResponse::ok(());
     }
 
     if let Err(e) = fs::remove_file(get_subscriptions_path()) {
         return ApiResponse::err(format!("清空订阅列表失败: {}", e), 500);
+    }
+
+    if !all_tags.is_empty() {
+        crate::core::stats_db::delete_history_by_tags(&all_tags);
+        log::info!("[subscription] 已联动清理 {} 个节点的历史记录", all_tags.len());
     }
 
     log::info!("[subscription] 所有订阅已清空");

@@ -226,28 +226,82 @@ async fn fetch_service_response(
     })
 }
 
-/// ip-api 出口信息查询（经 mixed 端口，与连通性检测同一数据源形态）。
-/// 免费限 45 req/min——调用方（批量调度器）负责令牌桶限速，这里不管节奏。
-pub async fn fetch_egress_info(
-    client: &reqwest::Client,
-) -> Result<(Option<String>, Option<String>, Option<bool>, Option<bool>, Option<String>), AppError> {
+/// 出口信息聚合（IP/归属国/hosting/proxy/ISP）
+#[derive(Debug, Clone, Default)]
+pub struct EgressInfo {
+    pub ip: Option<String>,
+    pub country_code: Option<String>,
+    pub hosting: Option<bool>,
+    pub proxy_flag: Option<bool>,
+    pub isp: Option<String>,
+}
+
+/// ip-api 出口信息查询（经出口端口，与连通性检测同一数据源形态）。
+///
+/// 免费限 45 req/min **按出口 IP 计数**——批量检测下每查询来自各节点自己的
+/// 出口，天然分散；唯一例外是机场同出口挂多节点（单 IP 累积）。触限（429）
+/// 时换 freeipapi 单发重试一次（60 req/min、含 isProxy；hosting 字段缺失置
+/// None——proxy 布尔可顶替机房启发式语义）。
+pub async fn fetch_egress_info(client: &reqwest::Client) -> Result<EgressInfo, AppError> {
     let resp = client
         .get("http://ip-api.com/json?fields=query,countryCode,isp,proxy,hosting&lang=zh-CN")
         .timeout(Duration::from_secs(8))
         .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().as_u16() == 429 => {
+            // 限速容错：freeipapi 单发重试（调研实测 2026-09-07：无 key、含 isProxy）
+            fetch_egress_info_freeipapi(client).await
+        }
+        Ok(r) if r.status().is_success() => {
+            let v: serde_json::Value = r
+                .json()
+                .await
+                .map_err(|e| AppError::Network(format!("解析 ip-api 响应失败: {}", e)))?;
+            Ok(EgressInfo {
+                ip: str_field(&v, "query"),
+                country_code: str_field(&v, "countryCode"),
+                hosting: bool_field(&v, "hosting"),
+                proxy_flag: bool_field(&v, "proxy"),
+                isp: str_field(&v, "isp"),
+            })
+        }
+        Ok(r) => Err(AppError::Network(format!("ip-api 返回 HTTP {}", r.status()))),
+        Err(e) => Err(AppError::Network(format!("ip-api 查询失败: {}", e))),
+    }
+}
+
+/// freeipapi 备源（ip-api 429 时的单发重试；无 hosting 字段，isProxy 顶替）
+async fn fetch_egress_info_freeipapi(client: &reqwest::Client) -> Result<EgressInfo, AppError> {
+    let resp = client
+        .get("https://freeipapi.com/api/json")
+        .timeout(Duration::from_secs(8))
+        .send()
         .await
-        .map_err(|e| AppError::Network(format!("ip-api 查询失败: {}", e)))?;
+        .map_err(|e| AppError::Network(format!("freeipapi 查询失败: {}", e)))?;
     if !resp.status().is_success() {
-        return Err(AppError::Network(format!("ip-api 返回 HTTP {}", resp.status())));
+        return Err(AppError::Network(format!("freeipapi 返回 HTTP {}", resp.status())));
     }
     let v: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| AppError::Network(format!("解析 ip-api 响应失败: {}", e)))?;
+        .map_err(|e| AppError::Network(format!("解析 freeipapi 响应失败: {}", e)))?;
+    Ok(EgressInfo {
+        ip: str_field(&v, "ipAddress"),
+        country_code: str_field(&v, "countryCode"),
+        hosting: None, // freeipapi 无机房字段；isProxy 覆盖代理/VPN/机房启发式
+        proxy_flag: bool_field(&v, "isProxy"),
+        isp: str_field(&v, "asnOrganization"),
+    })
+}
 
-    let get_s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(|s| s.to_string());
-    let get_b = |k: &str| v.get(k).and_then(|x| x.as_bool());
-    Ok((get_s("query"), get_s("countryCode"), get_b("hosting"), get_b("proxy"), get_s("isp")))
+fn str_field(v: &serde_json::Value, k: &str) -> Option<String> {
+    v.get(k).and_then(|x| x.as_str()).map(|s| s.to_string())
+}
+
+fn bool_field(v: &serde_json::Value, k: &str) -> Option<bool> {
+    v.get(k).and_then(|x| x.as_bool())
 }
 
 /// 服务探测 URL
@@ -264,7 +318,11 @@ pub fn service_url(service: UnlockService) -> &'static str {
 /// `egress_port`：流量出口的本地 mixed 端口——主实例（selector 已被调用方
 /// 切到目标节点）传 mixed_port；test-core 专属端口（inbound 规则已钉死到
 /// 目标节点）传 port_base+i。检测语义两种通道完全一致。
-/// services 为空时只做 ip-api 层；with_ip=false 跳过 ip-api。
+/// services 为空时只做 ip 层；with_ip=false 跳过 ip 层。
+///
+/// 三服务 + ip 层全部并行：单服务经代理远端往返 2-5s，串行三服务 10-15s
+/// 是单节点检测的耗时大头；各探测相互独立无共享状态，墙钟时间收敛到
+/// 最慢一路（约 5-8s）。
 pub async fn check_current_exit(
     egress_port: u16,
     services: &[UnlockService],
@@ -279,6 +337,46 @@ pub async fn check_current_exit(
         .build()
         .map_err(|e| AppError::Network(e.to_string()))?;
 
+    // 并行任务组：探测枚举 + ip 层（JoinSet 要求同型任务，用 ProbeOutcome 分派）
+    enum ProbeOutcome {
+        Service(String, UnlockStatus),
+        Ip(Result<EgressInfo, AppError>),
+    }
+    let mut join_set = tokio::task::JoinSet::new();
+    for &service in services {
+        join_set.spawn({
+            let client = client.clone();
+            let params = params.clone();
+            async move {
+                let status = match fetch_service_response(&client, service_url(service)).await {
+                    Ok(resp) => classify_response(service, &resp, &params),
+                    Err(_) => UnlockStatus::Failed,
+                };
+                ProbeOutcome::Service(service.as_str().to_string(), status)
+            }
+        });
+    }
+    if with_ip {
+        join_set.spawn({
+            let client = client.clone();
+            async move { ProbeOutcome::Ip(fetch_egress_info(&client).await) }
+        });
+    }
+
+    let mut service_results = Vec::with_capacity(services.len());
+    let mut ip_result: Option<EgressInfo> = None;
+    while let Some(joined) = join_set.join_next().await {
+        match joined {
+            Ok(ProbeOutcome::Service(name, status)) => service_results.push((name, status)),
+            Ok(ProbeOutcome::Ip(Ok(info))) => ip_result = Some(info),
+            Ok(ProbeOutcome::Ip(Err(e))) => {
+                // ip 层失败不判 Failed——服务层结果依然有效，仅 IP 层缺省
+                log::debug!("[unlock] ip 层查询失败（结果保留服务层字段）: {}", e);
+            }
+            Err(e) => log::debug!("[unlock] 并行探测任务异常: {}", e),
+        }
+    }
+
     let mut result = UnlockCheckResult {
         node_tag: String::new(), // 由调用方回填
         services: std::collections::HashMap::new(),
@@ -289,24 +387,16 @@ pub async fn check_current_exit(
         isp: None,
         tested_at: chrono::Utc::now().timestamp_millis(),
     };
-
-    for service in services {
-        let status = match fetch_service_response(&client, service_url(*service)).await {
-            Ok(resp) => classify_response(*service, &resp, params),
-            Err(_) => UnlockStatus::Failed,
-        };
-        result.services.insert(service.as_str().to_string(), status);
+    for (name, status) in service_results {
+        result.services.insert(name, status);
     }
-
-    if with_ip {
-        if let Ok((ip, cc, hosting, proxy_flag, isp)) = fetch_egress_info(&client).await {
-            result.egress_ip = ip;
-            result.country_code = cc;
-            result.hosting = hosting;
-            result.proxy_flag = proxy_flag;
-            result.isp = isp;
-        }
-        // ip-api 失败不判 Failed——服务层结果依然有效，仅 IP 层缺省
+    // ip 层失败不判 Failed——服务层结果依然有效，仅 IP 层缺省
+    if let Some(info) = ip_result {
+        result.egress_ip = info.ip;
+        result.country_code = info.country_code;
+        result.hosting = info.hosting;
+        result.proxy_flag = info.proxy_flag;
+        result.isp = info.isp;
     }
 
     Ok(result)

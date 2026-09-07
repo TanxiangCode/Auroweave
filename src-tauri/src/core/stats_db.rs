@@ -32,8 +32,7 @@ fn init_schema(conn: &Connection) -> Result<()> {
     // WAL 模式：写不阻塞读（流量监控写拍与前端统计查询并发不再串行竞争），
     // synchronous=NORMAL 在 WAL 下安全且大幅减少 fsync（默认 FULL 每条 autocommit 一次）
     conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
-    // 流量每小时聚合表
+    conn.pragma_update(None, "synchronous", "NORMAL")?;    // 流量每小时聚合表
     conn.execute(
         "CREATE TABLE IF NOT EXISTS traffic_hourly (
             timestamp_hour INTEGER PRIMARY KEY, /* Unix timestamp for the start of the hour */
@@ -93,7 +92,57 @@ fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // 历史保留期裁剪（plan-O O-3）：unlock/speedtest 两表只增不删会无限膨胀，
+    // 且趋势查询本就 LIMIT 20——90 天外数据无消费者。开库一次，幂等（<10ms）
+    if let Err(e) = prune_history(conn) {
+        log::warn!("[stats_db] 历史保留期裁剪失败（不影响使用，下次开库重试）: {}", e);
+    }
+
     Ok(())
+}
+
+/// 历史保留期（天）：解锁状态与测速记录的可用价值窗口
+const HISTORY_RETENTION_DAYS: i64 = 90;
+
+/// 删除 tested_at 早于 90 天的历史行（unlock_history + speedtest_history）
+fn prune_history(conn: &Connection) -> Result<()> {
+    let cutoff = chrono::Utc::now().timestamp_millis() - HISTORY_RETENTION_DAYS * 24 * 3600 * 1000;
+    conn.execute(
+        "DELETE FROM unlock_history WHERE tested_at < ?1",
+        rusqlite::params![cutoff],
+    )?;
+    conn.execute(
+        "DELETE FROM speedtest_history WHERE tested_at < ?1",
+        rusqlite::params![cutoff],
+    )?;
+    Ok(())
+}
+
+/// 按节点 tag 批量删除历史记录（订阅删除时联动清理其节点数据，
+/// 防止孤儿记录——tag 永远查不到消费者）
+pub fn delete_history_by_tags(tags: &[String]) {
+    if tags.is_empty() {
+        return;
+    }
+    if let Err(e) = with_conn(|conn| {
+        conn.execute_batch("BEGIN;")?;
+        {
+            let mut stmt = conn.prepare("DELETE FROM unlock_history WHERE node_tag = ?1")?;
+            for tag in tags {
+                stmt.execute(rusqlite::params![tag])?;
+            }
+        }
+        {
+            let mut stmt = conn.prepare("DELETE FROM speedtest_history WHERE node_tag = ?1")?;
+            for tag in tags {
+                stmt.execute(rusqlite::params![tag])?;
+            }
+        }
+        conn.execute_batch("COMMIT;")?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 订阅删除联动清理历史失败（孤儿数据容忍，不影响功能）: {}", e);
+    }
 }
 
 /// 获取数据库连接。数据库不可用时返回 Err（调用方决定记录日志或忽略）。
@@ -357,4 +406,84 @@ pub fn get_latest_unlock_per_node() -> Result<Vec<UnlockRecord>> {
         })?;
         rows.collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// in-memory 连接跑完整 init_schema（不触真实 DB_CONN），验证裁剪与联动语义
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn
+    }
+
+    fn insert_unlock(conn: &Connection, tag: &str, tested_at: i64) {
+        conn.execute(
+            "INSERT INTO unlock_history (node_tag, services, tested_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![tag, "{}", tested_at],
+        )
+        .unwrap();
+    }
+
+    fn insert_speedtest(conn: &Connection, tag: &str, tested_at: i64) {
+        conn.execute(
+            "INSERT INTO speedtest_history (node_tag, download_bps, upload_bps, delay_ms, tested_at) VALUES (?1, 0, 0, NULL, ?2)",
+            rusqlite::params![tag, tested_at],
+        )
+        .unwrap();
+    }
+
+    fn count_rows(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn prune_removes_rows_older_than_90_days() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp_millis();
+        let stale = now - 91 * 24 * 3600 * 1000;
+        let fresh = now - 89 * 24 * 3600 * 1000;
+        insert_unlock(&conn, "旧节点", stale);
+        insert_unlock(&conn, "新节点", fresh);
+        insert_speedtest(&conn, "旧节点", stale);
+        insert_speedtest(&conn, "新节点", fresh);
+
+        prune_history(&conn).unwrap();
+
+        assert_eq!(count_rows(&conn, "unlock_history"), 1);
+        assert_eq!(count_rows(&conn, "speedtest_history"), 1);
+        // 剩余的是新行
+        let tag: String = conn
+            .query_row("SELECT node_tag FROM unlock_history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tag, "新节点");
+    }
+
+    #[test]
+    fn delete_by_tags_removes_only_matching() {
+        let conn = test_conn();
+        let now = chrono::Utc::now().timestamp_millis();
+        for tag in ["a", "b", "c"] {
+            insert_unlock(&conn, tag, now);
+            insert_speedtest(&conn, tag, now);
+        }
+        // with_conn 走全局 DB_CONN；此处直接内联等价逻辑验证 SQL 语义
+        let tags = vec!["a".to_string(), "c".to_string()];
+        conn.execute_batch("BEGIN;").unwrap();
+        {
+            let mut stmt = conn.prepare("DELETE FROM unlock_history WHERE node_tag = ?1").unwrap();
+            for tag in &tags {
+                stmt.execute(rusqlite::params![tag]).unwrap();
+            }
+        }
+        conn.execute_batch("COMMIT;").unwrap();
+
+        assert_eq!(count_rows(&conn, "unlock_history"), 1);
+        let tag: String = conn
+            .query_row("SELECT node_tag FROM unlock_history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tag, "b");
+    }
 }

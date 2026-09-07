@@ -253,6 +253,7 @@ onDeactivated(() => {
           :raw-count="rawNodes.length"
           :loading="loading"
           :search-text="searchText"
+          :unlock-filter="unlockFilter"
           :is-selectable="isSelectorGroup"
           :layout-mode="viewMode"
           :fetch-error="proxyStore.error"

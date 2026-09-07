@@ -3,8 +3,9 @@
  * 批量解锁检测确认弹窗
  * 作者: TanXiang
  *
- * 与批量测速确认同心智，但警示更重：检测期间会逐节点临时切换出口，
- * 用户实时流量会跟着轮换；IP 层受 ip-api 45 req/min 限速。
+ * test-core 模式（plan-N）：检测在独立测试内核中受控并发进行，
+ * 不影响用户当前网络；测试内核拉起失败时自动降级为逐节点切换出口
+ * 的串行模式（v1 fallback 语义）。
  */
 defineProps<{
   visible: boolean;
@@ -30,8 +31,9 @@ const emit = defineEmits<{
           <div>检测服务: Gemini · Claude · ChatGPT + 出口 IP 归属地</div>
         </div>
         <p class="warning-tip">
-          检测将在独立测试内核中并发进行，不影响你当前使用的节点与网络。
-          若测试内核拉起失败，将自动降级为逐节点切换出口的串行模式。中途可随时取消。
+          检测将在独立测试内核中并发进行，不影响你当前使用的节点与网络；
+          单节点检测入口在节点卡片上（✨ 按钮）。若测试内核拉起失败，
+          将自动降级为逐节点切换出口的串行模式。中途可随时取消。
         </p>
         <div class="modal-actions">
           <button class="btn text" @click="emit('close')">取消</button>

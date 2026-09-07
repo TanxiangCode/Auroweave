@@ -12,7 +12,7 @@ import type { ProxyNode } from "@/types";
 
 withDefaults(
   defineProps<{
-    /** 节点列表（已搜索+排序） */
+    /** 节点列表（已搜索+筛选+排序） */
     nodes: ProxyNode[];
     /** 原始节点数量（用于判断是否为空） */
     rawCount: number;
@@ -20,6 +20,8 @@ withDefaults(
     loading: boolean;
     /** 当前搜索关键词 */
     searchText: string;
+    /** 当前解锁服务筛选（"gemini:yes" 形态；空串=未筛选） */
+    unlockFilter?: string;
     /** 是否为手动选择分组 */
     isSelectable: boolean;
     /** 布局模式 */
@@ -31,6 +33,7 @@ withDefaults(
   }>(),
   {
     layoutMode: "grid",
+    unlockFilter: "",
     fetchError: null,
     pinnedSet: () => new Set<string>(),
   }
@@ -76,12 +79,14 @@ const speedtestStore = useSpeedtestStore();
     @cta="emit('refresh-groups')"
   />
 
-  <!-- 搜索无匹配 -->
+  <!-- 筛选/搜索无匹配（两种来源文案区分，避免误导性提示） -->
   <EmptyState
     v-else-if="nodes.length === 0"
     icon="Search"
-    title="没有找到匹配的节点"
-    :description="`搜索「${searchText}」无结果，试试其他关键词`"
+    :title="unlockFilter ? '当前筛选下无匹配节点' : '没有找到匹配的节点'"
+    :description="unlockFilter
+      ? '解锁筛选未命中任何节点——可能是尚未检测，试试清除筛选或先跑一轮解锁检测'
+      : `搜索「${searchText}」无结果，试试其他关键词`"
   />
 
   <!-- 节点列表 / 网格容器 -->
