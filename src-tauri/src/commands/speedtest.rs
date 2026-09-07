@@ -119,7 +119,7 @@ pub async fn speedtest_run_latency(
     Ok(ApiResponse::ok(results))
 }
 
-/// 单节点吞吐量测速
+/// 单节点吞吐量测速（test-core 零打扰路径；订阅池未命中降级 selector 切换）
 #[tauri::command]
 pub async fn speedtest_run_single(
     app_handle: tauri::AppHandle,
@@ -133,14 +133,56 @@ pub async fn speedtest_run_single(
         ));
     }
     info!("开始对节点 [{}] 运行单体吞吐量测速...", node_tag);
-    let port = crate::speedtest::get_mixed_port(&app_handle);
+    let mixed_port = crate::speedtest::get_mixed_port(&app_handle);
     // 用户设置的测速数据源（设置页 speed_test_url；空串回退内置 Cloudflare）
-    let test_url = crate::commands::settings::settings_get_internal(&app_handle).speed_test_url;
+    let settings = crate::commands::settings::settings_get_internal(&app_handle);
+    let test_url = settings.speed_test_url.clone();
+    let port_base = if settings.test_core_port_base > 0 {
+        settings.test_core_port_base
+    } else {
+        crate::core::test_core::DEFAULT_PORT_BASE
+    };
 
+    // ---- 主路径：订阅池命中 → test-core 专属端口（selector/用户流量零打扰） ----
+    if let Some(node) = crate::commands::subscription::collect_active_outbounds()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|n| n.tag == node_tag && crate::core::parser::is_valid_proxy_node(n))
+    {
+        let core = crate::core::test_core::TestCoreManager::new();
+        // 单节点错开 +500 端口段：与并发批量批次互不干扰（不持全局锁）
+        match core
+            .spawn(std::slice::from_ref(&node), crate::core::test_core::single_node_port_base(port_base))
+            .await
+        {
+            Ok(base) => {
+                let result = run_single_throughput_test_with_url(&node_tag, 5, base, &test_url).await;
+                core.stop().await; // 测速完立即销毁
+                match result {
+                    Ok(res) => {
+                        crate::core::stats_db::add_speedtest_record(
+                            &node_tag,
+                            res.download_bps,
+                            res.upload_bps,
+                            None,
+                        );
+                        info!("[speedtest] 单节点测速完成（test-core）: [{}]", node_tag);
+                        return Ok(ApiResponse::ok(res));
+                    }
+                    Err(e) => return Ok(ApiResponse::err(format!("单节点测速失败: {}", e), 500)),
+                }
+            }
+            Err(e) => {
+                // 拉起失败降级 selector 路径（下方继续）
+                log::warn!("[speedtest] test-core 拉起失败，单节点测速降级 selector 路径: {}", e);
+            }
+        }
+    }
+
+    // ---- 降级路径：selector 临时切换（v1 语义） ----
     // 吞吐测速经本地 mixed 端口发起，流量走 selector 当前选中节点。
     // 单节点测速必须先把所在 selector 组切换到目标节点，否则测的是
     // 用户当前选中的其他节点（历史缺陷：测速结果张冠李戴）。
-    // 通过 /proxies 找到包含该节点的 selector 组并切换，测速后还原原选中节点。
     let client = ClashApiClient::default();
     let mut restored: Option<(String, String)> = None; // (group_tag, original_now)
     if let Ok(proxies) = client.get_proxies().await {
@@ -166,7 +208,7 @@ pub async fn speedtest_run_single(
         }
     }
 
-    let result = run_single_throughput_test_with_url(&node_tag, 5, port, &test_url).await;
+    let result = run_single_throughput_test_with_url(&node_tag, 5, mixed_port, &test_url).await;
 
     // 持久化单节点测速历史
     if let Ok(ref res) = result {

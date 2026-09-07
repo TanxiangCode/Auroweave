@@ -10,12 +10,14 @@ const DEFAULT_TEST_URL: &str = "https://speed.cloudflare.com/__down?bytes=250000
 
 /// 针对单个节点或当前代理，进行限定时长的下载与上传吞吐量测速
 ///
+/// `egress_port`：流量出口的本地 mixed 端口——主实例（selector 已被调用方
+/// 切到目标节点）或 test-core 专属端口（inbound 规则已钉死到目标节点）。
 /// `test_url` 为用户设置的下载数据源（空串回退 Cloudflare 默认）；
 /// 上传统一走 Cloudflare /__up（生态内无通用上传端点，不暴露为设置）。
 pub async fn run_single_throughput_test_with_url(
     _node_tag: &str,
     duration_secs: u64,
-    mixed_port: u16,
+    egress_port: u16,
     test_url: &str,
 ) -> Result<ThroughputResult, AppError> {
     let test_url = if test_url.trim().is_empty() {
@@ -24,7 +26,7 @@ pub async fn run_single_throughput_test_with_url(
         test_url.trim()
     };
 
-    let proxy_url = format!("http://127.0.0.1:{}", mixed_port);
+    let proxy_url = format!("http://127.0.0.1:{}", egress_port);
     let proxy = Proxy::all(&proxy_url)
         .map_err(|e| AppError::Network(format!("创建本地代理客户端失败: {}", e)))?;
 
