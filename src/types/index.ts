@@ -44,6 +44,28 @@ export interface ThroughputResult {
   tested_at: number;
 }
 
+// ============================================================
+// AI 服务解锁检测（Gemini / Claude / ChatGPT）
+// ============================================================
+
+/** 检测目标服务 */
+export type UnlockServiceId = "gemini" | "claude" | "chatgpt";
+
+/** 单服务解锁状态（与后端 core/unlock_check.rs UnlockStatus 对齐） */
+export type UnlockStatus = "yes" | "no" | "risky" | "failed";
+
+/** 单节点解锁检测结果（services 为服务名→状态映射） */
+export interface UnlockCheckResult {
+  node_tag: string;
+  services: Partial<Record<UnlockServiceId, UnlockStatus>>;
+  egress_ip?: string;
+  country_code?: string;
+  hosting?: boolean;
+  proxy_flag?: boolean;
+  isp?: string;
+  tested_at: number;
+}
+
 export interface ProxyNode {
   tag: string;
   type: ProxyProtocol;
@@ -172,7 +194,7 @@ export interface SubscriptionInspectData {
 // 节点排序与自定义分组
 // ============================================================
 
-export type NodeSortKey = "default" | "name" | "latency" | "protocol";
+export type NodeSortKey = "default" | "name" | "latency" | "protocol" | "unlock";
 export type SortOrder = "asc" | "desc";
 
 export interface NodeSortConfig {
@@ -180,8 +202,16 @@ export interface NodeSortConfig {
   order: SortOrder;
 }
 
-/** 自定义分组匹配规则类型 */
-export type GroupMatchType = "keyword" | "regex" | "protocol";
+/** 自定义分组匹配规则类型（unlock = 按解锁检测结果匹配） */
+export type GroupMatchType = "keyword" | "regex" | "protocol" | "unlock";
+
+/** 解锁匹配规则的字段（match_type=unlock 时生效） */
+export interface UnlockMatchConfig {
+  /** 目标服务 */
+  service: UnlockServiceId;
+  /** 期望状态（yes=可用 / no=封锁 / risky=风控疑似 / failed=不可达） */
+  status: UnlockStatus;
+}
 
 /** 自定义分组规则定义 */
 export interface CustomGroupRule {
@@ -195,6 +225,8 @@ export interface CustomGroupRule {
   pattern: string;
   /** 协议类型 (match_type=protocol 时生效, 如 vmess, trojan) */
   protocols: string[];
+  /** 解锁匹配配置 (match_type=unlock 时生效) */
+  unlock?: UnlockMatchConfig;
   /** 排序优先级，数字越小越靠前 */
   order: number;
 }
@@ -298,6 +330,17 @@ export interface AppSettings {
   dashboard_show_current_node?: boolean;
   dashboard_show_egress_ip?: boolean;
   dashboard_show_total_traffic?: boolean;
+
+  // 解锁检测判据（空串 = 内置默认；AI 服务页面混淆 ID 轮换后可在此更新）
+  unlock_gemini_marker?: string;
+  unlock_claude_block_marker?: string;
+  unlock_chatgpt_block_marker?: string;
+
+  // 测试内核实例（plan-N）
+  /** test-core 端口基址（0 = 默认 40040；冲突自动 +1000 偏移） */
+  test_core_port_base?: number;
+  /** test-core 批量探测节点级并发上限（2-16，默认 8） */
+  unlock_test_concurrency?: number;
   core: {
     runMode: string;
     service: {

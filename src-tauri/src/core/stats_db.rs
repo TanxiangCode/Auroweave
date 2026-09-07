@@ -72,6 +72,27 @@ fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // 节点解锁检测历史表（服务状态随时间留痕，重启不丢；
+    // services 为 JSON：{"gemini":"yes","claude":"no"}）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS unlock_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_tag TEXT NOT NULL,
+            services TEXT NOT NULL,
+            egress_ip TEXT,
+            country_code TEXT,
+            hosting INTEGER, /* null=未查询 */
+            proxy_flag INTEGER,
+            isp TEXT,
+            tested_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_unlock_node_time ON unlock_history(node_tag, tested_at DESC)",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -130,6 +151,7 @@ pub fn clear_all_stats() -> Result<()> {
              DELETE FROM traffic_hourly;
              DELETE FROM app_traffic_hourly;
              DELETE FROM speedtest_history;
+             DELETE FROM unlock_history;
              COMMIT;",
         )?;
         Ok(())
@@ -223,6 +245,114 @@ pub fn get_speedtest_history(node_tag: &str, limit: u32) -> Result<Vec<Speedtest
                 upload_bps: row.get::<_, i64>(2)? as u64,
                 delay_ms: row.get::<_, Option<i64>>(3)?.map(|d| d as u64),
                 tested_at: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    })
+}
+
+// ==================== 解锁检测历史 ====================
+
+/// 解锁检测历史记录（持久化后的查询视图，结构与 UnlockCheckResult 对齐）
+#[derive(Debug, serde::Serialize)]
+pub struct UnlockRecord {
+    pub node_tag: String,
+    /// 服务状态 JSON：{"gemini":"yes","claude":"no","chatgpt":"risky"}
+    pub services: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub egress_ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hosting: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy_flag: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isp: Option<String>,
+    pub tested_at: i64,
+}
+
+/// 写入一条解锁检测记录（失败仅记日志）
+pub fn add_unlock_record(rec: &crate::core::unlock_check::UnlockCheckResult) {
+    if let Err(e) = with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO unlock_history
+                (node_tag, services, egress_ip, country_code, hosting, proxy_flag, isp, tested_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                rec.node_tag,
+                serde_json::to_string(&rec.services).unwrap_or_else(|_| "{}".to_string()),
+                rec.egress_ip,
+                rec.country_code,
+                rec.hosting.map(|b| b as i64),
+                rec.proxy_flag.map(|b| b as i64),
+                rec.isp,
+                rec.tested_at,
+            ],
+        )?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 写入解锁检测历史失败: {}", e);
+    }
+}
+
+/// 批量写入解锁检测记录（单事务；批量检测收尾/攒批场景使用）
+pub fn add_unlock_records_batch(records: Vec<crate::core::unlock_check::UnlockCheckResult>) {
+    if records.is_empty() {
+        return;
+    }
+    if let Err(e) = with_conn(|conn| {
+        conn.execute_batch("BEGIN;")?;
+        {
+            let mut stmt = conn.prepare(
+                "INSERT INTO unlock_history
+                    (node_tag, services, egress_ip, country_code, hosting, proxy_flag, isp, tested_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )?;
+            for rec in &records {
+                stmt.execute(rusqlite::params![
+                    rec.node_tag,
+                    serde_json::to_string(&rec.services).unwrap_or_else(|_| "{}".to_string()),
+                    rec.egress_ip,
+                    rec.country_code,
+                    rec.hosting.map(|b| b as i64),
+                    rec.proxy_flag.map(|b| b as i64),
+                    rec.isp,
+                    rec.tested_at,
+                ])?;
+            }
+        }
+        conn.execute_batch("COMMIT;")?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 批量写入解锁检测历史失败: {}", e);
+    }
+}
+
+/// 每个节点取最近一次解锁检测结果（应用启动时回填 store 用；
+/// 全表只扫每个 tag 的最新行，数百节点量级一次完成）
+pub fn get_latest_unlock_per_node() -> Result<Vec<UnlockRecord>> {
+    with_conn(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT u.node_tag, u.services, u.egress_ip, u.country_code, u.hosting, u.proxy_flag, u.isp, u.tested_at
+             FROM unlock_history u
+             INNER JOIN (
+                 SELECT node_tag, MAX(tested_at) AS max_ts
+                 FROM unlock_history
+                 GROUP BY node_tag
+             ) latest ON u.node_tag = latest.node_tag AND u.tested_at = latest.max_ts",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(UnlockRecord {
+                node_tag: row.get(0)?,
+                services: serde_json::from_str(&row.get::<_, String>(1)?)
+                    .unwrap_or(serde_json::Value::Null),
+                egress_ip: row.get(2)?,
+                country_code: row.get(3)?,
+                hosting: row.get::<_, Option<i64>>(4)?.map(|b| b != 0),
+                proxy_flag: row.get::<_, Option<i64>>(5)?.map(|b| b != 0),
+                isp: row.get(6)?,
+                tested_at: row.get(7)?,
             })
         })?;
         rows.collect()
