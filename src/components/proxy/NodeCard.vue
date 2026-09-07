@@ -45,6 +45,20 @@
           <SvgIcon name="wifi" :size="10" />
           <span>{{ formatThroughputCompact(speedBps) }}</span>
         </div>
+
+        <!-- AI 服务解锁徽章（G=Gemini C=Claude O=ChatGPT；title 展示服务名+状态） -->
+        <div
+          v-if="unlockBadges.length > 0"
+          class="unlock-badges"
+          :title="unlockTitle"
+        >
+          <span
+            v-for="b in unlockBadges"
+            :key="b.key"
+            class="unlock-badge"
+            :style="{ color: b.color, borderColor: b.color }"
+          >{{ b.badge }}</span>
+        </div>
       </div>
 
       <!-- 快捷操作按钮组 -->
@@ -80,6 +94,18 @@
           <span v-if="isTesting" class="spin-icon"><BaseIcon name="RefreshCw" :size="12" class="spin" /></span>
           <SvgIcon v-else name="wifi" :size="11" />
         </button>
+
+        <!-- AI 服务解锁检测（独立测试内核零打扰，失败降级切换出口） -->
+        <button
+          class="card-action-btn unlock-btn"
+          :class="{ active: isUnlockChecking }"
+          :disabled="isUnlockChecking"
+          title="AI 服务解锁检测（Gemini/Claude/ChatGPT + 出口 IP），在独立测试内核中进行，不影响当前网络"
+          @click.stop="$emit('check-unlock', nodeTag)"
+        >
+          <span v-if="isUnlockChecking" class="spin-icon"><BaseIcon name="RefreshCw" :size="12" class="spin" /></span>
+          <BaseIcon v-else name="Sparkles" :size="12" />
+        </button>
       </div>
     </div>
   </div>
@@ -92,6 +118,8 @@
  */
 import { computed } from "vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
+import { useUnlockStore, UNLOCK_SERVICE_META, unlockStatusColor } from "@/stores/unlock.store";
+import type { UnlockStatus, UnlockServiceId } from "@/types";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
 // 测速结果为字节/秒（字段名 download_bps 为历史误称），按 1024 进制 KB/s 展示
@@ -122,6 +150,7 @@ const emit = defineEmits<{
   (e: "test-latency", tag: string): void;
   (e: "test-speed", tag: string): void;
   (e: "toggle-pin", tag: string): void;
+  (e: "check-unlock", tag: string): void;
 }>();
 
 function onCardClick() {
@@ -131,6 +160,50 @@ function onCardClick() {
 }
 
 const speedtestStore = useSpeedtestStore();
+const unlockStore = useUnlockStore();
+
+// 解锁徽章：有检测结果时按 G/C/O 三胶囊展示（任一服务有值即整行显示）
+const unlockBadges = computed(() => {
+  const rec = unlockStore.unlockMap[props.nodeTag];
+  if (!rec || !rec.services) return [];
+  const out: { key: string; badge: string; color: string; label: string }[] = [];
+  for (const [id, meta] of Object.entries(UNLOCK_SERVICE_META) as [
+    UnlockServiceId,
+    { badge: string; label: string },
+  ][]) {
+    const status = rec.services[id] as UnlockStatus | undefined;
+    out.push({
+      key: id,
+      badge: meta.badge,
+      color: unlockStatusColor(status),
+      label: meta.label,
+    });
+  }
+  return out;
+});
+
+/** 徽章组 title：服务名=状态汇总，含出口 IP 归属地 */
+const unlockTitle = computed(() => {
+  const rec = unlockStore.unlockMap[props.nodeTag];
+  if (!rec || !rec.services) return "";
+  const statusLabel: Record<string, string> = {
+    yes: "可用",
+    no: "地区封锁",
+    risky: "风控疑似",
+    failed: "不可达",
+  };
+  const parts = Object.entries(UNLOCK_SERVICE_META).map(([id, meta]) => {
+    const st = rec.services?.[id as UnlockServiceId];
+    return `${meta.label}: ${st ? statusLabel[st] ?? st : "未测"}`;
+  });
+  if (rec.country_code) parts.push(`出口: ${rec.country_code}`);
+  return parts.join(" · ");
+});
+
+const isTesting = computed(() => speedtestStore.testingNodes.has(props.nodeTag));
+const isLatencyTesting = computed(() => speedtestStore.testingLatencyNodes.has(props.nodeTag));
+const isUnlockChecking = computed(() => unlockStore.checkingNodes.has(props.nodeTag));
+const latencyColor = computed(() => getLatencyColor(props.latency));
 
 function getProtocolBadge(type: string): string {
   const t = type.toLowerCase();
@@ -156,11 +229,6 @@ function getLatencyColor(ms?: number): string {
   if (ms < 600) return "#f97316"; // 350 ~ 600ms: 偏慢 (深橙)
   return "var(--accent-red)"; // >= 600ms: 高延迟 (红色)
 }
-
-
-const isTesting = computed(() => speedtestStore.testingNodes.has(props.nodeTag));
-const isLatencyTesting = computed(() => speedtestStore.testingLatencyNodes.has(props.nodeTag));
-const latencyColor = computed(() => getLatencyColor(props.latency));
 </script>
 
 <style scoped>
@@ -380,6 +448,28 @@ const latencyColor = computed(() => getLatencyColor(props.latency));
   border-radius: var(--radius-xs);
 }
 
+/* AI 服务解锁徽章组（G/C/O 三胶囊，颜色按状态） */
+.unlock-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.unlock-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  font-family: var(--font-mono);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-xs);
+  opacity: 0.95;
+}
+
 .card-actions {
   display: flex;
   align-items: center;
@@ -430,6 +520,16 @@ const latencyColor = computed(() => getLatencyColor(props.latency));
 .card-action-btn.speed-btn:hover:not(:disabled) {
   color: var(--accent-cyan);
   border-color: var(--accent-cyan);
+}
+
+.card-action-btn.unlock-btn:hover:not(:disabled) {
+  color: var(--accent-green);
+  border-color: var(--accent-green);
+}
+
+.card-action-btn.unlock-btn.active {
+  color: var(--accent-green);
+  border-color: var(--accent-green);
 }
 
 .card-action-btn:disabled {

@@ -6,9 +6,10 @@
  * 职责：布局拼装、状态绑定、Hook 协调
  * 业务逻辑全部委托至各子组件与 Hook
  */
-import { onMounted, onActivated, onDeactivated, ref } from "vue";
+import { onMounted, onActivated, onDeactivated, ref, computed } from "vue";
 import { useProxyStore } from "@/stores/proxy.store";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
+import { useUnlockStore } from "@/stores/unlock.store";
 import { useToast } from "@/composables/useToast";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
@@ -19,6 +20,7 @@ import GroupSidebar from "./components/GroupSidebar.vue";
 import NodeToolbar from "./components/NodeToolbar.vue";
 import NodeListPanel from "./components/NodeListPanel.vue";
 import BatchSpeedConfirmModal from "./components/BatchSpeedConfirmModal.vue";
+import UnlockBatchConfirmModal from "./components/UnlockBatchConfirmModal.vue";
 import GroupEditModal from "./components/GroupEditModal.vue";
 import RegionManageModal from "./components/RegionManageModal.vue";
 
@@ -26,24 +28,26 @@ import RegionManageModal from "./components/RegionManageModal.vue";
 import { useProxyGroups } from "./hooks/useProxyGroups";
 import { useNodeFilter } from "./hooks/useNodeFilter";
 import { useSpeedtestActions } from "./hooks/useSpeedtestActions";
+import { useUnlockActions } from "./hooks/useUnlockActions";
 import { useRegionRules } from "./hooks/useRegionRules";
 
 // Store 实例（用于模板直接读取批量测速进度等全局状态）
 const proxyStore = useProxyStore();
 const speedtestStore = useSpeedtestStore();
+const unlockStore = useUnlockStore();
 const toast = useToast();
 
 // ==================== Hook 初始化 ====================
 
 const {
   groups, loading, selectedGroupTag,
-  systemGroups, regionGroups,
+  systemGroups, regionGroups, customGroups,
   isSelectorGroup, routingGroupTags, rawNodes,
   initSelectedGroup, handleGroupSelect,
 } = useProxyGroups();
 
 const {
-  searchText, sortConfig, sortLabels,
+  searchText, sortConfig, sortLabels, unlockFilter,
   displayNodes, cycleSortKey, toggleSortOrder, clearSearch,
   pinnedSet, togglePinned,
 } = useNodeFilter(rawNodes);
@@ -60,10 +64,25 @@ const {
 });
 
 const {
+  showUnlockModal, unlockBatchEstimate,
+  handleSingleUnlockCheck, confirmBatchUnlockCheck,
+} = useUnlockActions({
+  selectedGroupTag,
+  rawNodes,
+});
+
+const {
   showRegionModal,
   openRegionModal,
   closeRegionModal,
 } = useRegionRules();
+
+/** 含 unlock 匹配的规则名集合（GroupSidebar 时效提示用） */
+const unlockRuleNames = computed(() =>
+  proxyStore.customGroupRules
+    .filter((r) => r.enabled && r.match_type === "unlock")
+    .map((r) => r.name)
+);
 
 // ==================== 视图模式 (Grid 网格 / List 列表) ====================
 const viewMode = ref<"grid" | "list">(
@@ -141,6 +160,7 @@ onMounted(() => {
 onActivated(async () => {
   await proxyStore.fetchGroups();
   await speedtestStore.init();
+  await unlockStore.init();
   await initSelectedGroup();
 
   // 定期刷新分组列表以更新 URLTest 组的 now 字段（当前选中节点）
@@ -176,12 +196,23 @@ onDeactivated(() => {
       @cancel="speedtestStore.cancelBatch"
     />
 
+    <!-- 批量解锁检测进度条（复用共享进度卡片，标题区分） -->
+    <BatchProgressCard
+      :visible="unlockStore.isBatchChecking && !!unlockStore.batchProgress"
+      :progress="unlockStore.batchProgress!"
+      action-label="解锁检测"
+      cancel-label="取消检测"
+      @cancel="unlockStore.cancelBatch"
+    />
+
     <!-- 双栏布局区域 -->
     <div v-if="groups.length > 0" class="proxies-layout">
       <!-- 左栏：分组选择器 -->
       <GroupSidebar
         :system-groups="systemGroups"
         :region-groups="regionGroups"
+        :custom-groups="customGroups"
+        :unlock-rule-names="unlockRuleNames"
         :recent-groups="proxyStore.recentGroups"
         :selected-group-tag="selectedGroupTag"
         :routing-group-tags="routingGroupTags"
@@ -197,18 +228,22 @@ onDeactivated(() => {
           :group-tag="selectedGroupTag"
           :node-count="rawNodes.length"
           :filtered-count="displayNodes.length"
-          :is-filtering="!!searchText.trim()"
+          :is-filtering="!!searchText.trim() || !!unlockFilter"
           :search-text="searchText"
           :sort-config="sortConfig"
           :sort-labels="sortLabels"
           :view-mode="viewMode"
           :is-testing-latency="speedtestStore.isTestingLatency"
+          :is-unlock-checking="unlockStore.isBatchChecking"
+          :unlock-filter="unlockFilter"
           @update:search-text="searchText = $event"
+          @update:unlock-filter="unlockFilter = $event"
           @cycle-sort="cycleSortKey"
           @toggle-sort-order="toggleSortOrder"
           @toggle-view-mode="handleToggleViewMode"
           @run-latency="handleRunLatency"
           @show-batch-modal="showConfirmModal = true"
+          @show-unlock-modal="showUnlockModal = true"
           @refresh="proxyStore.fetchGroups"
         />
 
@@ -225,6 +260,7 @@ onDeactivated(() => {
           @select="handleNodeSelect"
           @test-latency="handleSingleLatency"
           @test-speed="handleSingleSpeed"
+          @check-unlock="handleSingleUnlockCheck"
           @toggle-pin="togglePinned"
           @refresh-groups="proxyStore.fetchGroups"
         />
@@ -251,6 +287,15 @@ onDeactivated(() => {
       :estimate-mb="batchEstimate.mb"
       @close="showConfirmModal = false"
       @confirm="confirmBatchSpeedTest"
+    />
+
+    <UnlockBatchConfirmModal
+      :visible="showUnlockModal"
+      :group-tag="selectedGroupTag"
+      :node-count="unlockBatchEstimate.count"
+      :estimate-minutes="unlockBatchEstimate.minutes"
+      @close="showUnlockModal = false"
+      @confirm="confirmBatchUnlockCheck"
     />
 
     <GroupEditModal

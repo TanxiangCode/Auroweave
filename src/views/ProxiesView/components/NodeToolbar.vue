@@ -29,10 +29,16 @@ withDefaults(
     viewMode?: "grid" | "list";
     /** 是否正在测延迟 */
     isTestingLatency?: boolean;
+    /** 是否正在批量解锁检测 */
+    isUnlockChecking?: boolean;
+    /** 服务筛选状态（空串=未筛选） */
+    unlockFilter?: string;
   }>(),
   {
     viewMode: "grid",
     isTestingLatency: false,
+    isUnlockChecking: false,
+    unlockFilter: "",
   }
 );
 
@@ -42,8 +48,10 @@ const emit = defineEmits<{
   'toggle-sort-order': [];
   'run-latency': [];
   'show-batch-modal': [];
+  'show-unlock-modal': [];
   'toggle-view-mode': [mode: "grid" | "list"];
   refresh: [];
+  'update:unlockFilter': [value: string];
 }>();
 </script>
 
@@ -115,6 +123,23 @@ const emit = defineEmits<{
         </button>
       </div>
 
+      <!-- 解锁服务筛选片（按检测结果过滤节点列表） -->
+      <div class="unlock-filter-group">
+        <select
+          class="unlock-filter-select"
+          :value="unlockFilter"
+          title="按 AI 服务解锁状态筛选节点"
+          @change="emit('update:unlockFilter', ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">全部节点</option>
+          <option value="gemini:yes">Gemini 可用</option>
+          <option value="claude:yes">Claude 可用</option>
+          <option value="chatgpt:yes">ChatGPT 可用</option>
+          <option value="gemini:no">Gemini 封锁</option>
+          <option value="claude:no">Claude 封锁</option>
+        </select>
+      </div>
+
       <div class="divider-vertical"></div>
 
       <!-- 操作按钮组 -->
@@ -137,6 +162,18 @@ const emit = defineEmits<{
       >
         <SvgIcon name="wifi" :size="12" class="icon-gap" />
         <span>批量测速</span>
+      </button>
+
+      <button
+        class="btn-action unlock"
+        :class="{ loading: isUnlockChecking }"
+        :disabled="isUnlockChecking"
+        @click="emit('show-unlock-modal')"
+        title="批量检测 AI 服务解锁状态（Gemini/Claude/ChatGPT）"
+      >
+        <span v-if="isUnlockChecking" class="spinner-ring unlock"></span>
+        <BaseIcon v-else name="Sparkles" :size="12" class="icon-gap" />
+        <span>{{ isUnlockChecking ? '检测中...' : '解锁检测' }}</span>
       </button>
 
       <button
@@ -376,6 +413,47 @@ const emit = defineEmits<{
 
 .btn-action.speed:hover:not(:disabled) {
   color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.btn-action.unlock:hover:not(:disabled) {
+  color: var(--accent-green);
+  border-color: var(--accent-green);
+}
+
+.btn-action.unlock.loading {
+  background: var(--layer-2);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+  opacity: 0.9;
+  cursor: wait;
+}
+
+/* 解锁服务筛选下拉 */
+.unlock-filter-group {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+}
+
+.unlock-filter-select {
+  height: 30px;
+  padding: 0 6px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  outline: none;
+  transition: all var(--duration-fast);
+}
+
+.unlock-filter-select:hover {
+  border-color: var(--border-accent);
+}
+
+.unlock-filter-select:focus {
   border-color: var(--accent-cyan);
 }
 

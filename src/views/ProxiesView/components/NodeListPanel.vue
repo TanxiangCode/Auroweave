@@ -40,6 +40,7 @@ const emit = defineEmits<{
   select: [nodeTag: string];
   'test-latency': [nodeTag: string];
   'test-speed': [nodeTag: string];
+  'check-unlock': [nodeTag: string];
   'toggle-pin': [nodeTag: string];
   'refresh-groups': [];
 }>();
@@ -100,6 +101,7 @@ const speedtestStore = useSpeedtestStore();
         @select="emit('select', node.tag)"
         @test-latency="emit('test-latency', node.tag)"
         @test-speed="emit('test-speed', node.tag)"
+        @check-unlock="emit('check-unlock', node.tag)"
         @toggle-pin="emit('toggle-pin', node.tag)"
       />
     </div>

@@ -1,7 +1,7 @@
 <template>
   <div v-if="visible" class="batch-progress-card glass-effect">
     <div class="progress-info">
-      <span>正在测速: <strong>{{ progress.current_node }}</strong></span>
+      <span>{{ actionLabel }}: <strong>{{ progress.current_node }}</strong></span>
       <span>进度: {{ progress.current_index }} / {{ progress.total }}</span>
     </div>
     <div class="progress-bar-bg">
@@ -10,25 +10,44 @@
         :style="{ width: `${(progress.current_index / progress.total) * 100}%` }"
       ></div>
     </div>
-    <button class="btn-cancel" @click="emit('cancel')">取消测速</button>
+    <button class="btn-cancel" @click="emit('cancel')">{{ cancelLabel }}</button>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * 批量测速进度卡片（共享组件）
+ * 批量任务进度卡片（共享组件）
  * 作者: TanXiang
  *
- * ProxiesView 与 SpeedtestView 复用（此前两视图各写一份完全相同的模板，
- * 且取消按钮位置/间距有漂移）。数据源统一为 speedtestStore.batchProgress。
+ * ProxiesView / SpeedtestView 复用（测速与解锁检测两个批量任务共用形态）。
+ * 进度结构同构：current_index/total/current_node 必有，result 类型随任务而异，
+ * 本组件只消费三个进度字段，故以最小结构类型收窄（结构化兼容两种 payload）。
  */
-import type { BatchProgressPayload } from "@/api/ipc/speedtest";
+import type { ThroughputResult } from "@/types";
 
-const props = defineProps<{
-  /** 是否显示（isBatchTesting && batchProgress 非空由调用方判断） */
-  visible: boolean;
-  progress: BatchProgressPayload;
-}>();
+/** 组件实际消费的最小进度结构（测速/解锁检测 payload 均结构化兼容） */
+export interface BatchProgressLike {
+  current_index: number;
+  total: number;
+  current_node: string;
+  result?: ThroughputResult | unknown;
+}
+
+const props = withDefaults(
+  defineProps<{
+    /** 是否显示（批量进行中且 batchProgress 非空由调用方判断） */
+    visible: boolean;
+    progress: BatchProgressLike;
+    /** 动作名（"正在测速"/"解锁检测"） */
+    actionLabel?: string;
+    /** 取消按钮文案 */
+    cancelLabel?: string;
+  }>(),
+  {
+    actionLabel: "正在测速",
+    cancelLabel: "取消测速",
+  }
+);
 
 const emit = defineEmits<{ (e: "cancel"): void }>();
 

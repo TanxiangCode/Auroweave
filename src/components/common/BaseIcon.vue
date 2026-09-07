@@ -76,6 +76,7 @@ import {
   Play,
   Pause,
   Square,
+  Sparkles,
 } from "lucide-vue-next";
 
 
@@ -168,6 +169,7 @@ const iconMap: Record<string, any> = {
   Play,
   Pause,
   Square,
+  Sparkles,
 };
 
 
