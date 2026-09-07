@@ -8,6 +8,7 @@ import type { ProxyGroup, ProxyNode, CustomGroupRule } from "@/types";
 import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode, getProxyMode, updateGroupConfig as updateGroupConfigApi } from "@/api/ipc/proxy";
 import { RECENT_GROUPS_MAX } from "@/constants";
 import { useToast } from "@/composables/useToast";
+import { useUnlockStore } from "@/stores/unlock.store";
 
 export const useProxyStore = defineStore("proxy", () => {
   const toast = useToast();
@@ -67,6 +68,7 @@ export const useProxyStore = defineStore("proxy", () => {
       return new Map();
     }
 
+    const unlockStore = useUnlockStore();
     const result = new Map<string, ProxyNode[]>();
     const matched = new Set<string>();
 
@@ -91,6 +93,13 @@ export const useProxyStore = defineStore("proxy", () => {
           }
         } else if (rule.match_type === "protocol") {
           is_match = rule.protocols.includes(node.type.toLowerCase());
+        } else if (rule.match_type === "unlock") {
+          // 解锁匹配：按 unlockMap 中该节点最近一次检测的指定服务状态判定
+          const cfg = rule.unlock;
+          if (cfg?.service && cfg.status) {
+            const status = unlockStore.unlockMap[node.tag]?.services?.[cfg.service];
+            is_match = status === cfg.status;
+          }
         }
 
         if (is_match) {

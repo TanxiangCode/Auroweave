@@ -39,6 +39,8 @@ export function useRegionRules() {
       keywords: [],
       pattern: "",
       protocols: [],
+      // 解锁匹配默认找 Gemini 可用节点（用户可改服务与期望状态）
+      unlock: { service: "gemini", status: "yes" },
       order: proxyStore.customGroupRules.length,
     };
     isNewRule.value = true;
@@ -64,6 +66,13 @@ export function useRegionRules() {
     if (!editingRule.value.name.trim()) {
       toast.warning("请填写区域名称");
       return;
+    }
+    // unlock 匹配的完整性校验：缺服务/状态时规则永远匹配不到节点
+    if (editingRule.value.match_type === "unlock") {
+      if (!editingRule.value.unlock?.service || !editingRule.value.unlock?.status) {
+        toast.warning("请选择检测服务与期望状态");
+        return;
+      }
     }
     if (isNewRule.value) {
       const { id, ...ruleData } = editingRule.value;

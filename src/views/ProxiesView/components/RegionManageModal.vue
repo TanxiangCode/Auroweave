@@ -18,6 +18,17 @@ const emit = defineEmits<{
   close: [];
 }>();
 
+/** 匹配方式徽章中文标签 */
+function matchTypeLabel(t: string): string {
+  switch (t) {
+    case "keyword": return "关键词";
+    case "regex": return "正则";
+    case "protocol": return "协议";
+    case "unlock": return "解锁";
+    default: return t;
+  }
+}
+
 const proxyStore = useProxyStore();
 const {
   editingRule,
@@ -49,6 +60,7 @@ const {
               <option value="keyword">关键词匹配</option>
               <option value="regex">正则表达式</option>
               <option value="protocol">协议类型</option>
+              <option value="unlock">解锁检测结果</option>
             </select>
           </div>
           <div v-if="editingRule.match_type === 'keyword'" class="form-row">
@@ -74,6 +86,31 @@ const {
               class="form-input"
               placeholder="用逗号分隔，如: vmess, trojan"
             />
+          </div>
+          <div v-if="editingRule.match_type === 'unlock'" class="form-row unlock-match-row">
+            <!-- 解锁匹配配置：服务 + 期望状态（保存时校验非空） -->
+            <select
+              :value="editingRule.unlock?.service ?? 'gemini'"
+              @input="editingRule.unlock = { service: ($event.target as HTMLSelectElement).value as any, status: editingRule.unlock?.status ?? 'yes' }"
+              class="form-input"
+            >
+              <option value="gemini">Gemini 可用性</option>
+              <option value="claude">Claude 可用性</option>
+              <option value="chatgpt">ChatGPT 可用性</option>
+            </select>
+            <select
+              :value="editingRule.unlock?.status ?? 'yes'"
+              @input="editingRule.unlock = { service: editingRule.unlock?.service ?? 'gemini', status: ($event.target as HTMLSelectElement).value as any }"
+              class="form-input"
+            >
+              <option value="yes">可用</option>
+              <option value="no">地区封锁</option>
+              <option value="risky">风控疑似</option>
+              <option value="failed">不可达</option>
+            </select>
+          </div>
+          <div v-if="editingRule.match_type === 'unlock'" class="form-hint unlock-hint">
+            按节点最近一次解锁检测结果匹配；从未检测的节点不会命中任何状态。
           </div>
 
           <!-- 内置区域快捷填充 -->
@@ -106,7 +143,7 @@ const {
             <div v-for="rule in proxyStore.customGroupRules" :key="rule.id" class="rule-item">
               <div class="rule-info">
                 <span class="rule-name">{{ rule.name }}</span>
-                <span class="rule-type">{{ rule.match_type }}</span>
+                <span class="rule-type">{{ matchTypeLabel(rule.match_type) }}</span>
                 <span class="rule-enabled" :class="{ disabled: !rule.enabled }">
                   {{ rule.enabled ? '启用' : '禁用' }}
                 </span>
@@ -234,6 +271,23 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+/* 解锁匹配双下拉行 */
+.unlock-match-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.unlock-match-row .form-input {
+  flex: 1;
+}
+
+.unlock-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  margin-top: calc(-1 * var(--space-1));
 }
 
 .builtin-tags {

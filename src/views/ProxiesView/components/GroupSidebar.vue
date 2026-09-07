@@ -15,6 +15,10 @@ const props = defineProps<{
   systemGroups: ProxyGroup[];
   /** 地区分组列表 */
   regionGroups: ProxyGroup[];
+  /** 自定义虚拟分组列表（本地匹配，tag 带 custom: 前缀） */
+  customGroups?: ProxyGroup[];
+  /** 自定义分组中含 unlock 匹配规则的名称集合（空态/时效提示用） */
+  unlockRuleNames?: string[];
   /** 最近常用分组标签 */
   recentGroups: string[];
   /** 当前选中分组标签 */
@@ -42,6 +46,17 @@ const filteredRegionGroups = computed(() => {
   const kw = groupSearch.value.toLowerCase();
   return props.regionGroups.filter(g => g.tag.toLowerCase().includes(kw));
 });
+
+/** 自定义分组显示列表（tag 去前缀得到显示名） */
+const customGroupItems = computed(() =>
+  (props.customGroups ?? []).map((g) => ({
+    group: g,
+    name: g.tag.startsWith("custom:") ? g.tag.slice("custom:".length) : g.tag,
+  }))
+);
+
+/** 是否存在 unlock 规则（空态文案区分"未检测"与"全失败"） */
+const hasUnlockRule = computed(() => (props.unlockRuleNames ?? []).length > 0);
 
 /** 地区分组列表（预计算地区徽标，避免模板每次渲染重复调用 3 次 getRegionBadge） */
 const regionGroupsWithBadge = computed(() =>
@@ -272,6 +287,54 @@ function getGroupTypeLabel(tag: string, type: string): string {
         </div>
       </div>
     </div>
+
+    <!-- 自定义分组（本地匹配虚拟分组，不进内核） -->
+    <div v-if="customGroupItems.length > 0" class="group-section">
+      <div class="section-title-row">
+        <span class="section-title">
+          <BaseIcon name="Folder" :size="11" class="icon-gap" />
+          自定义分组
+        </span>
+        <div class="section-actions">
+          <span class="section-count-badge">{{ customGroupItems.length }}</span>
+          <button class="btn-add-region" @click="emit('manage-regions')" title="管理自定义分组规则">
+            <SvgIcon name="plus" :size="11" />
+          </button>
+        </div>
+      </div>
+
+      <div class="groups-list">
+        <div
+          v-for="{ group, name } in customGroupItems"
+          :key="group.tag"
+          class="group-item-wrapper"
+        >
+          <button
+            class="group-card-item custom"
+            :class="{ active: group.tag === selectedGroupTag }"
+            @click="emit('select', group.tag)"
+          >
+            <div class="group-header-info">
+              <div class="group-name-wrapper">
+                <span class="group-name" :title="name">{{ name }}</span>
+              </div>
+              <span class="group-type-badge custom-badge">本地</span>
+            </div>
+            <div class="group-footer-info">
+              <span v-if="group.proxies.length > 0" class="group-current-node muted">
+                {{ group.proxies.length }} 个节点
+              </span>
+              <span v-else class="group-current-node muted">空分组</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- unlock 规则时效提示（检测结果会过期，提醒重测） -->
+      <div v-if="hasUnlockRule" class="custom-group-hint">
+        解锁匹配分组依赖最近一次检测结果，节点变动或 IP 换段后建议重新检测
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -478,6 +541,29 @@ function getGroupTypeLabel(tag: string, type: string): string {
   border-color: var(--accent-cyan);
   background: var(--accent-cyan-glow);
   box-shadow: 0 0 12px var(--accent-cyan-glow);
+}
+
+/* 自定义虚拟分组徽章与时效提示 */
+.group-type-badge.custom-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--layer-3);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.custom-group-hint {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  background: var(--layer-2);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .group-header-info {
