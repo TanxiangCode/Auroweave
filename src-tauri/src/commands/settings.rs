@@ -44,6 +44,7 @@ fn default_dns_remote_doh() -> String { "8.8.8.8".to_string() }
 fn default_dns_timeout_secs() -> u64 { 5 }
 fn default_tun_dns_mode() -> String { "hijack".to_string() }
 fn default_udp_nat_max() -> u64 { 0 }
+fn default_unlock_test_concurrency() -> u32 { 8 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -103,6 +104,28 @@ pub struct AppSettings {
     /// 置顶收藏的节点 tag 列表（节点卡片星标，排序时恒排最前）
     #[serde(default)]
     pub pinned_nodes: Vec<String>,
+
+    // 解锁检测判据（AI 服务页面混淆 ID / 封锁特征会随版本轮换，settings 可更新；
+    // 空串回退内置默认，详见 core/unlock_check.rs）
+    #[serde(default)]
+    pub unlock_gemini_marker: String,
+    #[serde(default)]
+    pub unlock_claude_block_marker: String,
+    #[serde(default)]
+    pub unlock_chatgpt_block_marker: String,
+
+    // 测试内核实例（plan-N）：端口基址与探测并发
+    /// test-core 专属端口基址（0 = 内置默认 40040；冲突时自动 +1000 偏移）
+    #[serde(default)]
+    pub test_core_port_base: u16,
+    /// test-core 批量探测的节点级并发上限（2-16，默认 8）
+    #[serde(default = "default_unlock_test_concurrency")]
+    pub unlock_test_concurrency: u32,
+
+    /// test-core 批量吞吐测速并发（默认 1=串行——并发抢带宽数值失真；
+    /// 迁移只为零打扰；上限 4）
+    #[serde(default)]
+    pub speedtest_test_concurrency: u32,
 
     /// 首页右翼统计胶囊显隐开关（设置-首页显示；true=显示，缺省视为 true
     /// 兼容旧 settings.json）
@@ -181,6 +204,16 @@ impl Default for AppSettings {
 
             // 置顶收藏节点（默认空）
             pinned_nodes: Vec::new(),
+
+            // 解锁检测判据（默认空串 = 内置默认判据，UnlockCheckParams::from_settings 回退）
+            unlock_gemini_marker: String::new(),
+            unlock_claude_block_marker: String::new(),
+            unlock_chatgpt_block_marker: String::new(),
+
+            // 测试内核实例（plan-N）：0 = 默认基址；并发默认 8
+            test_core_port_base: 0,
+            unlock_test_concurrency: default_unlock_test_concurrency(),
+            speedtest_test_concurrency: 1,
 
             // 首页右翼统计胶囊（默认全开，可到设置-首页显示关闭）
             dashboard_show_connections: true,

@@ -9,6 +9,7 @@ pub mod system;
 
 use core::sidecar::SidecarManager;
 use speedtest::scheduler::SpeedTestScheduler;
+use commands::unlock_check::UnlockCheckScheduler;
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -49,10 +50,16 @@ pub fn run() {
 
     let sidecar_manager = Arc::new(SidecarManager::new());
     let speedtest_scheduler = Arc::new(SpeedTestScheduler::new());
+    let unlock_scheduler = Arc::new(UnlockCheckScheduler::new());
+    // test-core 管理器：Exit 钩子持有（退出清理短命测试内核）；
+    // setup 与 run 两个 move 闭包各自捕获一个克隆
+    let test_core_manager = Arc::new(core::test_core::TestCoreManager::new());
+    let test_core_manager_for_exit = test_core_manager.clone();
 
     tauri::Builder::default()
         .manage(sidecar_manager.clone())
         .manage(speedtest_scheduler.clone())
+        .manage(unlock_scheduler.clone())
         // 注册单例插件，确保只运行一个实例
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 如果尝试启动新实例，将其聚焦（可以触发某些事件）
@@ -131,6 +138,11 @@ pub fn run() {
             commands::speedtest::speedtest_cancel_batch,
             commands::speedtest::speedtest_get_results,
             commands::speedtest::speedtest_get_history,
+            // AI 服务解锁检测
+            commands::unlock_check::unlock_check_single,
+            commands::unlock_check::unlock_check_batch,
+            commands::unlock_check::unlock_check_cancel,
+            commands::unlock_check::unlock_check_get_latest,
             commands::routing::routing_get_processes,
             commands::routing::routing_get_app_rules,
             commands::routing::routing_save_app_rule,
@@ -235,6 +247,14 @@ pub fn run() {
                 log::info!("[app] 程序正在退出，清理网络代理...");
                 // 使用静默模式清理代理，避免退出时弹出 macOS 密码框阻塞退出流程
                 let _ = system::sysproxy::set_system_proxy_silent(false, 0);
+                // test-core 短命测试内核：退出时必须清理（与运行模式无关，
+                // 服务模式下它同样可能因批量检测而存活）
+                {
+                    let core = test_core_manager_for_exit.clone();
+                    tauri::async_runtime::block_on(async move {
+                        core.stop().await;
+                    });
+                }
                 let settings = commands::settings::settings_get_internal(app_handle);
                 if settings.core.run_mode == "service" {
                     log::info!("[app] 服务模式退出：停止系统服务");

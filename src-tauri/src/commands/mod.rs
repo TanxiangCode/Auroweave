@@ -8,4 +8,5 @@ pub mod routing;
 pub mod logging;
 pub mod stats;
 pub mod singbox_update;
+pub mod unlock_check;
 

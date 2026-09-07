@@ -243,7 +243,8 @@ async fn fetch_and_parse(url: &str, custom_ua: Option<&str>) -> Result<(Subscrip
 /// 3. 单个订阅解析失败仅 log::warn 跳过，不让坏订阅拖垮整体
 /// 4. tag 冲突时追加订阅名后缀去重（sing-box 要求 outbound tag 唯一）
 /// 5. 至少聚合出一个节点，否则返回错误
-fn collect_active_outbounds() -> Result<Vec<crate::core::parser::ParsedOutbound>, AppError> {
+/// 聚合全部活跃订阅的节点出站（test-core 检测/测速也经此取全量节点池）
+pub fn collect_active_outbounds() -> Result<Vec<crate::core::parser::ParsedOutbound>, AppError> {
     let subs = load_subscriptions();
     let mut outbounds: Vec<crate::core::parser::ParsedOutbound> = Vec::new();
     let mut seen_tags: std::collections::HashSet<String> = std::collections::HashSet::new();
