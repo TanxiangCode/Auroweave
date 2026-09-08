@@ -25,8 +25,8 @@ async function save(field: keyof AppSettings) {
           <BaseIcon name="Palette" :size="20" />
         </span>
         <div class="card-title-group">
-          <h3>外观与语言</h3>
-          <p>个性化界面视窗主题风格与显示语言</p>
+          <h3>外观</h3>
+          <p>个性化界面视窗主题风格</p>
         </div>
       </div>
 
@@ -40,17 +40,6 @@ async function save(field: keyof AppSettings) {
             <option value="dark">深色极光 (Dark)</option>
             <option value="light">浅色明亮 (Light)</option>
             <option value="system">跟随操作系统 (System)</option>
-          </select>
-        </div>
-
-        <div class="setting-item">
-          <div class="item-label">
-            <span>界面语言 (Language)</span>
-            <span class="sub-label">切换客户端操作语言</span>
-          </div>
-          <select v-model="settingsStore.settings.language" class="select-input" @change="save('language')">
-            <option value="zh-CN">简体中文 (Simplified Chinese)</option>
-            <option value="en-US">English (US)</option>
           </select>
         </div>
       </div>

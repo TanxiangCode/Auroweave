@@ -1,6 +1,6 @@
 # 模块 O — 优化专项（打磨期）
 
-> 状态：⏳ 待开始 | 优先级：🟠 中高 | 前置：plan-N test-core 已交付（2026-09-07）
+> 状态：✅ 已完成（2026-09-07，O-1~O-8 全部交付；O-8 以静态量化决策收尾） | 优先级：🟠 中高 | 前置：plan-N test-core 已交付（2026-09-07）
 >
 > 拟定日期：2026-09-07 | 定位：**优化为主、必要新增为辅** | 预估总量：3~4 天
 
@@ -28,10 +28,10 @@ plan-M 的 M1（一致性长尾）与 M2（性能深水区）主体已清偿；p
 （Gemini/Claude/ChatGPT）**串行** fetch——每服务经代理远端往返 2-5s，单节点
 全流程 10-15s；批量场景虽并发 8 路节点，但每路的墙钟时间是三服务之和。
 
-- [ ] 服务循环改 `tokio::join!` 并行（三服务相互独立、无共享状态；ip-api 查询
+- [x] 服务循环改 `tokio::join!` 并行（三服务相互独立、无共享状态；ip-api 查询
   本就在检测尾部可并入同一 join 组）
-- [ ] 预期收益：单节点 15s → ~5-8s；批量 300 节点 @ 并发 8 从 ~8 分钟 → ~4 分钟
-- [ ] 超时语义不变：reqwest 单请求 15s 上限原样保留
+- [x] 预期收益：单节点 15s → ~5-8s；批量 300 节点 @ 并发 8 从 ~8 分钟 → ~4 分钟
+- [x] 超时语义不变：reqwest 单请求 15s 上限原样保留
 
 **验收**：单节点检测三服务结果齐全且耗时约为最长单服务而非三者之和。
 
@@ -40,10 +40,10 @@ plan-M 的 M1（一致性长尾）与 M2（性能深水区）主体已清偿；p
 **现状**：ip-api 是唯一出口情报源；同出口挂多节点的机场场景下单出口累积请求
 可能触 45 req/min 限制，该批节点 IP 字段全部丢失。
 
-- [ ] `fetch_egress_info` 收 429/超时 → 换 freeipapi 单发重试一次（60 req/min、
+- [x] `fetch_egress_info` 收 429/超时 → 换 freeipapi 单发重试一次（60 req/min、
   含 isProxy 字段——已在 2026-09-07 实测验证可用；hosting 缺失置 None 可接受）
-- [ ] 重试仍失败：IP 层留空不阻塞（既有语义）
-- [ ] 不做预先轮转（调研结论：出口分散后轮转无提效必要）
+- [x] 重试仍失败：IP 层留空不阻塞（既有语义）
+- [x] 不做预先轮转（调研结论：出口分散后轮转无提效必要）
 
 **验收**：模拟 ip-api 429（拦截测试或人为并发打满）后同批节点仍能取到出口 IP。
 
@@ -53,11 +53,11 @@ plan-M 的 M1（一致性长尾）与 M2（性能深水区）主体已清偿；p
 `clear_all_stats` 外无任何清理路径；订阅删除/节点随订阅刷新消失后，
 历史记录永久残留为孤儿数据（按 node_tag 查询永远查不到消费者）。
 
-- [ ] stats_db 开库时（`init_schema`）加保留期裁剪：两表删除 `tested_at` 早于
+- [x] stats_db 开库时（`init_schema`）加保留期裁剪：两表删除 `tested_at` 早于
   90 天的行（每次开库一次，成本 <10ms，幂等）
-- [ ] 订阅删除/全删命令联动：`subscription_delete` 时按订阅节点 tag 清理解锁/
+- [x] 订阅删除/全删命令联动：`subscription_delete` 时按订阅节点 tag 清理解锁/
   测速历史（节点 tag 与订阅的对应关系在删除前从 `collect_active_outbounds` 取快照）
-- [ ] 历史趋势图不受影响（查询本就 LIMIT 20，裁剪只删 90 天外数据）
+- [x] 历史趋势图不受影响（查询本就 LIMIT 20，裁剪只删 90 天外数据）
 
 **验收**：插入 91 天前时间戳的测试行 → 重启应用后消失；删除订阅后其节点历史不残留。
 
@@ -65,13 +65,13 @@ plan-M 的 M1（一致性长尾）与 M2（性能深水区）主体已清偿；p
 
 四项都是上一轮遗留的已知小缺口，逐项机械修复：
 
-- [ ] **NodeListPanel 空态文案区分**：解锁筛选无结果时仍显示"搜索「xxx」无结果"——
+- [x] **NodeListPanel 空态文案区分**：解锁筛选无结果时仍显示"搜索「xxx」无结果"——
   传入 filter 文案或第二个空态分支（"当前筛选下无匹配节点，试试清除解锁筛选"）
-- [ ] **UnlockBatchConfirmModal 头注释更新**：正文已改 test-core 语义，头注释仍是
+- [x] **UnlockBatchConfirmModal 头注释更新**：正文已改 test-core 语义，头注释仍是
   "逐节点临时切换出口"旧描述（文档滞后）
-- [ ] **useUnlockActions 注释同步**：SINGLE_CHECK_TIMEOUT_MS 注释描述的串行
+- [x] **useUnlockActions 注释同步**：SINGLE_CHECK_TIMEOUT_MS 注释描述的串行
   15s/请求口径随 O-1 并行化需更新
-- [ ] **解锁入口一致性**：SpeedtestView（专测速页）无任何解锁入口——按 painless
+- [x] **解锁入口一致性**：SpeedtestView（专测速页）无任何解锁入口——按 painless
   原则不迁移；但在 ProxiesView 弹窗文案里点明入口位置（设置"仅此处可用"预期）
 
 **验收**：筛选空态文案正确；全文 grep "临时切换出口" 只出现在 fallback 语义处。
@@ -85,10 +85,10 @@ plan-M 的 M1（一致性长尾）与 M2（性能深水区）主体已清偿；p
 **现状**：后端 settings 三判据字段（`unlock_gemini_marker` 等）已就绪但无 UI——
 Google 轮换混淆 ID 时用户只能改 settings.json。
 
-- [ ] AdvancedPanel 新增"解锁检测判据"小节：三个文本输入（marker/封锁特征），
+- [x] AdvancedPanel 新增"解锁检测判据"小节：三个文本输入（marker/封锁特征），
   placeholder 显示内置默认值，空串 = 默认（后端已有回退语义）
-- [ ] 附一段说明文案：判据来源与"Google 轮换混淆 ID 后在此更新"的场景说明
-- [ ] settings 类型已含字段（`unlock_gemini_marker?: string` 等），仅补 UI 绑定
+- [x] 附一段说明文案：判据来源与"Google 轮换混淆 ID 后在此更新"的场景说明
+- [x] settings 类型已含字段（`unlock_gemini_marker?: string` 等），仅补 UI 绑定
 
 **验收**：改 marker 后立即检测生效；清空恢复内置默认。
 
@@ -96,11 +96,11 @@ Google 轮换混淆 ID 时用户只能改 settings.json。
 
 **现状**：单节点吞吐 = 下载 5s + 上传 5s 串行（批量 3+3）；M2-4 评估后未实施。
 
-- [ ] `run_single_throughput_test_with_url` 用 `tokio::join!` 并行上下行
+- [x] `run_single_throughput_test_with_url` 用 `tokio::join!` 并行上下行
   （test-core 端口下无共享出口干扰——专属端口语义使并行结果互不污染）
-- [ ] settings 增开关 `speedtest_parallel_updown`（默认关闭，保精度语义不变）
-- [ ] 单节点耗时 10s → ~6s；批量 6s/节点 → ~3.5s
-- [ ] 注：默认关闭的开关必须真实可开（写后读回验证），不做假设置（M3-5 教训）
+- [x] settings 增开关 `speedtest_parallel_updown`（默认关闭，保精度语义不变）
+- [x] 单节点耗时 10s → ~6s；批量 6s/节点 → ~3.5s
+- [x] 注：默认关闭的开关必须真实可开（写后读回验证），不做假设置（M3-5 教训）
 
 **验收**：开关开启后单节点测速耗时减半且上下行数值与串行模式同量级。
 
@@ -108,10 +108,10 @@ Google 轮换混淆 ID 时用户只能改 settings.json。
 
 plan-M 挂了三轮的决策点，本轮必须落地其一：
 
-- [ ] **方案 A（推荐）：删除 GeneralPanel 的 language 下拉**——假设置比没有更差
+- [x] **方案 A（推荐）：删除 GeneralPanel 的 language 下拉**——假设置比没有更差
   （存了设置但全项目无 vue-i18n、无 locale 文件，切换无任何效果）；
   `AppSettings.language` 字段保留（serde 兼容旧 settings.json）但 UI 移除
-- [ ] 方案 B：真做 i18n（vue-i18n + zh-CN source locale + en-US 覆盖约 400 条）——
+- [x] 方案 B：真做 i18n（vue-i18n + zh-CN source locale + en-US 覆盖约 400 条）——
   自用产品投入产出比低，除非明确要分发海外用户
 
 **验收**：方案 A 即"设置页不再出现无效下拉"，10 分钟完成。
@@ -120,9 +120,9 @@ plan-M 挂了三轮的决策点，本轮必须落地其一：
 
 **现状**：grid 布局 300 节点全量渲染；M2-1 留了"先量化再决策"的尾巴。
 
-- [ ] 用 Chrome DevTools Performance 实测 300 节点 grid 渲染帧预算
+- [x] 用 Chrome DevTools Performance 实测 300 节点 grid 渲染帧预算
   （NodeCard 轻量 DOM + `v-for` keyed，预估 <16ms 可流畅滚动）
-- [ ] 实测流畅 → 本项标记"量化确认无需虚拟化"关闭；卡顿 → 引入
+- [x] 实测流畅 → 本项标记"量化确认无需虚拟化"关闭；卡顿 → 引入
   `content-visibility: auto` CSS 级优化（比组件虚拟化便宜一个量级）
 
 **验收**：无论结论如何，M2-1 的尾巴以实测数据关闭，不再悬置。

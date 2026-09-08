@@ -129,6 +129,14 @@ const speedtestStore = useSpeedtestStore();
   align-content: start;
 }
 
+/* 大节点量保险（O-8 实测决策）：300 节点 ≈5100 DOM 全量渲染可接受，
+   content-visibility 让视口外卡片跳过 layout/paint——组件级虚拟化的
+   零成本替代（contain-intrinsic-size 保留占位防滚动跳动） */
+.nodes-container.grid > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 90px;
+}
+
 /* List 紧凑列表布局 */
 .nodes-container.list {
   display: flex;
