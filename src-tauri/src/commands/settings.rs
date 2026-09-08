@@ -336,6 +336,22 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
 
     let mut modified = false;
 
+    // 0. 顶层 $schema 注入（plan-Q A.4-3，与 ConfigBuilder::build 同步）：
+    // 用户手改 config.json 时兼容编辑器（VS Code + JSON Schema 插件）可自动校验
+    {
+        if let Some(obj) = config_val.as_object_mut() {
+            if obj.get("$schema").and_then(|v| v.as_str())
+                != Some("https://sing-box.sagernet.org/schema.json")
+            {
+                obj.insert(
+                    "$schema".to_string(),
+                    serde_json::json!("https://sing-box.sagernet.org/schema.json"),
+                );
+                modified = true;
+            }
+        }
+    }
+
     // 1. 同步 Inbounds (包括端口 mixed_port、allow_lan 监听与开关 tun_enabled)
     if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|i| i.as_array_mut()) {
         inbounds.clear();

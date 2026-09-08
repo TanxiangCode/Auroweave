@@ -32,6 +32,8 @@ use std::collections::HashMap;
 /// 后续导入订阅后会通过 ConfigBuilder 重新生成完整配置。
 pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
     json!({
+        // $schema 注入（与 build() 同步，plan-Q A.4-3）：三条生成路径统一
+        "$schema": "https://sing-box.sagernet.org/schema.json",
         "log": {
             "level": "info",
             "timestamp": true
@@ -413,6 +415,9 @@ impl ConfigBuilder {
 
         // ---- 阶段5: 组装最终 JSON ----
         let config = json!({
+            // $schema 注入（plan-Q A.4-3）：内核忽略此字段，用户把 config.json
+            // 拿到 VS Code 等兼容编辑器可自动获得字段补全与校验
+            "$schema": "https://sing-box.sagernet.org/schema.json",
             "log": {
                 "level": "info",
                 "timestamp": true
