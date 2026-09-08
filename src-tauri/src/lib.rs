@@ -169,6 +169,11 @@ pub fn run() {
             // sing-box 内核版本检测与在线更新
             commands::singbox_update::core_check_singbox_update,
             commands::singbox_update::core_upgrade_singbox,
+            // 配置编辑器（plan-Q）：schema 导出 + 安全编辑
+            commands::config_editor::config_export_schema,
+            commands::config_editor::config_editor_load,
+            commands::config_editor::config_editor_save,
+            commands::config_editor::config_editor_restart_core,
             // ClashAPI 访问令牌（供前端 WebSocket 鉴权）
             core::clash_api::core_get_clash_secret,
             // 托盘实时网速同步

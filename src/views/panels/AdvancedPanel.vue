@@ -30,6 +30,17 @@
           </div>
         </div>
 
+        <!-- JSON Schema 导出（plan-Q Q1）：产出 Draft 2020-12 文件供外部编辑器校验 -->
+        <div class="setting-item schema-export-row">
+          <div class="item-label">
+            <span>导出 JSON Schema</span>
+            <span class="sub-label">生成本内核的配置校验文件（config/schema.json），VS Code 等外部编辑器加载后可对 config.json 字段级补全校验</span>
+          </div>
+          <button class="btn-restore" @click="handleExportSchema" :disabled="exportingSchema">
+            <span>{{ exportingSchema ? '正在导出...' : '导出 Schema' }}</span>
+          </button>
+        </div>
+
         <!-- 升级通知卡片（发现新版本时显示） -->
         <div v-if="updateInfo && updateInfo.has_update" class="update-release-box">
           <div class="release-header">
@@ -280,8 +291,21 @@
             <span>{{ restoring ? '正在恢复...' : '恢复备份' }}</span>
           </button>
         </div>
+
+        <div class="setting-item">
+          <div class="item-label">
+            <span>编辑当前内核配置</span>
+            <span class="sub-label">手改 config.json（保存前经内核 check 校验，拦截拒载配置），改动前内容自动入备份</span>
+          </div>
+          <button class="btn-restore" @click="showConfigEditor = true">
+            <span>打开编辑器</span>
+          </button>
+        </div>
       </div>
     </div>
+
+    <!-- 配置编辑器弹窗（plan-Q Q2） -->
+    <ConfigEditorModal :visible="showConfigEditor" @close="showConfigEditor = false" />
   </div>
 </template>
 
@@ -296,8 +320,10 @@ import {
   checkSingboxUpdate,
   restoreConfigBackup,
 } from "@/api/ipc/settings";
+import { exportConfigSchema } from "@/api/ipc/configEditor";
 import { invokeWithTimeout } from "@/api/ipc/client";
 import type { SingboxUpdateInfo } from "@/types";
+import ConfigEditorModal from "./ConfigEditorModal.vue";
 
 const props = defineProps<{
   highlightTarget?: string;
@@ -311,6 +337,8 @@ const highlightTopology = ref(false);
 const checkingUpdate = ref(false);
 const upgrading = ref(false);
 const restoring = ref(false);
+const exportingSchema = ref(false);
+const showConfigEditor = ref(false);
 const updateInfo = ref<SingboxUpdateInfo | null>(null);
 
 function formatDate(dateStr: string): string {
@@ -427,6 +455,27 @@ async function handleRestore() {
     toast.error("恢复备份失败", e instanceof Error ? e.message : String(e));
   } finally {
     restoring.value = false;
+  }
+}
+
+async function handleExportSchema() {
+  if (exportingSchema.value) return;
+  exportingSchema.value = true;
+  toast.info("正在生成 JSON Schema 文件...");
+  try {
+    const res = await exportConfigSchema();
+    if (res.success && res.data) {
+      toast.success(
+        "JSON Schema 已导出",
+        `文件位于 ${res.data}，VS Code 中将 config.json 关联此文件即可获得字段级校验`
+      );
+    } else {
+      toast.error("导出 Schema 失败", res.error || "内核 schema 子命令执行失败");
+    }
+  } catch (e) {
+    toast.error("导出 Schema 失败", e instanceof Error ? e.message : String(e));
+  } finally {
+    exportingSchema.value = false;
   }
 }
 
@@ -745,6 +794,11 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.02);
   border-left: 2px solid color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
   border-radius: 0 8px 8px 0;
+}
+
+/* schema 导出行与内核状态行间距对齐 */
+.schema-export-row {
+  margin-top: 2px;
 }
 
 /* switch 统一走 App.vue 全局胶囊开关（36×20，勾选青色高亮） */
