@@ -52,6 +52,20 @@
         />
       </div>
 
+      <!-- 智能分流 v2 -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>智能分流 v2 (Smart Routing)</span>
+          <span class="sub-label">按解析结果判定直连：先问本地 DNS，答案为国内 IP 则直接采用并直连——比域名名单（geosite）更实时，对新域名/CDN 误判免疫；境外域名会多一次本地查询（毫秒级）</span>
+        </div>
+        <input
+          type="checkbox"
+          v-model="localSmartV2"
+          class="switch"
+          @change="toggleSmartV2"
+        />
+      </div>
+
       <!-- 本地直连 DNS -->
       <div class="setting-item">
         <div class="item-label">
@@ -152,6 +166,7 @@ const localTimeoutMs = ref(settingsStore.settings.latency_test_timeout_ms || 300
 const localRemoteDoh = ref(settingsStore.settings.dns_remote_doh || "8.8.8.8");
 const localDnsTimeout = ref(settingsStore.settings.dns_timeout_secs || 5);
 const localOptimistic = ref(settingsStore.settings.dns_optimistic_cache !== false);
+const localSmartV2 = ref(settingsStore.settings.dns_smart_routing_v2 === true);
 
 // 精确监听相关字段（数组形式 getter），避免深度 watch 整个 settings
 // 在无关字段变化时触发无意义的重置
@@ -163,14 +178,16 @@ watch(
     settingsStore.settings.dns_remote_doh,
     settingsStore.settings.dns_timeout_secs,
     settingsStore.settings.dns_optimistic_cache,
+    settingsStore.settings.dns_smart_routing_v2,
   ] as const,
-  ([url, concurrency, timeoutMs, doh, dnsTimeout, optimistic]) => {
+  ([url, concurrency, timeoutMs, doh, dnsTimeout, optimistic, smartV2]) => {
     localTestUrl.value = url || DEFAULT_LATENCY_TEST_URL;
     localConcurrency.value = concurrency || 20;
     localTimeoutMs.value = timeoutMs || 3000;
     localRemoteDoh.value = doh || "8.8.8.8";
     localDnsTimeout.value = dnsTimeout || 5;
     localOptimistic.value = optimistic !== false;
+    localSmartV2.value = smartV2 === true;
   }
 );
 
@@ -198,6 +215,15 @@ async function toggleOptimistic() {
   const res = await settingsStore.updateSettings({ dns_optimistic_cache: val });
   if (res.success) {
     toast.success("乐观 DNS 缓存已" + (val ? "开启" : "关闭"), "下次重启内核后生效");
+  }
+}
+
+async function toggleSmartV2() {
+  // v-model 已翻转 localSmartV2，这里只负责持久化
+  const val = localSmartV2.value;
+  const res = await settingsStore.updateSettings({ dns_smart_routing_v2: val });
+  if (res.success) {
+    toast.success("智能分流 v2 已" + (val ? "开启" : "关闭"), "下次重启内核后生效");
   }
 }
 

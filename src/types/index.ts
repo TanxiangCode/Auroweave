@@ -306,6 +306,8 @@ export interface AppSettings {
   dns_timeout_secs?: number;
   /** 乐观 DNS 缓存开关（过期缓存立即返回 + 后台刷新） */
   dns_optimistic_cache?: boolean;
+  /** 智能分流 v2：按本地解析结果是否国内 IP 判定直连（evaluate/match_response/respond） */
+  dns_smart_routing_v2?: boolean;
   // TUN 进阶（sing-box 1.14.0）
   /** TUN DNS 模式：hijack（默认劫持接口 DNS）/ disabled（不接管系统 DNS） */
   tun_dns_mode?: string;
