@@ -9,4 +9,5 @@ pub mod logging;
 pub mod stats;
 pub mod singbox_update;
 pub mod unlock_check;
+pub mod config_editor;
 
