@@ -83,6 +83,15 @@
 ### 🔵 M12 — 优化专项（plan-N 后沉淀期，见 plan-O-optimization.md）
 - 目标：三服务并行探测腰斩单节点耗时；ip 429 容错；历史数据 90 天保留期 + 订阅删除联动；判据设置 UI；i18n 决策清偿；大节点量虚拟化实测决策。
 - 定位：优化为主、必要新增为辅；无架构改动，每项独立可验收。
+- **✅ 已完成（2026-09-07）**：O-1~O-8 全部交付；M2-1/M2-4/M3-5 三个悬置尾巴以数据关闭。
+
+### 🔵 M13 — 智能分流 v2（DNS evaluate/respond 响应级分流，见 plan-P-smart-routing-v2.md）
+- 目标：分流判定从 geosite 域名名单制升级为解析结果归属制（evaluate 本地 DNS → 答案命中 geoip-cn 则 respond 采纳）；UI 仅暴露预设开关。
+- 实测预验证：规则链三形态过 1.14.0 check（含 rule_set 复用项目 geoip-cn.srs）；rule_set 引用合法使 CN 判定零新增数据依赖。
+
+### 🔵 M14 — 配置编辑器（JSON Schema 校验 + 安全写回，见 plan-Q-config-editor.md）
+- 目标：高级用户手改 config.json 的安全网——Q1 schema 导出 + $schema 注入（半天）；Q2 内置编辑器 + check 拦截 + 备份写回（2~3 天，分期交付）。
+- 关键决策：内置校验只走 JSON 语法 + sing-box check 双层（砍 jsonschema crate）；check 不过绝不写回。
 
 ---
 
