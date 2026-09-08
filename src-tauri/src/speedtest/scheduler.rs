@@ -55,6 +55,8 @@ impl SpeedTestScheduler {
         };
         // 吞吐并发默认 1（串行）：并发抢带宽数值失真；上限 4 防误配拖垮全批
         let concurrency = (settings.speedtest_test_concurrency.max(1) as usize).min(4);
+        // 上下行并行测速（O-6，默认关保精度）
+        let parallel_updown = settings.speedtest_parallel_updown;
 
         tokio::spawn(async move {
             // 全局 test-core 互斥：与解锁检测调度器共享（并发 spawn 端口打架）
@@ -121,6 +123,7 @@ impl SpeedTestScheduler {
                         let sem = semaphore.clone();
                         let tag = tag.clone();
                         let test_url = test_url.clone();
+                        let parallel_updown = parallel_updown;
                         async move {
                             let _permit = sem.acquire().await.ok();
                             let res = run_single_throughput_test_with_url(
@@ -128,6 +131,7 @@ impl SpeedTestScheduler {
                                 3,
                                 port,
                                 &test_url,
+                                parallel_updown,
                             )
                             .await;
                             let r = res.unwrap_or(ThroughputResult {
@@ -192,6 +196,7 @@ impl SpeedTestScheduler {
                         total,
                         &mut done_index,
                         &cache,
+                        parallel_updown,
                     )
                     .await;
                 }
@@ -246,6 +251,7 @@ async fn run_selector_loop(
     total: usize,
     done_index: &mut usize,
     cache: &Arc<Mutex<HashMap<String, ThroughputResult>>>,
+    parallel_updown: bool,
 ) {
     let original_now: Option<String> = clash_client.get_proxies().await.ok()
         .and_then(|json| json.get("proxies")?.get(&group_tag)?.get("now")?.as_str().map(|s| s.to_string()));
@@ -281,7 +287,7 @@ async fn run_selector_loop(
         }
 
         // 2. 测量 3 秒速度（用户设置的测速 URL，经主 mixed 端口）
-        let res = run_single_throughput_test_with_url(&node_tag, 3, mixed_port, test_url)
+        let res = run_single_throughput_test_with_url(&node_tag, 3, mixed_port, test_url, parallel_updown)
             .await
             .unwrap_or(ThroughputResult {
                 download_bps: 0,

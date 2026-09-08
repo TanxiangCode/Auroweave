@@ -341,6 +341,8 @@ export interface AppSettings {
   test_core_port_base?: number;
   /** test-core 批量探测节点级并发上限（2-16，默认 8） */
   unlock_test_concurrency?: number;
+  /** 上下行并行测速（默认关=串行保精度） */
+  speedtest_parallel_updown?: boolean;
   core: {
     runMode: string;
     service: {

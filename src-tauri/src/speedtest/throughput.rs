@@ -14,11 +14,14 @@ const DEFAULT_TEST_URL: &str = "https://speed.cloudflare.com/__down?bytes=250000
 /// 切到目标节点）或 test-core 专属端口（inbound 规则已钉死到目标节点）。
 /// `test_url` 为用户设置的下载数据源（空串回退 Cloudflare 默认）；
 /// 上传统一走 Cloudflare /__up（生态内无通用上传端点，不暴露为设置）。
+/// `parallel_updown`：上下行并行（O-6，settings.speedtest_parallel_updown；
+/// test-core 专属端口下互不干扰；主 mixed 端口下会互相挤占带宽）。
 pub async fn run_single_throughput_test_with_url(
     _node_tag: &str,
     duration_secs: u64,
     egress_port: u16,
     test_url: &str,
+    parallel_updown: bool,
 ) -> Result<ThroughputResult, AppError> {
     let test_url = if test_url.trim().is_empty() {
         DEFAULT_TEST_URL
@@ -35,6 +38,34 @@ pub async fn run_single_throughput_test_with_url(
         .timeout(Duration::from_secs(duration_secs + 5))
         .build()
         .map_err(|e| AppError::Network(e.to_string()))?;
+
+    if parallel_updown {
+        // 上下行并行：互不等待，总耗时 ≈ max(下行, 上行)（test-core 专属端口
+        // 下两路独立节点出站；主 mixed 端口下共享出口会互相挤占）
+        let (dl, ul) = tokio::join!(
+            async {
+                measure_download(&client, duration_secs, test_url)
+                    .await
+                    .unwrap_or_else(|e| {
+                        log::warn!("[throughput] 下载测速失败: {}", e);
+                        0
+                    })
+            },
+            async {
+                measure_upload(&client, duration_secs)
+                    .await
+                    .unwrap_or_else(|e| {
+                        log::warn!("[throughput] 上传测速失败: {}", e);
+                        0
+                    })
+            }
+        );
+        return Ok(ThroughputResult {
+            download_bps: dl,
+            upload_bps: ul,
+            tested_at: chrono::Utc::now().timestamp_millis(),
+        });
+    }
 
     // 1. 下载测速（失败记日志，与真实 0 带宽区分）
     let download_bps = match measure_download(&client, duration_secs, test_url).await {

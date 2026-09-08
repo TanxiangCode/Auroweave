@@ -127,6 +127,11 @@ pub struct AppSettings {
     #[serde(default)]
     pub speedtest_test_concurrency: u32,
 
+    /// 上下行并行测速（默认关=串行保精度；开启后单节点耗时约减半，
+    /// 上下行同时挤占带宽数值轻微偏低——test-core 专属端口下互不干扰）
+    #[serde(default)]
+    pub speedtest_parallel_updown: bool,
+
     /// 首页右翼统计胶囊显隐开关（设置-首页显示；true=显示，缺省视为 true
     /// 兼容旧 settings.json）
     #[serde(default = "default_true")]
@@ -214,6 +219,7 @@ impl Default for AppSettings {
             test_core_port_base: 0,
             unlock_test_concurrency: default_unlock_test_concurrency(),
             speedtest_test_concurrency: 1,
+            speedtest_parallel_updown: false,
 
             // 首页右翼统计胶囊（默认全开，可到设置-首页显示关闭）
             dashboard_show_connections: true,

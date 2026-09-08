@@ -137,6 +137,7 @@ pub async fn speedtest_run_single(
     // 用户设置的测速数据源（设置页 speed_test_url；空串回退内置 Cloudflare）
     let settings = crate::commands::settings::settings_get_internal(&app_handle);
     let test_url = settings.speed_test_url.clone();
+    let parallel_updown = settings.speedtest_parallel_updown;
     let port_base = if settings.test_core_port_base > 0 {
         settings.test_core_port_base
     } else {
@@ -156,7 +157,7 @@ pub async fn speedtest_run_single(
             .await
         {
             Ok(base) => {
-                let result = run_single_throughput_test_with_url(&node_tag, 5, base, &test_url).await;
+                let result = run_single_throughput_test_with_url(&node_tag, 5, base, &test_url, parallel_updown).await;
                 core.stop().await; // 测速完立即销毁
                 match result {
                     Ok(res) => {
@@ -208,7 +209,7 @@ pub async fn speedtest_run_single(
         }
     }
 
-    let result = run_single_throughput_test_with_url(&node_tag, 5, mixed_port, &test_url).await;
+    let result = run_single_throughput_test_with_url(&node_tag, 5, mixed_port, &test_url, parallel_updown).await;
 
     // 持久化单节点测速历史
     if let Ok(ref res) = result {

@@ -158,6 +158,79 @@
             @change="save"
           />
         </div>
+
+        <div class="setting-item">
+          <div class="item-label">
+            <span>上下行并行测速</span>
+            <span class="sub-label">下载与上传同时进行，单节点测速耗时减半；并行会轻微互相挤占带宽，追求精确数值请保持关闭</span>
+          </div>
+          <input
+            type="checkbox"
+            v-model="settingsStore.settings.speedtest_parallel_updown"
+            class="switch"
+            @change="save"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. AI 服务解锁检测判据 -->
+    <div class="setting-card glass-effect">
+      <div class="card-header">
+        <span class="card-icon"><BaseIcon name="Sparkles" :size="20" /></span>
+        <div class="card-title-group">
+          <h3>AI 服务解锁检测判据</h3>
+          <p>Gemini / Claude / ChatGPT 可用性判定的页面特征——服务方轮换特征后在此更新，无需发版</p>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="setting-item">
+          <div class="item-label">
+            <span>Gemini 可用性标记</span>
+            <span class="sub-label">gemini.google.com 页面正文包含此片段即判定可用（Google 混淆 ID，随版本轮换）</span>
+          </div>
+          <input
+            type="text"
+            v-model="settingsStore.settings.unlock_gemini_marker"
+            class="text-input"
+            placeholder="45631641,null,true"
+            @change="save"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="item-label">
+            <span>Claude 地区封锁特征</span>
+            <span class="sub-label">claude.ai 重定向落点包含此片段即判定地区封锁</span>
+          </div>
+          <input
+            type="text"
+            v-model="settingsStore.settings.unlock_claude_block_marker"
+            class="text-input"
+            placeholder="app-unavailable-in-region"
+            @change="save"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="item-label">
+            <span>ChatGPT 地区封锁特征</span>
+            <span class="sub-label">api.openai.com 响应正文包含此片段即判定地区封锁</span>
+          </div>
+          <input
+            type="text"
+            v-model="settingsStore.settings.unlock_chatgpt_block_marker"
+            class="text-input"
+            placeholder="unsupported_country"
+            @change="save"
+          />
+        </div>
+
+        <div class="marker-hint">
+          三项留空即使用内置默认判据。判定依据参考 lmc999/RegionRestrictionCheck 社区脚本；
+          若某服务检测结果全量异常（如 Google 轮换了混淆 ID），可从社区脚本同步最新特征到此更新。
+        </div>
       </div>
     </div>
 
@@ -661,6 +734,17 @@ onMounted(() => {
 
 .btn-restore:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* 解锁判据说明块 */
+.marker-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
+  border-radius: 0 8px 8px 0;
 }
 
 /* switch 统一走 App.vue 全局胶囊开关（36×20，勾选青色高亮） */
