@@ -115,6 +115,8 @@ pub struct ConfigBuilder {
     dns_timeout_secs: u64,
     /// 乐观 DNS 缓存开关（过期缓存立即返回 + 后台刷新）
     dns_optimistic_cache: bool,
+    /// 智能分流 v2（evaluate/match_response/respond 响应级分流，plan-P）
+    dns_smart_routing_v2: bool,
 }
 
 impl ConfigBuilder {
@@ -131,6 +133,7 @@ impl ConfigBuilder {
             dns_remote_doh: String::new(),
             dns_timeout_secs: 5,
             dns_optimistic_cache: true,
+            dns_smart_routing_v2: false,
         }
     }
 
@@ -140,11 +143,12 @@ impl ConfigBuilder {
         self
     }
 
-    /// 设置 DNS 配置（远端 DoH 地址 / 查询超时秒 / 乐观缓存开关）
-    pub fn with_dns(mut self, remote_doh: String, timeout_secs: u64, optimistic: bool) -> Self {
+    /// 设置 DNS 配置（远端 DoH 地址 / 查询超时秒 / 乐观缓存开关 / 智能分流 v2 开关）
+    pub fn with_dns(mut self, remote_doh: String, timeout_secs: u64, optimistic: bool, smart_v2: bool) -> Self {
         self.dns_remote_doh = remote_doh;
         self.dns_timeout_secs = timeout_secs;
         self.dns_optimistic_cache = optimistic;
+        self.dns_smart_routing_v2 = smart_v2;
         self
     }
 
@@ -347,16 +351,6 @@ impl ConfigBuilder {
         server_domains.sort();
         server_domains.dedup();
 
-        let mut dns_rules = Vec::new();
-        // Direct 模式全量本地解析（与 route 的 clash_mode 单一真相源对齐）：
-        // TUN 下系统 DNS 劫持的查询在 Direct 模式走 local，不依赖 remote DoH
-        //（detour "proxy" 引用不经过 route.rules，Direct 前置规则对 DoH 无效，
-        //  节点故障时直连模式域名解析不应随之失败）
-        dns_rules.push(json!({ "clash_mode": "Direct", "action": "route", "server": "local" }));
-        if !server_domains.is_empty() {
-            dns_rules.push(json!({ "domain": server_domains, "action": "route", "server": "local" }));
-        }
-
         // ---- 阶段4: 组装路由 ----
         // 检查本地 rule-set 文件是否存在（以 Path::exists() 实际检查为准）
         // DNS 分流与 route 规则统一使用同一组 has_geosite/has_geoip 布尔值，
@@ -364,10 +358,8 @@ impl ConfigBuilder {
         let has_geosite = self.geosite_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
         let has_geoip = self.geoip_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
 
-        // 仅当 geosite-cn rule-set 可用时才添加 DNS 规则：国内域名由 local DNS 权威解析
-        if has_geosite {
-            dns_rules.push(json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
-        }
+        // dns.rules 与 rebuild_config_from_settings 共用 build_dns_rules（防两路径漂移）
+        let dns_rules = build_dns_rules(&server_domains, has_geosite, has_geoip, self.dns_smart_routing_v2);
 
         let mut rule_set_config = Vec::new();
         // geosite 与 geoip 各自独立注册（与 build_full_route_rules 的独立布尔语义对齐）。
@@ -514,6 +506,52 @@ fn tokenize_tag(s: &str) -> Vec<&str> {
         .collect()
 }
 
+/// 构建 dns.rules 规则列表（公共函数，供 ConfigBuilder::build 与
+/// rebuild_config_from_settings 统一调用——两条生成路径共用同一实现防漂移）
+///
+/// 规则顺序（不可变，内核按序匹配）：
+/// 1. Direct 模式全量本地解析（TUN 劫持查询不依赖 detour=proxy 的 remote DoH）
+/// 2. 节点服务器域名 → local（保证节点连接域名的直连解析）
+/// 3. 智能分流 v2（smart_v2 && has_geoip 时启用，1.14.0 响应级分流）：
+///    - evaluate 向 local 发查询并保存响应（不终止匹配）
+///    - 答案 IP 命中 geoip-cn → respond 直接采用本地答案（后续 route 按 IP 直连）
+///    - 否则 fallthrough 到 geosite-cn 名单规则 / remote DoH
+///    （v2 链整块注入替换 geosite-cn 名单规则：名单语义被解析结果归属取代）
+/// 4. geosite-cn 名单直连（v1 语义，仅 smart_v2 未启用时注入）
+///
+/// has_geoip=false（无订阅态/rule-set 未就绪）时 v2 链不注入，
+/// match_response 引用未注册 rule-set 会在内核初始化期拒载。
+pub fn build_dns_rules(
+    server_domains: &[String],
+    has_geosite: bool,
+    has_geoip: bool,
+    smart_v2: bool,
+) -> Vec<Value> {
+    let mut rules = vec![
+        // Direct 模式全量本地解析（与 route 的 clash_mode 单一真相源对齐）：
+        // TUN 下系统 DNS 劫持的查询在 Direct 模式走 local，不依赖 remote DoH
+        //（detour "proxy" 引用不经过 route.rules，Direct 前置规则对 DoH 无效，
+        //  节点故障时直连模式域名解析不应随之失败）
+        json!({ "clash_mode": "Direct", "action": "route", "server": "local" }),
+    ];
+
+    if !server_domains.is_empty() {
+        rules.push(json!({ "domain": server_domains, "action": "route", "server": "local" }));
+    }
+
+    if smart_v2 && has_geoip {
+        // v2 链（顺序由生成器固定，respond 必须有先行 evaluate，内核否则运行时报错）
+        rules.push(json!({ "action": "evaluate", "server": "local" }));
+        rules.push(json!({ "match_response": true, "rule_set": ["geoip-cn"], "action": "respond" }));
+        rules.push(json!({ "action": "route", "server": "remote" }));
+    } else if has_geosite {
+        // v1 名单语义：国内域名由 local DNS 权威解析
+        rules.push(json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
+    }
+
+    rules
+}
+
 /// 构建完整的 route.rules 规则列表（公共函数，供 ConfigBuilder 和 rebuild_config_from_settings 统一调用）
 ///
 /// 规则匹配顺序（严格遵循域名优先、IP后置原则）：
@@ -618,6 +656,100 @@ pub fn build_full_route_rules(has_geosite: bool, has_geoip: bool) -> Vec<Value> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- build_dns_rules（智能分流 v2 共享函数）四象限 ----
+
+    #[test]
+    fn test_build_dns_rules_v2_enabled_with_geoip() {
+        // v2 开 + geoip 就绪：注入 evaluate/match_response/respond 三行链，
+        // geosite-cn 名单规则被 v2 语义取代（不再注入）
+        let rules = build_dns_rules(&["node.example.com".to_string()], true, true, true);
+        assert_eq!(rules[0], json!({ "clash_mode": "Direct", "action": "route", "server": "local" }), "Direct 前置必须保持首条");
+        assert_eq!(rules[1], json!({ "domain": ["node.example.com"], "action": "route", "server": "local" }));
+        assert_eq!(rules[2], json!({ "action": "evaluate", "server": "local" }), "evaluate 必须先于 respond");
+        assert_eq!(rules[3], json!({ "match_response": true, "rule_set": ["geoip-cn"], "action": "respond" }));
+        assert_eq!(rules[4], json!({ "action": "route", "server": "remote" }));
+        assert_eq!(rules.len(), 5);
+        assert!(!rules.iter().any(|r| {
+            r.get("rule_set").and_then(|rs| rs.as_array())
+                .map(|a| a.iter().any(|i| i.as_str() == Some("geosite-cn")))
+                .unwrap_or(false)
+                && r.get("match_response").is_none()
+        }), "v2 开启时不得再注入 geosite-cn 名单规则（已被解析结果归属取代）");
+    }
+
+    #[test]
+    fn test_build_dns_rules_v2_disabled_falls_back_to_geosite() {
+        // v2 关 + geosite 就绪：恢复 v1 名单语义（回归保障）
+        let rules = build_dns_rules(&[], true, true, false);
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[1], json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
+        assert!(!rules.iter().any(|r| r.get("action").and_then(|a| a.as_str()) == Some("evaluate")));
+        assert!(!rules.iter().any(|r| r.get("match_response").and_then(|m| m.as_bool()) == Some(true)));
+    }
+
+    #[test]
+    fn test_build_dns_rules_v2_enabled_without_geoip_not_injected() {
+        // v2 开但 geoip 未就绪（无订阅态）：不注入 v2 链（match_response 引用
+        // 未注册 rule-set 会拒载），geosite 可用时回退 v1 语义
+        let rules = build_dns_rules(&[], true, false, true);
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[1], json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
+        assert!(!rules.iter().any(|r| r.get("match_response").is_some()), "geoip 缺失时不得注入 v2 链");
+    }
+
+    #[test]
+    fn test_build_dns_rules_no_rule_sets_minimal() {
+        // 双 rule-set 均缺失 + v2 开：仅剩 Direct 前置（无任何名单/响应链）
+        let rules = build_dns_rules(&[], false, false, true);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0], json!({ "clash_mode": "Direct", "action": "route", "server": "local" }));
+    }
+
+    #[test]
+    fn test_build_dns_rules_empty_domains_skip_domain_rule() {
+        // 节点 server 全为 IP 时域名规则不注入
+        let rules = build_dns_rules(&[], false, false, false);
+        assert!(!rules.iter().any(|r| r.get("domain").is_some()));
+    }
+
+    /// 用临时 .srs 文件让 has_geoip/has_geosite 为真，验证 ConfigBuilder
+    /// 全量生成路径注入 v2 链（与单测纯函数互补，覆盖 build 集成）
+    #[test]
+    fn test_config_builder_injects_v2_chain() {
+        let tmp = std::env::temp_dir();
+        let geosite = tmp.join("auroweave-test-geosite-cn.srs");
+        let geoip = tmp.join("auroweave-test-geoip-cn.srs");
+        std::fs::write(&geosite, b"stub").unwrap();
+        std::fs::write(&geoip, b"stub").unwrap();
+
+        let outbounds = vec![make_node("🇯🇵 日本-001")];
+        let builder = ConfigBuilder::new(outbounds)
+            .with_local_rule_sets(Some(geosite.to_string_lossy().to_string()), Some(geoip.to_string_lossy().to_string()))
+            .with_dns("1.1.1.1".to_string(), 5, true, true);
+        let config = builder.build().expect("build config 应该成功");
+
+        let dns_rules = config["dns"]["rules"].as_array().unwrap();
+        let evaluate_idx = dns_rules.iter().position(|r| r.get("action").and_then(|a| a.as_str()) == Some("evaluate"));
+        let respond_idx = dns_rules.iter().position(|r| {
+            r.get("action").and_then(|a| a.as_str()) == Some("respond")
+                && r.get("match_response").and_then(|m| m.as_bool()) == Some(true)
+        });
+        let remote_idx = dns_rules.iter().position(|r| r.get("action").and_then(|a| a.as_str()) == Some("route")
+            && r.get("server").and_then(|s| s.as_str()) == Some("remote"));
+        assert!(evaluate_idx.is_some(), "v2 开启时 evaluate 应存在");
+        assert!(respond_idx.is_some(), "v2 开启时 match_response+respond 应存在");
+        assert!(remote_idx.is_some(), "v2 链尾 route→remote 应存在");
+        assert!(evaluate_idx.unwrap() < respond_idx.unwrap(), "evaluate 必须先于 respond");
+        assert!(respond_idx.unwrap() < remote_idx.unwrap(), "respond 必须先于兜底 route→remote");
+
+        // route.rule_set 必须注册 geoip-cn（v2 链引用它）
+        let route_rule_sets = config["route"]["rule_set"].as_array().unwrap();
+        assert!(route_rule_sets.iter().any(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geoip-cn")));
+
+        let _ = std::fs::remove_file(&geosite);
+        let _ = std::fs::remove_file(&geoip);
+    }
 
     #[test]
     fn test_build_full_route_rules_order() {

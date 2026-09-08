@@ -86,6 +86,11 @@ pub struct AppSettings {
     pub dns_timeout_secs: u64,
     #[serde(default = "default_true")]
     pub dns_optimistic_cache: bool,
+    /// 智能分流 v2（1.14.0 evaluate/match_response/respond 响应级分流）：
+    /// 开启后 CN 判定从 geosite 域名名单升级为"本地解析结果是否国内 IP"，
+    /// 默认关闭（opt-in 灰度）；需 geoip-cn rule-set 就绪，未就绪时生成器不注入
+    #[serde(default = "default_false")]
+    pub dns_smart_routing_v2: bool,
 
     // TUN 进阶选项（sing-box 1.14.0：dns_mode 显式化 + UDP NAT 上限）
     #[serde(default = "default_tun_dns_mode")]
@@ -199,6 +204,7 @@ impl Default for AppSettings {
             dns_remote_doh: default_dns_remote_doh(),
             dns_timeout_secs: default_dns_timeout_secs(),
             dns_optimistic_cache: true,
+            dns_smart_routing_v2: false,
             tun_dns_mode: default_tun_dns_mode(),
             udp_nat_max: default_udp_nat_max(),
 
@@ -281,6 +287,35 @@ pub fn settings_get_internal(_app_handle: &tauri::AppHandle) -> AppSettings {
 
     *cache = Some((mtime, loaded.clone()));
     loaded
+}
+
+/// 检查 config 的 route.rule_set 中是否已注册指定 tag 的规则集
+///（rebuild_config_from_settings 的 dns v2 注入门控：未注册时注入引用它的
+///  dns 规则会导致内核初始化期拒载）
+fn route_rule_set_registered(config: &serde_json::Value, tag: &str) -> bool {
+    config.get("route")
+        .and_then(|r| r.get("rule_set"))
+        .and_then(|rs| rs.as_array())
+        .map(|arr| arr.iter().any(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some(tag)))
+        .unwrap_or(false)
+}
+
+/// 从 config 的 outbounds 提取节点服务器域名（与 ConfigBuilder::build 阶段3 同语义：
+/// 非空且非 IP 字面量的 server 字段，排序去重——dns.rules 整块替换的数据来源）
+fn extract_outbound_server_domains(config: &serde_json::Value) -> Vec<String> {
+    let mut domains: Vec<String> = config.get("outbounds")
+        .and_then(|o| o.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|o| o.get("server").and_then(|s| s.as_str()))
+                .filter(|s| !s.is_empty() && s.parse::<std::net::IpAddr>().is_err())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    domains.sort();
+    domains.dedup();
+    domains
 }
 
 /// 核心重构函数：将 AppSettings 中的全部可配置项（端口、TUN、路由等）统一同步到 config.json
@@ -486,6 +521,11 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
     }
 
     // 5. 确保 dns 配置规范（远端 DoH 服务器地址 / timeout / optimistic 缓存 + local 校准）
+    // dns.rules 整块替换所需的前置数据在可变借用前计算（route.rule_set 注册状态
+    // 与 outbound server 域名清单），与 ConfigBuilder::build 共用 build_dns_rules
+    let server_domains = extract_outbound_server_domains(&config_val);
+    let route_has_geosite = route_rule_set_registered(&config_val, "geosite-cn");
+    let route_has_geoip = route_rule_set_registered(&config_val, "geoip-cn");
     if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
         if !dns.contains_key("strategy") {
             dns.insert("strategy".to_string(), serde_json::json!("prefer_ipv4"));
@@ -536,19 +576,20 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
             }
         }
 
-        // 清理 dns.rules 中残留的 www.gstatic.com 强制 local 规则
-        if let Some(rules) = dns.get_mut("rules").and_then(|r| r.as_array_mut()) {
-            let before_len = rules.len();
-            rules.retain(|r| {
-                if let Some(domains) = r.get("domain").and_then(|d| d.as_array()) {
-                    !domains.iter().any(|dom| dom.as_str() == Some("www.gstatic.com"))
-                } else {
-                    true
-                }
-            });
-            if rules.len() != before_len {
-                modified = true;
-            }
+        // dns.rules 整块替换：与 ConfigBuilder::build 共用 build_dns_rules
+        // （防两条生成路径漂移的结构性手段）。v2 门控以 route.rule_set 是否
+        // 已注册 geoip-cn 为准（上方步骤3刚按文件存在性同步；无订阅态未注册
+        // 时不注入 v2 链，match_response 引用未注册 rule-set 会拒载）。
+        // 整块替换同时清掉了 legacy 的 www.gstatic.com 强制 local 规则。
+        let new_dns_rules = crate::core::config_builder::build_dns_rules(
+            &server_domains,
+            route_has_geosite,
+            route_has_geoip,
+            settings.dns_smart_routing_v2,
+        );
+        if dns.get("rules") != Some(&serde_json::json!(new_dns_rules)) {
+            dns.insert("rules".to_string(), serde_json::json!(new_dns_rules));
+            modified = true;
         }
     }
 
