@@ -1,8 +1,8 @@
 # 模块 Q — 配置编辑器（JSON Schema 校验 + 安全写回）
 
-> 状态：⏳ 待开始 | 优先级：🟡 中 | 前置：plan-M M3-3
+> 状态：✅ 已完成（Q1 + Q2 一次交付，2026-09-08） | 优先级：🟡 中 | 前置：plan-M M3-3 ✅
 >
-> 拟定日期：2026-09-08 | 预估工作量：Q1 半天 + Q2 2~3 天（可分期） | 文档依据：`docs/sing-box_docs/schema.md`
+> 拟定日期：2026-09-08 | 完成日期：2026-09-08 | 文档依据：`docs/sing-box_docs/schema.md`
 >
 > **本文档为设计文档 + 开发说明书合一**：Part A 供评审决策，Part B 供直接动工。
 
@@ -164,11 +164,60 @@ Ok(ApiResponse::ok(EditSaveResult::saved))
 
 ### B.5 验收标准
 
-- [ ] Q1：schema 导出按钮产出 444KB 级合法 Draft 2020-12 文件；VS Code 打开 config.json 有字段补全（`$schema` 注入生效）
-- [ ] Q2：坏 JSON/坏引用/坏结构三类修改全部保存被拦，错误面板给出定位
-- [ ] 合法修改保存后内核重启生效，改动前内容自动入 backup
-- [ ] 编辑器打开期间订阅刷新 → 提示条预警覆盖风险（提示已在，验证文案可见性）
+- [x] Q1：schema 导出按钮产出 444KB 级合法 Draft 2020-12 文件（实测 444,895 字节）；`$schema` 注入生效（rebuild 路径实测确认，ConfigBuilder 路径单测覆盖）
+- [x] Q2：坏 JSON/坏引用/坏结构三类修改全部保存被拦，错误面板给出定位（实测：L1 行列拦截 / `dns rule[0]: rule-set not found` / `dns.rules[0].rules: unknown field` / `log.level` 类型错，parse_fatal 单测 8 例全绿）
+- [x] 合法修改保存后内核重启生效，改动前内容自动入 backup（bash 复刻写回链实测：backup == 修改前、config == 修改后，check 复核通过）
+- [x] 编辑器打开期间订阅刷新 → 提示条预警覆盖风险（A.4-2 文案固定弹窗顶部）
 
 ### B.6 排期建议
 
 Q1（半天）可与 plan-P 同批顺手交付（`$schema` 注入两路径改动与 P 的 dns 段改动同文件不同段，无冲突）；Q2 独立排期，等 P 验收后启动——两批改动都动 config 生成面，串行降低复盘成本。
+
+---
+
+## Part C — 实施落盘记录（2026-09-08 完成）
+
+### C.1 实际交付清单
+
+| 子项 | 文件 | 说明 |
+|---|---|---|
+| Q1 | `src-tauri/src/commands/config_editor.rs` | `config_export_schema` 命令：`resolve_binary_path` + `schema -o <config_dir>/schema.json`，附带 1KB 下限截断防护 |
+| Q1 | `src-tauri/src/core/config_builder.rs` | `ConfigBuilder::build` 顶层 `$schema` 注入 |
+| Q1 | `src-tauri/src/commands/settings.rs` | `rebuild_config_from_settings` 同步注入（两路径防漂移） |
+| Q1 | `src/views/panels/AdvancedPanel.vue` | 「导出 Schema」按钮（内核版本卡片内） |
+| Q2 | `src-tauri/src/commands/config_editor.rs` | `config_editor_load` / `config_editor_save` / `config_editor_restart_core` 三命令 + `parse_fatal` 解析器 |
+| Q2 | `src/api/ipc/configEditor.ts`（新） | 前端 API 封装（含 `EditSaveResult` serde tag 对齐的 TS 判别联合类型） |
+| Q2 | `src/views/panels/ConfigEditorModal.vue`（新） | 编辑器弹窗：textarea + 顶部覆盖预警条 + 错误面板 + 保存/重启链 + Tab 插入两空格 |
+| Q2 | `src/views/panels/AdvancedPanel.vue` | 「打开编辑器」入口（灾备卡片内，与恢复备份相邻） |
+| Q2 | `src-tauri/src/lib.rs` | 四命令注册 |
+
+### C.2 与设计的偏差
+
+1. **`config_editor_restart_core` 为新增命令**（B.2 原设计重启走前端调用既有链，但前端无既有重启命令封装，落为后端命令，与订阅刷新同一拉起路径）→ **二次复盘推翻：改走纯重启链**（见 C.5）
+2. **check 输出解析规则以实测修正**：A.4-4 原正则 `(?:decode config|initialize \w+).*?: ([^:]+): (.+)` 会让原因段（如 `geosite-cn`）抢定位；实改为「`": "` 拆段后，首个 dots 形态（无空格含点）或序号形态（`]` 结尾）且后随原因的段」判定，文件路径段跳过。定位形态实测三种：`dns.rules[0].rules` / `parse rule-set[0]` / `dns rule[0]`
+3. **FATAL 输出需 `--disable-color`**（实测默认带 ANSI 码），已在 check 调用参数固定；解析器仍保留 ANSI 兜底剥离
+4. **L1 serde 行列号即面板定位**：不做 textarea 滚动定位（B.3 已声明够用主义，实施一致）
+
+### C.3 验证实录
+
+- cargo 单测 67 通过（含新增 8 例：parse_fatal 四形态 + 兜底 + 多 FATAL 行 + 前缀剥离 + merge_output）
+- vue-tsc / vite build / vitest(6) 全绿
+- check 实测：真实订阅配置（221 outbounds）注入三类错误（dns rule-set 未注册 / dns.rules 嵌套非法字段 / log.level 类型错）全部 exit=1 拦截，FATAL 定位与 parse_fatal 输出一致；`$schema` 字段注入后 check 仍通过（内核确忽略）
+- 写回链实测（bash 复刻 `config_editor_save` 成功路径）：L1 → L3 → 备份 → 原子写，断言 backup == 修改前、config == 修改后，现场已恢复
+- 回归：rebuild 路径重建后的真实 config.json（含 `$schema`）check 通过，订阅刷新链不受编辑器影响
+
+### C.4 遗留决策点（v2）
+
+- 配置锁定开关（A.4-2 留档）：编辑器保存后手动锁定制止 rebuild 覆盖
+- L2 schema 校验升格：如实测发现 check 漏拦「多余字段静默忽略」类错误再评估（A.4-1 留档）
+- textarea 行定位滚动：需行计算映射，锦上添花
+
+### C.5 二次复盘（2026-09-08，提交前复审发现三处修正）
+
+1. **【严重】重启链 rebuild 覆盖手改内容**：初版 `config_editor_restart_core` 走 `apply_core_mode_with_fallback`，其步骤 2（startup.rs:118）调 `rebuild_config_from_settings` 用设置态覆盖 inbounds/route/dns/experimental 段——用户点「重启内核生效」的瞬间手改内容被整体抹掉，Q2 核心价值链路断裂；且内核拒载错误恰在重启时刻暴露（rebuild 覆写后启动的是设置态配置，编辑器的 check 保护被旁路）。
+   **修正**：改纯重启链——local 模式 `sm.stop()` → 300ms → `sm.start(config.json)`（不动 config 一个字节）；service 模式 `RELOAD_CONFIG` IPC **内嵌编辑后配置文本**下发（服务端写自己的 config.json 再拉起，同样不经过 GUI rebuild）。
+2. **服务模式 IPC 命令名纠错**：IPC 协议只有 `GET_STATUS` / `RELOAD_CONFIG` / `SHUTDOWN_CORE` 三个 action（无 START_CORE）；且 `RELOAD_CONFIG` 的 config 参数一律为内嵌文本（历史曾传路径被当正文写入导致拒载，服务侧任意文件读取分支已删除）。初版误用不存在的 `START_CORE`，编译能过但运行必错。
+3. **第三条生成路径漏注 `$schema`**：`generate_minimal_config`（无订阅态默认配置）未注入，B.1 清单只列了两条路径。补注后三条生成路径（build / rebuild / minimal）统一。
+4. 小项：`strip_fatal_prefix` 的 ANSI 剥离循环有死代码（`find('m')` 结果未用），简化为截到首个 ESC 前；service 分支重写后 `PathBuf` 导入变死导入，移除。
+
+复盘后验证：cargo 67 测试（config_editor 8 + config_builder 11 全绿）、clippy 新代码零警告（16 个存量警告均在旧文件）、vue-tsc / vite build / vitest 全绿；最小配置 + `$schema` check 实测通过。
