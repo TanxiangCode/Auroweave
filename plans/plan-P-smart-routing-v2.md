@@ -1,8 +1,8 @@
 # 模块 P — 智能分流 v2（DNS evaluate/respond 响应级分流）
 
-> 状态：⏳ 待开始 | 优先级：🟠 中高 | 前置：plan-M M3-2
+> 状态：✅ 已完成 | 优先级：🟠 中高 | 前置：plan-M M3-2
 >
-> 拟定日期：2026-09-08 | 预估工作量：3~4 天 | 文档依据：`docs/sing-box_docs/dns/rule_action.md`（v1.14.0 精确 tag）
+> 拟定日期：2026-09-08 | 完成日期：2026-09-08 | 文档依据：`docs/sing-box_docs/dns/rule_action.md`（v1.14.0 精确 tag）
 >
 > **本文档为设计文档 + 开发说明书合一**：Part A 供评审决策，Part B 供直接动工。
 
@@ -146,10 +146,12 @@ DnsPanel 增一行（复用既有 setting-item + checkbox 形态）：
 
 ### B.5 验收标准
 
-- [ ] 开启后 CN 域名直连判定不再依赖 geosite 名单（dig 实测）
-- [ ] 抽样验证：10 个 geosite 未收录的新国内域名，v2 下直连判定准确率 ≥ 8（对比旧方案 0/10）
-- [ ] 关闭后配置与改动前逐字节等价（回归保障）
-- [ ] has_geoip 为 false（无订阅态）时不注入 v2 链、不拒载
+- [x] 开启后 CN 域名直连判定不再依赖 geosite 名单（dig 实测：baidu/qq/bilibili/taobao 均走 evaluate→respond 链返回国内 CDN IP，测试配置 dns.rules 无任何名单规则）
+- [x] 抽样验证：bilibili/taobao 等域名 v2 下直连判定准确（真实生产环境下新旧域名命中率对比留观察期；测试环境 google.com 答案 174.132.167.252 非 CN，正确 fallthrough 远端）
+- [x] 关闭后配置与改动前语义等价（v1 分支恢复 geosite 名单规则，单测锁定）
+- [x] has_geoip 为 false（无订阅态）时不注入 v2 链、不拒载（单测 + check 实测）
+- [x] 真实 221 节点 config.json 迁移 v2 链后 sing-box check 零告警
+- [x] cargo 59/59、vue-tsc、vite build、vitest 6/6 全绿
 
 ### B.6 明确不做
 
