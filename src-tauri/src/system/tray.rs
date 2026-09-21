@@ -171,8 +171,28 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 pub fn show_main_window(app_handle: &AppHandle) {
     #[cfg(target_os = "macos")]
     {
+        use objc2::AnyThread;
+        use objc2_app_kit::{NSApplication, NSImage};
+        use objc2_foundation::NSData;
+
         // 恢复 macOS 程序坞图标可见
         let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Regular);
+        // Accessory→Regular 切回后 macOS 会重建 Dock tile：打包版从 Info.plist
+        // 取图标，dev/裸二进制（无 Info.plist CFBundleIconFile）此时显示通用
+        // exec 图标——主动重设 NSApplication 图标（与 tauri.conf bundle.icon 同源）。
+        // sharedApplication 需主线程标记：托盘菜单/按钮事件回调均在主事件循环线程
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            let icon = include_bytes!("../../icons/128x128.png");
+            unsafe {
+                let data = NSData::dataWithBytes_length(
+                    icon.as_ptr() as *const core::ffi::c_void,
+                    icon.len(),
+                );
+                if let Some(img) = NSImage::initWithData(NSImage::alloc(), &data) {
+                    NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&img));
+                }
+            }
+        }
     }
 
     if let Some(window) = app_handle.get_webview_window("main") {

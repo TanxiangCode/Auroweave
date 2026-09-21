@@ -296,6 +296,30 @@ impl ClashApiClient {
 
 impl Default for ClashApiClient {
     fn default() -> Self {
-        Self::new(None)
+        // 进程级共享单例：此前每次 default() 都重建 reqwest Client
+        //（builder 构建 + 连接池冷启动），代理页每次激活的多个 IPC 命令
+        //（get_groups / get_mode / select_node…）各建一个客户端，
+        // 连接池无法复用、TLS 握手重复，是页面进入卡顿的放大因素之一。
+        // 端口动态（set_clash_api_port）在内核重启后变化：以当前端口为键
+        // 缓存，端口变更时自动重建。
+        let port = get_clash_api_port();
+        static CACHED: OnceLock<std::sync::Mutex<Option<(u16, ClashApiClient)>>> =
+            OnceLock::new();
+        let cache = CACHED.get_or_init(|| std::sync::Mutex::new(None));
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((cached_port, client)) = guard.as_ref() {
+            if *cached_port == port {
+                return Self {
+                    client: client.client.clone(),
+                    base_url: client.base_url.clone(),
+                };
+            }
+        }
+        let client = Self::new(None);
+        *guard = Some((port, Self {
+            client: client.client.clone(),
+            base_url: client.base_url.clone(),
+        }));
+        client
     }
 }

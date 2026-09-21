@@ -64,6 +64,11 @@ sha2 = "0.10.9"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 lazy_static = "1.5.0"
 tauri-plugin-autostart = "2"
+[target.'cfg(target_os = "macos")'.dependencies]
+# Dock 图标恢复：Accessory→Regular 切回后重设 NSApplication 图标（dev 裸二进制无 Info.plist 图标，会显示 exec 通用图标）；版本对齐依赖树中 wry/tao 所用 objc2 生态
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSImage"] }
+objc2-foundation = { version = "0.3", features = ["NSData"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",

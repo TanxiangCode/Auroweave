@@ -191,8 +191,8 @@ impl SidecarManager {
     #[cfg(target_os = "macos")]
     fn validate_binary_path_for_shell(path_str: &str) -> Result<(), AppError> {
         let forbidden = [
-            '\'', '"', '$', '`', '\\', '\n', '\r', '\t', '\0', ';', '|', '&', '(', ')',
-            '<', '>', '{', '}', '[', ']', '*', '?', '~', '!', '#',
+            '\'', '"', '$', '`', '\\', '\n', '\r', '\t', '\0', ';', '|', '&', '(',
+            ')', '<', '>', '{', '}', '[', ']', '*', '?', '~', '!', '#',
         ];
         if path_str.chars().any(|c| forbidden.contains(&c)) {
             return Err(AppError::Permission(format!(
@@ -201,6 +201,116 @@ impl SidecarManager {
             )));
         }
         Ok(())
+    }
+
+    /// 判断路径是否位于 macOS TCC 受保护目录（~/Documents、~/Desktop、~/Downloads）下
+    ///
+    /// TCC 对这三个目录的访问控制独立于传统 Unix 权限：即便提权后的 root 进程
+    /// （osascript "with administrator privileges"）访问其中文件，也会被内核
+    /// 按进程 TCC 标识拦截并返回 EPERM（Operation not permitted）。因此对位于
+    /// 受保护目录内的二进制直接做 SUID 赋权必然失败，必须先复制到普通目录。
+    /// `home` 参数注入便于单测；生产路径传当前用户 HOME。
+    #[cfg(target_os = "macos")]
+    fn is_tcc_protected_path_in(path: &std::path::Path, home: &std::path::Path) -> bool {
+        let protected_components = ["Documents", "Desktop", "Downloads"];
+        protected_components
+            .iter()
+            .any(|comp| path.starts_with(home.join(comp)))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn is_tcc_protected_path(path: &std::path::Path) -> bool {
+        match std::env::var_os("HOME") {
+            Some(home) => Self::is_tcc_protected_path_in(path, std::path::Path::new(&home)),
+            None => false,
+        }
+    }
+
+    /// 将二进制复制到 TCC 不受保护的暂存目录并返回新路径
+    ///
+    /// 开发环境下 sing-box 位于 `~/Documents/...` 内（TCC 受保护），直接对其
+    /// chown/chmod 会因 TCC 拦截而失败。此函数将二进制复制到数据根目录的
+    /// `bin/` 子目录（该目录本就是内核升级的安装目标与二进制搜索候选目录），
+    /// 后续 SUID 赋权与进程拉起均针对副本进行。
+    ///
+    /// 复制策略：
+    /// - 目标已存在且内容一致（大小一致且不早于源文件）时跳过复制，避免每次
+    ///   启动都重写 80MB 文件
+    /// - 复制采用"写临时文件 + rename"原子替换，目标正被运行中的 SUID 进程
+    ///   占用时也能安全换 inode，失败时清理半成品
+    #[cfg(target_os = "macos")]
+    fn stage_binary_outside_tcc(path: &std::path::Path) -> Result<std::path::PathBuf, AppError> {
+        Self::stage_binary_outside_tcc_in(path, &crate::get_data_root())
+    }
+
+    /// `stage_binary_outside_tcc` 的可测试核心：数据根目录由参数注入
+    #[cfg(target_os = "macos")]
+    fn stage_binary_outside_tcc_in(
+        path: &std::path::Path,
+        data_root: &std::path::Path,
+    ) -> Result<std::path::PathBuf, AppError> {
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "sing-box".to_string());
+        let bin_dir = data_root.join("bin");
+        std::fs::create_dir_all(&bin_dir).map_err(|e| {
+            AppError::Io(format!("创建内核暂存目录失败: {} ({})", bin_dir.display(), e))
+        })?;
+        let target = bin_dir.join(&file_name);
+
+        // 内容一致则直接复用。fs::copy 不保留 mtime，拷贝后目标 mtime 必然
+        // >= 源；源文件被替换为新版本（mtime 更新）后会触发重新拷贝。
+        let mtime_of = |m: &std::fs::Metadata| {
+            m.modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        };
+        let same = match (
+            std::fs::metadata(path),
+            std::fs::metadata(&target),
+        ) {
+            (Ok(src), Ok(dst)) => {
+                matches!((mtime_of(&src), mtime_of(&dst)), (Some(s), Some(d)) if s <= d)
+                    && src.len() == dst.len()
+            }
+            _ => false,
+        };
+        if same {
+            return Ok(target);
+        }
+
+        info!(
+            "[sidecar] sing-box 位于 TCC 受保护目录，复制到数据目录以允许提权: {:?} -> {:?}",
+            path, target
+        );
+        let tmp_target = bin_dir.join(format!(".{}.tmp", file_name));
+        std::fs::copy(path, &tmp_target).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp_target);
+            AppError::Io(format!(
+                "复制内核到暂存目录失败: {} ({})。请检查磁盘空间与目录权限",
+                tmp_target.display(),
+                e
+            ))
+        })?;
+        if let Err(e) = std::fs::rename(&tmp_target, &target) {
+            let _ = std::fs::remove_file(&tmp_target);
+            return Err(AppError::Io(format!(
+                "内核暂存副本替换失败: {} ({})",
+                target.display(),
+                e
+            )));
+        }
+        // 确保普通用户可执行（fs::copy 会保留源权限，但目标目录可能是新建的）
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&target) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = std::fs::set_permissions(&target, perms);
+            }
+        }
+        Ok(target)
     }
 
     /// 确保 macOS 下 sing-box 二进制文件具备 SUID root 特权（首次运行时请求一次管理员密码）
@@ -227,7 +337,7 @@ impl SidecarManager {
         Self::validate_binary_path_for_shell(&binary_str)?;
 
         let shell_cmd = format!(
-            "cd /tmp && chown root:admin '{}' && chmod +rx '{}' && chmod u+s '{}'",
+            "chown root:admin '{}' && chmod +rx '{}' && chmod u+s '{}'",
             binary_str, binary_str, binary_str
         );
         let escaped_cmd = shell_cmd.replace('\\', "\\\\").replace('"', "\\\"");
@@ -236,9 +346,15 @@ impl SidecarManager {
             escaped_cmd
         );
 
-        let output = tokio::process::Command::new("osascript")
-            .arg("-e")
-            .arg(&applescript)
+        // 关键修复：osascript 子进程的 CWD 若位于 TCC 受保护目录（如 ~/Documents，
+        // 开发环境从仓库目录启动时即是如此），提权后的 root shell 在初始化阶段
+        // 就会因 getcwd() 被拒而报 shell-init 错误（cd 补丁无效——失败发生在
+        // shell 执行任何命令之前）。显式切换到 /private/tmp 根治。
+        let mut cmd = tokio::process::Command::new("osascript");
+        cmd.arg("-e").arg(&applescript);
+        cmd.current_dir("/private/tmp");
+
+        let output = cmd
             .output()
             .await
             .map_err(|e| AppError::Sidecar(format!("执行 osascript 失败: {}", e)))?;
@@ -248,7 +364,16 @@ impl SidecarManager {
             let err_msg = if stderr.contains("-128") || stderr.contains("User canceled") {
                 "用户取消了管理员权限授权".to_string()
             } else {
-                format!("特权赋权失败: {}", stderr.trim())
+                let mut msg = format!("特权赋权失败: {}", stderr.trim());
+                if stderr.contains("Operation not permitted") {
+                    msg.push_str(
+                        "\n提示: 目标路径可能位于 macOS 隐私保护目录（~/Documents、~/Desktop、\
+                         ~/Downloads，管理员权限也无法修改其中文件）或系统只读卷上。\
+                         若从上述目录运行本应用，请在 系统设置 → 隐私与安全性 →\
+                         完全磁盘访问权限 中为运行环境（终端/IDE）授权。",
+                    );
+                }
+                msg
             };
             return Err(AppError::Sidecar(err_msg));
         }
@@ -360,12 +485,20 @@ impl SidecarManager {
         info!("找到 sing-box 执行文件: {:?}", binary_path);
 
         // ---- 阶段2b: macOS TUN 模式 SUID 特权保障 ----
+        // 二进制若位于 TCC 受保护目录（开发环境仓库在 ~/Documents 下、或用户
+        // 从 ~/Downloads 直接运行应用），root 也无法对其 chown/chmod，必须先
+        // 复制到数据目录的 bin/ 再对副本赋权与拉起
+        #[cfg(target_os = "macos")]
+        let mut binary_path = binary_path;
         #[cfg(target_os = "macos")]
         {
             let is_tun = std::fs::read_to_string(config_path)
                 .map(|c| c.contains("\"type\": \"tun\"") || c.contains("\"type\":\"tun\""))
                 .unwrap_or(false);
             if is_tun {
+                if Self::is_tcc_protected_path(&binary_path) {
+                    binary_path = Self::stage_binary_outside_tcc(&binary_path)?;
+                }
                 if let Err(e) = Self::ensure_privileged_binary(&binary_path).await {
                     self.set_status(SidecarStatus::Stopped).await;
                     return Err(e);
@@ -694,6 +827,93 @@ mod tests {
         assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing-$box").is_err());
         assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing`box").is_err());
         assert!(SidecarManager::validate_binary_path_for_shell("/tmp/sing\nbox").is_err());
+    }
+
+    /// TCC 受保护目录检测：~/Documents、~/Desktop、~/Downloads 内为 true，
+    /// 同名前缀目录（如 ~/Documents-backup）不误伤
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_is_tcc_protected_path() {
+        let home = std::path::Path::new("/Users/tester");
+        assert!(SidecarManager::is_tcc_protected_path_in(
+            &std::path::Path::new("/Users/tester/Documents/Git/app/bin/sing-box"),
+            home
+        ));
+        assert!(SidecarManager::is_tcc_protected_path_in(
+            &std::path::Path::new("/Users/tester/Downloads/sing-box"),
+            home
+        ));
+        assert!(SidecarManager::is_tcc_protected_path_in(
+            &std::path::Path::new("/Users/tester/Desktop/app"),
+            home
+        ));
+        // 同名前缀目录不算受保护（starts_with 是路径组件语义）
+        assert!(!SidecarManager::is_tcc_protected_path_in(
+            &std::path::Path::new("/Users/tester/Documents-backup/sing-box"),
+            home
+        ));
+        // 数据目录不受保护
+        assert!(!SidecarManager::is_tcc_protected_path_in(
+            &std::path::Path::new("/Users/tester/Library/Application Support/Auroweave/bin/sing-box"),
+            home
+        ));
+        // 系统路径不受保护
+        assert!(!SidecarManager::is_tcc_protected_path_in(
+            &std::path::Path::new("/usr/local/bin/sing-box"),
+            home
+        ));
+        assert!(!SidecarManager::is_tcc_protected_path_in(
+            &std::path::Path::new("/private/tmp/sing-box"),
+            home
+        ));
+    }
+
+    /// 暂存复制：目标位于数据目录 bin/ 下、内容一致时跳过复制、
+    /// 源更新后重新复制
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_stage_binary_outside_tcc() {
+        let tmp = std::env::temp_dir().join(format!(
+            "auroweave-tcc-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("创建测试目录失败");
+
+        // 数据根目录注入为临时目录，避免污染真实 ~/Library 数据目录
+        let data_root = tmp.join("data-root");
+
+        let src = tmp.join("fake-sing-box");
+        std::fs::write(&src, b"v1").expect("写源文件失败");
+
+        let staged = SidecarManager::stage_binary_outside_tcc_in(&src, &data_root)
+            .expect("暂存失败");
+        assert_eq!(staged, data_root.join("bin").join("fake-sing-box"));
+        assert_eq!(std::fs::read(&staged).unwrap(), b"v1");
+        // 半成品临时文件不残留
+        assert!(!bin_dir_of(&data_root).join(".fake-sing-box.tmp").exists());
+
+        // 副本 mtime 必然 >= 源（fs::copy 不保留源 mtime）→ 跳过复制复用副本
+        let staged2 = SidecarManager::stage_binary_outside_tcc_in(&src, &data_root)
+            .expect("第二次暂存失败");
+        assert_eq!(staged2, staged);
+
+        // 源更新（mtime 变新）→ 重新复制
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&src, b"v2-longer").expect("更新源文件失败");
+        let staged3 = SidecarManager::stage_binary_outside_tcc_in(&src, &data_root)
+            .expect("第三次暂存失败");
+        assert_eq!(staged3, staged);
+        assert_eq!(std::fs::read(&staged3).unwrap(), b"v2-longer");
+        assert!(!bin_dir_of(&data_root).join(".fake-sing-box.tmp").exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn bin_dir_of(data_root: &std::path::Path) -> std::path::PathBuf {
+        data_root.join("bin")
     }
 }
 
