@@ -41,7 +41,10 @@ fn default_true() -> bool { true }
 fn default_false() -> bool { false }
 
 fn default_dns_remote_doh() -> String { "8.8.8.8".to_string() }
+fn default_dns_bootstrap_doh() -> String { "223.5.5.5".to_string() }
+fn default_dns_bootstrap_backup_doh() -> String { "1.12.12.12".to_string() }
 fn default_dns_timeout_secs() -> u64 { 5 }
+fn default_dns_mode() -> String { "fakeip".to_string() }
 fn default_tun_dns_mode() -> String { "hijack".to_string() }
 fn default_udp_nat_max() -> u64 { 0 }
 fn default_unlock_test_concurrency() -> u32 { 8 }
@@ -82,6 +85,14 @@ pub struct AppSettings {
     // DNS 配置（sing-box 1.14.0：optimistic 缓存 / timeout 快速失败 / 远端 DoH 服务器）
     #[serde(default = "default_dns_remote_doh")]
     pub dns_remote_doh: String,
+    /// 节点域名解析专用直连 DoH（bootstrap）：不经代理防回环、不经运营商递归防污染
+    #[serde(default = "default_dns_bootstrap_doh")]
+    pub dns_bootstrap_doh: String,
+    /// bootstrap 的备用直连 DoH（异构运营商，默认 dnspod 1.12.12.12）：
+    /// 主解析器负缓存毒化（机场子域轮换删除窗口被 SOA 600s 负缓存放大）时，
+    /// 由 response_rcode=NXDOMAIN/SERVFAIL 规则切到备用解析器对冲
+    #[serde(default = "default_dns_bootstrap_backup_doh")]
+    pub dns_bootstrap_backup_doh: String,
     #[serde(default = "default_dns_timeout_secs")]
     pub dns_timeout_secs: u64,
     #[serde(default = "default_true")]
@@ -91,6 +102,15 @@ pub struct AppSettings {
     /// 默认关闭（opt-in 灰度）；需 geoip-cn rule-set 就绪，未就绪时生成器不注入
     #[serde(default = "default_false")]
     pub dns_smart_routing_v2: bool,
+    /// DNS 解析模式："fakeip" (默认，推荐) 或 "realip"
+    #[serde(default = "default_dns_mode")]
+    pub dns_mode: String,
+
+    /// 自定义分组规则（前端「自定义区域管理」维护的 CustomGroupRule JSON 数组）：
+    /// group_type=virtual 仅前端本地匹配展示；selector/urltest/balance 由
+    /// ConfigBuilder 生成内核真实策略组（tag = custom-{name}）
+    #[serde(default)]
+    pub custom_group_rules: Vec<serde_json::Value>,
 
     // TUN 进阶选项（sing-box 1.14.0：dns_mode 显式化 + UDP NAT 上限）
     #[serde(default = "default_tun_dns_mode")]
@@ -202,9 +222,13 @@ impl Default for AppSettings {
 
             // DNS 默认（sing-box 1.14.0）
             dns_remote_doh: default_dns_remote_doh(),
+            dns_bootstrap_doh: default_dns_bootstrap_doh(),
+            dns_bootstrap_backup_doh: default_dns_bootstrap_backup_doh(),
             dns_timeout_secs: default_dns_timeout_secs(),
             dns_optimistic_cache: true,
             dns_smart_routing_v2: false,
+            dns_mode: default_dns_mode(),
+            custom_group_rules: Vec::new(),
             tun_dns_mode: default_tun_dns_mode(),
             udp_nat_max: default_udp_nat_max(),
 
@@ -391,7 +415,14 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
             let mut tun_inbound = serde_json::json!({
                 "type": "tun",
                 "tag": "tun-in",
-                "address": ["172.19.0.1/30"],
+                // 双栈地址（docs/inbound/tun.zh.md 示例同构）：仅有 v4 地址时
+                // auto_route 不接管 v6，系统的 IPv6 DNS 解析器（如 2400:3200::1）
+                // 会绕过 TUN 直连运营商——被劫持域名（google 等）的毒化答案走 v6
+                // 通道抢先返回（v4 劫持链经 DoH 约秒级，毒化答案毫秒级必赢竞争），
+                // 表现为"TUN 下谷歌打不开而其它站点正常"。补 v6 地址后 v6 DNS
+                // 同进隧道被 hijack-dns 统一劫持。ULA 段避开 mihomo 惯用的
+                // fdfe:dcba:9875::/126 与文档示例 9876::/126，防双 TUN 共存撞段
+                "address": ["172.19.0.1/30", "fdfe:dcba:9874::1/126"],
                 "auto_route": true,
                 "strict_route": true,
                 "stack": "system",
@@ -431,6 +462,8 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
                 "path".to_string(),
                 serde_json::json!(crate::get_data_root().join("cache.db").to_string_lossy().to_string())
             );
+            cache_file.insert("store_dns".to_string(), serde_json::json!(true));
+            cache_file.insert("store_fakeip".to_string(), serde_json::json!(true));
             modified = true;
         }
     }
@@ -543,6 +576,8 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
     let route_has_geosite = route_rule_set_registered(&config_val, "geosite-cn");
     let route_has_geoip = route_rule_set_registered(&config_val, "geoip-cn");
     if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
+        let is_fake_ip = settings.dns_mode.trim().to_lowercase() != "realip";
+
         if !dns.contains_key("strategy") {
             dns.insert("strategy".to_string(), serde_json::json!("prefer_ipv4"));
             modified = true;
@@ -562,8 +597,11 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
         }
 
         // 校准 local dns server 为 type: local（附 1.14 neighbor_domain 局域网解析），
-        // remote dns server 的 DoH 地址跟随用户设置
+        // remote dns server 的 DoH 地址跟随用户设置，
+        // bootstrap / bootstrap-backup dns server（节点域名专用直连 DoH 主备）地址跟随设置且缺失时补齐
         let remote_doh = settings.dns_remote_doh.trim().to_string();
+        let canonical_bootstrap = crate::core::config_builder::canonical_bootstrap_server(&settings.dns_bootstrap_doh);
+        let canonical_backup = crate::core::config_builder::canonical_bootstrap_backup_server(&settings.dns_bootstrap_backup_doh);
         if let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut()) {
             for srv in servers.iter_mut() {
                 if srv.get("tag").and_then(|t| t.as_str()) == Some("local") {
@@ -588,8 +626,56 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
                         });
                         modified = true;
                     }
+                } else if srv.get("tag").and_then(|t| t.as_str()) == Some("bootstrap") {
+                    // 校准节点域名专用解析器：地址跟随设置（IP 直用 / 域名附 domain_resolver=local）
+                    if *srv != canonical_bootstrap {
+                        *srv = canonical_bootstrap.clone();
+                        modified = true;
+                    }
+                } else if srv.get("tag").and_then(|t| t.as_str()) == Some("bootstrap-backup") {
+                    // 校准备用解析器（NXDOMAIN/SERVFAIL 对冲链的第二跳）
+                    if *srv != canonical_backup {
+                        *srv = canonical_backup.clone();
+                        modified = true;
+                    }
                 }
             }
+            let has_fakeip = servers.iter().any(|s| s.get("tag").and_then(|t| t.as_str()) == Some("fakeip"));
+            if is_fake_ip && !has_fakeip {
+                servers.push(serde_json::json!({
+                    "tag": "fakeip",
+                    "type": "fakeip",
+                    "inet4_range": "198.18.0.0/15",
+                    "inet6_range": "fc00::/18"
+                }));
+                modified = true;
+            } else if !is_fake_ip && has_fakeip {
+                servers.retain(|s| s.get("tag").and_then(|t| t.as_str()) != Some("fakeip"));
+                modified = true;
+            }
+
+            let has_bootstrap = servers.iter().any(|s| {
+                s.get("tag").and_then(|t| t.as_str()) == Some("bootstrap")
+            });
+            if !has_bootstrap {
+                servers.push(canonical_bootstrap);
+                modified = true;
+            }
+            let has_backup = servers.iter().any(|s| {
+                s.get("tag").and_then(|t| t.as_str()) == Some("bootstrap-backup")
+            });
+            if !has_backup {
+                servers.push(canonical_backup);
+                modified = true;
+            }
+        }
+
+        // sing-box 规范与内核强校验：default server 严禁为 fakeip，final 保持为 remote
+        // 境外与代理域名由下方 build_dns_rules 生成的 route -> fakeip 规则承接
+        let target_final = "remote";
+        if dns.get("final").and_then(|f| f.as_str()) != Some(target_final) {
+            dns.insert("final".to_string(), serde_json::json!(target_final));
+            modified = true;
         }
 
         // dns.rules 整块替换：与 ConfigBuilder::build 共用 build_dns_rules
@@ -602,6 +688,7 @@ pub fn rebuild_config_from_settings(app_handle: &tauri::AppHandle) -> Result<(),
             route_has_geosite,
             route_has_geoip,
             settings.dns_smart_routing_v2,
+            is_fake_ip,
         );
         if dns.get("rules") != Some(&serde_json::json!(new_dns_rules)) {
             dns.insert("rules".to_string(), serde_json::json!(new_dns_rules));

@@ -237,11 +237,13 @@ mod mac_sysproxy {
         );
 
         log::info!("[sysproxy] 通过 osascript 提权执行 networksetup...");
-        match Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .output()
-        {
+        let mut elevated = Command::new("osascript");
+        elevated.arg("-e").arg(&script);
+        // CWD 若位于 TCC 受保护目录（~/Documents 等），提权后的 root shell
+        // 初始化阶段 getcwd() 即被拒（shell-init 错误），命令必然失败。
+        // 显式切换到 /private/tmp 根治（与 sidecar 提权链同款修复）。
+        elevated.current_dir("/private/tmp");
+        match elevated.output() {
             Ok(out) => {
                 if out.status.success() {
                     log::info!("[sysproxy] osascript 提权执行成功");
@@ -510,5 +512,35 @@ fn set_system_proxy_silent_impl(enabled: bool, port: u16) -> Result<(), String> 
     {
         let _ = (enabled, port);
         Ok(())
+    }
+}
+
+/// 刷新操作系统本地 DNS 解析缓存（环境自洁）
+/// - macOS: 执行 dscacheutil -flushcache（普通用户权限即可，清除残留 Fake-IP 映射，杜绝 15 秒假死）
+/// - Windows: 执行 ipconfig /flushdns
+/// - Linux: 若使用 systemd-resolved 则尝试 resolvectl flush-caches
+pub fn flush_system_dns_cache() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("dscacheutil")
+            .arg("-flushcache")
+            .output();
+        log::debug!("[sysproxy] macOS 本地 DNS 缓存已刷新 (dscacheutil -flushcache)");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("ipconfig")
+            .arg("/flushdns")
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        log::debug!("[sysproxy] Windows 本地 DNS 缓存已刷新 (ipconfig /flushdns)");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("resolvectl")
+            .arg("flush-caches")
+            .output();
     }
 }

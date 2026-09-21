@@ -270,6 +270,7 @@ pub async fn routing_delete_custom_rule(
     app_handle: AppHandle,
     id: String,
 ) -> Result<ApiResponse<()>, AppError> {
+    info!("[routing] 删除自定义分流规则: {}", id);
     let mut rules = load_custom_rules_internal();
     rules.retain(|r| r.id != id);
     save_custom_rules_internal(&app_handle, &rules).await?;

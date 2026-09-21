@@ -111,14 +111,24 @@ pub struct ConfigBuilder {
     /// 分组测速配置覆盖（group tag -> interval/tolerance/url），
     /// 由设置页 GroupEditModal 保存，仅覆盖显式设置的字段
     group_configs: std::collections::HashMap<String, crate::commands::settings::GroupTestConfig>,
+    /// 自定义分组规则（前端 CustomGroupRule 的 JSON 形态；settings.custom_group_rules）
+    custom_group_rules: Vec<Value>,
+    /// 节点最近一次解锁检测状态（node_tag → {"gemini":"yes",...}），unlock 匹配用
+    unlock_state: std::collections::HashMap<String, Value>,
     /// 远端 DoH 服务器地址（DNS 设置页；空串回退默认 8.8.8.8）
     dns_remote_doh: String,
+    /// 节点域名解析专用直连 DoH（bootstrap；空串回退默认 223.5.5.5）
+    dns_bootstrap_doh: String,
+    /// bootstrap 备用直连 DoH（空串回退默认 1.12.12.12；异构运营商对冲负缓存毒化）
+    dns_bootstrap_backup_doh: String,
     /// DNS 查询超时秒数（1.14.0 optimistic/timeout；timeout<=0 用默认 5s）
     dns_timeout_secs: u64,
     /// 乐观 DNS 缓存开关（过期缓存立即返回 + 后台刷新）
     dns_optimistic_cache: bool,
     /// 智能分流 v2（evaluate/match_response/respond 响应级分流，plan-P）
     dns_smart_routing_v2: bool,
+    /// DNS 解析模式："fakeip"（默认）或 "realip"
+    dns_mode: String,
 }
 
 impl ConfigBuilder {
@@ -132,10 +142,15 @@ impl ConfigBuilder {
             geosite_cn_path: None,
             geoip_cn_path: None,
             group_configs: std::collections::HashMap::new(),
+            custom_group_rules: Vec::new(),
+            unlock_state: std::collections::HashMap::new(),
             dns_remote_doh: String::new(),
+            dns_bootstrap_doh: String::new(),
+            dns_bootstrap_backup_doh: String::new(),
             dns_timeout_secs: 5,
             dns_optimistic_cache: true,
             dns_smart_routing_v2: false,
+            dns_mode: "fakeip".to_string(),
         }
     }
 
@@ -151,6 +166,39 @@ impl ConfigBuilder {
         self.dns_timeout_secs = timeout_secs;
         self.dns_optimistic_cache = optimistic;
         self.dns_smart_routing_v2 = smart_v2;
+        self
+    }
+
+    /// 设置 DNS 解析模式："fakeip"（默认）或 "realip"
+    pub fn with_dns_mode<S: Into<String>>(mut self, dns_mode: S) -> Self {
+        let mode = dns_mode.into();
+        if !mode.trim().is_empty() {
+            self.dns_mode = mode;
+        }
+        self
+    }
+
+    /// 设置节点域名解析专用直连 DoH（bootstrap；空串回退默认 223.5.5.5）
+    pub fn with_bootstrap_doh(mut self, addr: String) -> Self {
+        self.dns_bootstrap_doh = addr;
+        self
+    }
+
+    /// 设置 bootstrap 备用直连 DoH（空串回退默认 1.12.12.12）
+    pub fn with_bootstrap_backup_doh(mut self, addr: String) -> Self {
+        self.dns_bootstrap_backup_doh = addr;
+        self
+    }
+
+    /// 设置自定义分组规则（selector/urltest/balance 类型生成内核真实策略组）
+    pub fn with_custom_groups(mut self, rules: Vec<Value>) -> Self {
+        self.custom_group_rules = rules;
+        self
+    }
+
+    /// 设置节点解锁检测状态（unlock 匹配用；来自 stats_db::get_latest_unlock_per_node）
+    pub fn with_unlock_state(mut self, state: std::collections::HashMap<String, Value>) -> Self {
+        self.unlock_state = state;
         self
     }
 
@@ -338,6 +386,111 @@ impl ConfigBuilder {
             }));
         }
 
+        // 2d-2. 自定义分组（settings.custom_group_rules，前端「自定义区域管理」维护）：
+        // group_type=virtual 不生成真实组（前端本地匹配虚拟组，不进内核）；
+        // selector/urltest/balance 生成内核真实策略组，tag = custom-{name}，
+        // 并挂入 proxy 主组成员。匹配空集不生成（sing-box 拒载空成员组）；
+        // tag 与既有组/节点撞名时跳过；unlock 匹配依赖 with_unlock_state 传入的最新检测结果。
+        let mut custom_group_tags: Vec<String> = Vec::new();
+        for rule in &self.custom_group_rules {
+            let enabled = rule.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            let name = rule.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if !enabled || name.is_empty() {
+                continue;
+            }
+            let group_type = rule.get("group_type").and_then(|v| v.as_str()).unwrap_or("virtual").to_string();
+            if group_type == "virtual" {
+                continue;
+            }
+            let match_type = rule.get("match_type").and_then(|v| v.as_str()).unwrap_or("keyword").to_string();
+
+            // 匹配参数预提取（与前端语义对齐：keyword 包含 / regex 正则 / protocol 协议 / unlock 状态）
+            let compiled = if match_type == "regex" {
+                rule.get("pattern").and_then(|v| v.as_str()).and_then(|p| regex::Regex::new(p).ok())
+            } else {
+                None
+            };
+            let keywords: Vec<String> = rule.get("keywords").and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|k| k.as_str()).map(|s| s.to_lowercase()).collect())
+                .unwrap_or_default();
+            let protocols: Vec<String> = rule.get("protocols").and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|k| k.as_str()).map(|s| s.to_lowercase()).collect())
+                .unwrap_or_default();
+            let unlock_service = rule.get("unlock").and_then(|u| u.get("service")).and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let unlock_status = rule.get("unlock").and_then(|u| u.get("status")).and_then(|s| s.as_str()).unwrap_or("").to_string();
+
+            let mut member_tags: Vec<String> = Vec::new();
+            for out in &self.outbounds {
+                let hit = match match_type.as_str() {
+                    "keyword" => !keywords.is_empty()
+                        && keywords.iter().any(|kw| out.tag.to_lowercase().contains(kw)),
+                    "regex" => compiled.as_ref().map(|re| re.is_match(&out.tag)).unwrap_or(false),
+                    "protocol" => !protocols.is_empty()
+                        && protocols.iter().any(|p| out.r#type.to_lowercase() == *p),
+                    "unlock" => !unlock_service.is_empty()
+                        && !unlock_status.is_empty()
+                        && self.unlock_state.get(&out.tag)
+                            .and_then(|s| s.get(&unlock_service))
+                            .and_then(|v| v.as_str())
+                            .map(|st| st == unlock_status)
+                            .unwrap_or(false),
+                    _ => false,
+                };
+                if hit {
+                    member_tags.push(out.tag.clone());
+                }
+            }
+            if member_tags.is_empty() {
+                log::warn!("[config] 自定义分组 [{}] 无匹配节点，跳过生成", name);
+                continue;
+            }
+
+            let group_tag = format!("custom-{}", name);
+            // tag 冲突：与既有出站组/节点 tag 撞名则跳过
+            let conflict = final_outbounds.iter().any(|o| o.get("tag").and_then(|t| t.as_str()) == Some(group_tag.as_str()))
+                || all_node_tags.iter().any(|t| t == &group_tag);
+            if conflict {
+                log::warn!("[config] 自定义分组 tag [{}] 与既有出站冲突，跳过生成", group_tag);
+                continue;
+            }
+
+            let group_json = match group_type.as_str() {
+                "selector" => json!({
+                    "type": "selector", "tag": group_tag, "outbounds": member_tags,
+                    "interrupt_exist_connections": false
+                }),
+                "urltest" => {
+                    let (interval, url, tolerance) = self.urltest_params(&group_tag);
+                    json!({
+                        "type": "urltest", "tag": group_tag, "outbounds": member_tags,
+                        "url": url, "interval": interval, "idle_timeout": "15m",
+                        "tolerance": tolerance, "interrupt_exist_connections": false
+                    })
+                }
+                "balance" => {
+                    let (interval, url, tolerance) = self.urltest_params("balance");
+                    json!({
+                        "type": "urltest", "tag": group_tag, "outbounds": member_tags,
+                        "url": url, "interval": interval, "idle_timeout": "10m",
+                        "tolerance": tolerance, "interrupt_exist_connections": false
+                    })
+                }
+                _ => continue,
+            };
+            final_outbounds.push(group_json);
+            custom_group_tags.push(group_tag);
+        }
+        // 自定义组挂入 proxy 主组成员（尾部追加，Clash 面板可见可切换）
+        if !custom_group_tags.is_empty() {
+            for ob in final_outbounds.iter_mut() {
+                if ob.get("tag").and_then(|t| t.as_str()) == Some("proxy") {
+                    if let Some(arr) = ob.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+                        arr.extend(custom_group_tags.iter().map(|t| serde_json::Value::String(t.clone())));
+                    }
+                }
+            }
+        }
+
         // 2e. 节点具体出站
         final_outbounds.extend(raw_outbounds);
 
@@ -361,7 +514,8 @@ impl ConfigBuilder {
         let has_geoip = self.geoip_cn_path.as_ref().map(|p| std::path::Path::new(p).exists()).unwrap_or(false);
 
         // dns.rules 与 rebuild_config_from_settings 共用 build_dns_rules（防两路径漂移）
-        let dns_rules = build_dns_rules(&server_domains, has_geosite, has_geoip, self.dns_smart_routing_v2);
+        let is_fake_ip = self.dns_mode.trim().to_lowercase() != "realip";
+        let dns_rules = build_dns_rules(&server_domains, has_geosite, has_geoip, self.dns_smart_routing_v2, is_fake_ip);
 
         let mut rule_set_config = Vec::new();
         // geosite 与 geoip 各自独立注册（与 build_full_route_rules 的独立布尔语义对齐）。
@@ -413,6 +567,32 @@ impl ConfigBuilder {
             })
         };
 
+        // 组装 dns.servers
+        let mut dns_servers = Vec::new();
+        dns_servers.push(json!({
+            "detour": "proxy",
+            "server": if self.dns_remote_doh.trim().is_empty() { "8.8.8.8" } else { self.dns_remote_doh.trim() },
+            "tag": "remote",
+            "type": "https"
+        }));
+        if is_fake_ip {
+            // sing-box 1.14 规范的 Fake-IP DNS 服务器配置
+            dns_servers.push(json!({
+                "tag": "fakeip",
+                "type": "fakeip",
+                "inet4_range": "198.18.0.0/15",
+                "inet6_range": "fc00::/18"
+            }));
+        }
+        dns_servers.push(canonical_bootstrap_server(&self.dns_bootstrap_doh));
+        dns_servers.push(canonical_bootstrap_backup_server(&self.dns_bootstrap_backup_doh));
+        dns_servers.push(json!({
+            "tag": "local",
+            "type": "local",
+            // 1.14.0：单标签与 .lan/.local 后缀域名走系统邻居解析器
+            "neighbor_domain": [".", ".lan", ".local"]
+        }));
+
         // ---- 阶段5: 组装最终 JSON ----
         let config = json!({
             // $schema 注入（plan-Q A.4-3）：内核忽略此字段，用户把 config.json
@@ -423,22 +603,10 @@ impl ConfigBuilder {
                 "timestamp": true
             },
             "dns": {
-                "servers": [
-                    {
-                        "detour": "proxy",
-                        "server": if self.dns_remote_doh.trim().is_empty() { "8.8.8.8" } else { self.dns_remote_doh.trim() },
-                        "tag": "remote",
-                        "type": "https"
-                    },
-                    {
-                        "tag": "local",
-                        "type": "local",
-                        // 1.14.0：单标签与 .lan/.local 后缀域名走系统邻居解析器
-                        // （TUN 接管后 nas/打印机/HomePod 等局域网主机名仍可解析）
-                        "neighbor_domain": [".", ".lan", ".local"]
-                    }
-                ],
+                "servers": dns_servers,
                 "rules": dns_rules,
+                // sing-box 规范与内核强校验：default server 严禁为 fakeip（changelog: default server can no longer be fakeip）
+                // 待代理域名由 dns.rules 尾部规则 route 到 fakeip，此处 final 保持为真实 remote DoH 承担内部兜底
                 "final": "remote",
                 "strategy": "prefer_ipv4",
                 // 1.14.0：乐观缓存（过期立即返回+后台刷新）与查询超时（快速失败）
@@ -465,7 +633,9 @@ impl ConfigBuilder {
                 },
                 "cache_file": {
                     "enabled": true,
-                    // DNS 缓存持久化（1.14.0 新增，experimental/cache-file.md）
+                    // DNS 缓存与 Fake-IP 双向映射持久化（experimental/cache-file.md）
+                    // 避免内核重启/热重载后丢失映射表，导致客户端系统 DNS 缓存中未过期的 Fake-IP 寻址失效
+                    "store_fakeip": true,
                     "store_dns": true,
                     "path": crate::get_data_root().join("cache.db").to_string_lossy().to_string()
                 }
@@ -511,12 +681,52 @@ fn tokenize_tag(s: &str) -> Vec<&str> {
         .collect()
 }
 
+/// 构造 canonical 直连 DoH DNS 服务器（节点域名解析主备共用）。
+/// 空/非法输入回退默认 default_addr；若填写的是域名（如 dns.alidns.com），
+/// 依 docs/sing-box_docs/dns/server/https.zh.md 必须设置 domain_resolver
+/// 解析该域名——用 local 承担（不依赖代理，无回环）。不设 detour：
+/// 新版 https 服务器默认直连出站（防“用代理解析代理服务器地址”回环）。
+/// ConfigBuilder::build 与 rebuild_config_from_settings 共用（防两路径漂移）。
+fn canonical_direct_doh_server(tag: &str, addr: &str, default_addr: &str) -> Value {
+    let trimmed = addr.trim();
+    let addr = if trimmed.is_empty() { default_addr } else { trimmed };
+    let mut obj = json!({
+        "tag": tag,
+        "type": "https",
+        "server": addr
+    });
+    if addr.parse::<std::net::IpAddr>().is_err() {
+        obj["domain_resolver"] = json!("local");
+    }
+    obj
+}
+
+/// 节点域名解析主解析器（默认 223.5.5.5 alidns）
+pub fn canonical_bootstrap_server(addr: &str) -> Value {
+    canonical_direct_doh_server("bootstrap", addr, "223.5.5.5")
+}
+
+/// 节点域名解析备用解析器（默认 1.12.12.12 dnspod；须与主解析器异构运营商，
+/// 否则主备共享同一套递归缓存，负缓存毒化时对冲失效）
+pub fn canonical_bootstrap_backup_server(addr: &str) -> Value {
+    canonical_direct_doh_server("bootstrap-backup", addr, "1.12.12.12")
+}
+
 /// 构建 dns.rules 规则列表（公共函数，供 ConfigBuilder::build 与
 /// rebuild_config_from_settings 统一调用——两条生成路径共用同一实现防漂移）
 ///
 /// 规则顺序（不可变，内核按序匹配）：
 /// 1. Direct 模式全量本地解析（TUN 劫持查询不依赖 detour=proxy 的 remote DoH）
-/// 2. 节点服务器域名 → local（保证节点连接域名的直连解析）
+/// 2. 节点服务器域名 → 主备对冲链（1.14.0 evaluate/response_rcode/respond）：
+///    - evaluate 先问 bootstrap（主直连 DoH；不用 local：运营商递归不可靠；
+///      不用 remote：用代理解析代理服务器地址回环）
+///    - 响应为 NXDOMAIN/SERVFAIL → route 到 bootstrap-backup（异构运营商
+///      独立缓存：机场子域轮换的删除窗口会被单一递归器按 SOA 负缓存放大成
+///      约 10 分钟死区——2026-09-18 TUN 全瘫事故根因——备用递归器大概率
+///      未踩中该窗口，一次查询内立即愈合）
+///    - 其余响应 → respond 直接采用主解析器答案（正常路径零额外查询）
+///    - 兜底 route → bootstrap：evaluate 无响应（网络抖动）时查询不落空到
+///      final=remote 造成回环
 /// 3. 智能分流 v2（smart_v2 && has_geoip 时启用，1.14.0 响应级分流）：
 ///    - evaluate 向 local 发查询并保存响应（不终止匹配）
 ///    - 答案 IP 命中 geoip-cn → respond 直接采用本地答案（后续 route 按 IP 直连）
@@ -531,27 +741,65 @@ pub fn build_dns_rules(
     has_geosite: bool,
     has_geoip: bool,
     smart_v2: bool,
+    is_fake_ip: bool,
 ) -> Vec<Value> {
     let mut rules = vec![
         // Direct 模式全量本地解析（与 route 的 clash_mode 单一真相源对齐）：
-        // TUN 下系统 DNS 劫持的查询在 Direct 模式走 local，不依赖 remote DoH
+        // TUN 下系统 DNS 劫持的查询在 Direct 模式走 local，不依赖 remote DoH / fakeip
         //（detour "proxy" 引用不经过 route.rules，Direct 前置规则对 DoH 无效，
         //  节点故障时直连模式域名解析不应随之失败）
         json!({ "clash_mode": "Direct", "action": "route", "server": "local" }),
     ];
 
     if !server_domains.is_empty() {
-        rules.push(json!({ "domain": server_domains, "action": "route", "server": "local" }));
+        // 节点域名主备对冲链（带 disable_cache: true 防本地固化负缓存死区）：
+        // 1. evaluate 先查主直连 DoH (bootstrap，默认 223.5.5.5)；
+        // 2. 响应为 NXDOMAIN/SERVFAIL 时切备用直连 DoH (bootstrap-backup，默认 1.12.12.12)；
+        // 3. respond 采纳答案；
+        // 4. 兜底 route -> bootstrap，保证链内必定闭合，绝不泄漏至 proxy 回环！
+        rules.push(json!({ "domain": server_domains, "action": "evaluate", "server": "bootstrap", "disable_cache": true }));
+        rules.push(json!({ "domain": server_domains, "match_response": true, "response_rcode": "NXDOMAIN", "action": "route", "server": "bootstrap-backup", "disable_cache": true }));
+        rules.push(json!({ "domain": server_domains, "match_response": true, "response_rcode": "SERVFAIL", "action": "route", "server": "bootstrap-backup", "disable_cache": true }));
+        rules.push(json!({ "domain": server_domains, "match_response": true, "action": "respond" }));
+        rules.push(json!({ "domain": server_domains, "action": "route", "server": "bootstrap", "disable_cache": true }));
+
+        // 提取公共主根域（如 9999231.xyz）通配直连兜底：
+        // 防止机场后端高频动态轮换出的新子域尚未进入订阅快照时，因未匹配而漏入 proxy 造成死锁回环
+        let mut parent_suffixes: Vec<String> = Vec::new();
+        for d in server_domains {
+            let parts: Vec<&str> = d.split('.').collect();
+            if parts.len() >= 2 {
+                let suffix = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+                if !parent_suffixes.contains(&suffix) {
+                    parent_suffixes.push(suffix);
+                }
+            }
+        }
+        if !parent_suffixes.is_empty() {
+            rules.push(json!({
+                "domain_suffix": parent_suffixes,
+                "action": "route",
+                "server": "bootstrap",
+                "disable_cache": true
+            }));
+        }
     }
 
     if smart_v2 && has_geoip {
         // v2 链（顺序由生成器固定，respond 必须有先行 evaluate，内核否则运行时报错）
         rules.push(json!({ "action": "evaluate", "server": "local" }));
         rules.push(json!({ "match_response": true, "rule_set": ["geoip-cn"], "action": "respond" }));
-        rules.push(json!({ "action": "route", "server": "remote" }));
+        rules.push(json!({ "action": "route", "server": if is_fake_ip { "fakeip" } else { "remote" } }));
     } else if has_geosite {
         // v1 名单语义：国内域名由 local DNS 权威解析
         rules.push(json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
+    }
+
+    // 境外与待代理域名分流：
+    // 若开启 Fake-IP，未命中直连的域名统一分配 fakeip（0ms 响应、彻底免疫本地 GFW 投毒与公网 DNS 限流）
+    // 若为 realip，则未命中规则自然落入 dns.final = remote
+    if is_fake_ip {
+        rules.push(json!({ "action": "route", "server": "fakeip" }));
     }
 
     rules
@@ -666,27 +914,59 @@ mod tests {
 
     #[test]
     fn test_build_dns_rules_v2_enabled_with_geoip() {
-        // v2 开 + geoip 就绪：注入 evaluate/match_response/respond 三行链，
-        // geosite-cn 名单规则被 v2 语义取代（不再注入）
-        let rules = build_dns_rules(&["node.example.com".to_string()], true, true, true);
+        // v2 开 + geoip 就绪 + realip 模式：节点域名主备对冲链 + evaluate/match_response/respond 三行链
+        let rules = build_dns_rules(&["node.example.com".to_string()], true, true, true, false);
         assert_eq!(rules[0], json!({ "clash_mode": "Direct", "action": "route", "server": "local" }), "Direct 前置必须保持首条");
-        assert_eq!(rules[1], json!({ "domain": ["node.example.com"], "action": "route", "server": "local" }));
-        assert_eq!(rules[2], json!({ "action": "evaluate", "server": "local" }), "evaluate 必须先于 respond");
-        assert_eq!(rules[3], json!({ "match_response": true, "rule_set": ["geoip-cn"], "action": "respond" }));
-        assert_eq!(rules[4], json!({ "action": "route", "server": "remote" }));
-        assert_eq!(rules.len(), 5);
-        assert!(!rules.iter().any(|r| {
-            r.get("rule_set").and_then(|rs| rs.as_array())
-                .map(|a| a.iter().any(|i| i.as_str() == Some("geosite-cn")))
-                .unwrap_or(false)
+        // 节点域名对冲链：evaluate bootstrap → NXDOMAIN/SERVFAIL 切 backup → respond → 兜底 route
+        assert_eq!(rules[1], json!({ "domain": ["node.example.com"], "action": "evaluate", "server": "bootstrap", "disable_cache": true }));
+        assert_eq!(rules[2], json!({ "domain": ["node.example.com"], "match_response": true, "response_rcode": "NXDOMAIN", "action": "route", "server": "bootstrap-backup", "disable_cache": true }));
+        assert_eq!(rules[3], json!({ "domain": ["node.example.com"], "match_response": true, "response_rcode": "SERVFAIL", "action": "route", "server": "bootstrap-backup", "disable_cache": true }));
+        assert_eq!(rules[4], json!({ "domain": ["node.example.com"], "match_response": true, "action": "respond" }));
+        assert_eq!(rules[5], json!({ "domain": ["node.example.com"], "action": "route", "server": "bootstrap", "disable_cache": true }));
+        // 通配根域直连兜底
+        assert_eq!(rules[6], json!({ "domain_suffix": ["example.com"], "action": "route", "server": "bootstrap", "disable_cache": true }));
+        // v2 智能分流
+        assert_eq!(rules[7], json!({ "action": "evaluate", "server": "local" }), "evaluate 必须先于 respond");
+        assert_eq!(rules[8], json!({ "match_response": true, "rule_set": ["geoip-cn"], "action": "respond" }));
+        assert_eq!(rules[9], json!({ "action": "route", "server": "remote" }));
+        assert_eq!(rules.len(), 10);
+    }
+
+    #[test]
+    fn test_build_dns_rules_fakeip_mode() {
+        // Fake-IP 模式测试：未命中直连的待代理域名应 route 到 fakeip
+        let rules = build_dns_rules(&["node.example.com".to_string()], true, true, true, true);
+        let fakeip_rule = rules.iter().find(|r| {
+            r.get("action").and_then(|a| a.as_str()) == Some("route")
+                && r.get("server").and_then(|s| s.as_str()) == Some("fakeip")
+                && r.get("domain").is_none()
+        });
+        assert!(fakeip_rule.is_some(), "Fake-IP 模式必须生成 route 到 fakeip 的分流规则");
+    }
+
+    #[test]
+    fn test_node_domain_hedge_chain_terminates_before_v2() {
+        // 结构性约束：节点域名链必须自带无条件兜底 route（链内终止），
+        // 否则 evaluate 无响应时查询会穿透到 v2 链（evaluate→local，污染语义）
+        // 或 final=remote（用代理解析代理服务器地址，回环）
+        let rules = build_dns_rules(&["node.example.com".to_string()], true, true, true, false);
+        let chain_end = rules.iter().position(|r| {
+            r.get("domain").is_some()
+                && r.get("action").and_then(|a| a.as_str()) == Some("route")
+                && r.get("server").and_then(|s| s.as_str()) == Some("bootstrap")
                 && r.get("match_response").is_none()
-        }), "v2 开启时不得再注入 geosite-cn 名单规则（已被解析结果归属取代）");
+        }).expect("对冲链必须有无条件兜底 route→bootstrap");
+        let v2_start = rules.iter().position(|r| {
+            r.get("action").and_then(|a| a.as_str()) == Some("evaluate")
+                && r.get("server").and_then(|s| s.as_str()) == Some("local")
+        }).expect("v2 链应存在");
+        assert!(chain_end < v2_start, "对冲链必须在 v2 链之前闭合");
     }
 
     #[test]
     fn test_build_dns_rules_v2_disabled_falls_back_to_geosite() {
         // v2 关 + geosite 就绪：恢复 v1 名单语义（回归保障）
-        let rules = build_dns_rules(&[], true, true, false);
+        let rules = build_dns_rules(&[], true, true, false, false);
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[1], json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
         assert!(!rules.iter().any(|r| r.get("action").and_then(|a| a.as_str()) == Some("evaluate")));
@@ -697,7 +977,7 @@ mod tests {
     fn test_build_dns_rules_v2_enabled_without_geoip_not_injected() {
         // v2 开但 geoip 未就绪（无订阅态）：不注入 v2 链（match_response 引用
         // 未注册 rule-set 会拒载），geosite 可用时回退 v1 语义
-        let rules = build_dns_rules(&[], true, false, true);
+        let rules = build_dns_rules(&[], true, false, true, false);
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[1], json!({ "rule_set": "geosite-cn", "action": "route", "server": "local" }));
         assert!(!rules.iter().any(|r| r.get("match_response").is_some()), "geoip 缺失时不得注入 v2 链");
@@ -706,7 +986,7 @@ mod tests {
     #[test]
     fn test_build_dns_rules_no_rule_sets_minimal() {
         // 双 rule-set 均缺失 + v2 开：仅剩 Direct 前置（无任何名单/响应链）
-        let rules = build_dns_rules(&[], false, false, true);
+        let rules = build_dns_rules(&[], false, false, true, false);
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0], json!({ "clash_mode": "Direct", "action": "route", "server": "local" }));
     }
@@ -714,7 +994,7 @@ mod tests {
     #[test]
     fn test_build_dns_rules_empty_domains_skip_domain_rule() {
         // 节点 server 全为 IP 时域名规则不注入
-        let rules = build_dns_rules(&[], false, false, false);
+        let rules = build_dns_rules(&[], false, false, false, false);
         assert!(!rules.iter().any(|r| r.get("domain").is_some()));
     }
 
@@ -740,17 +1020,28 @@ mod tests {
             r.get("action").and_then(|a| a.as_str()) == Some("respond")
                 && r.get("match_response").and_then(|m| m.as_bool()) == Some(true)
         });
-        let remote_idx = dns_rules.iter().position(|r| r.get("action").and_then(|a| a.as_str()) == Some("route")
-            && r.get("server").and_then(|s| s.as_str()) == Some("remote"));
+        let fakeip_idx = dns_rules.iter().position(|r| r.get("action").and_then(|a| a.as_str()) == Some("route")
+            && r.get("server").and_then(|s| s.as_str()) == Some("fakeip"));
         assert!(evaluate_idx.is_some(), "v2 开启时 evaluate 应存在");
         assert!(respond_idx.is_some(), "v2 开启时 match_response+respond 应存在");
-        assert!(remote_idx.is_some(), "v2 链尾 route→remote 应存在");
+        assert!(fakeip_idx.is_some(), "fakeip 模式下 v2 链尾 route→fakeip 应存在");
         assert!(evaluate_idx.unwrap() < respond_idx.unwrap(), "evaluate 必须先于 respond");
-        assert!(respond_idx.unwrap() < remote_idx.unwrap(), "respond 必须先于兜底 route→remote");
+        assert!(respond_idx.unwrap() < fakeip_idx.unwrap(), "respond 必须先于兜底 route→fakeip");
 
         // route.rule_set 必须注册 geoip-cn（v2 链引用它）
         let route_rule_sets = config["route"]["rule_set"].as_array().unwrap();
         assert!(route_rule_sets.iter().any(|rs| rs.get("tag").and_then(|t| t.as_str()) == Some("geoip-cn")));
+
+        // realip 模式下验证尾部 route 到 remote
+        let builder_realip = ConfigBuilder::new(vec![make_node("🇯🇵 日本-001")])
+            .with_dns_mode("realip")
+            .with_local_rule_sets(Some(geosite.to_string_lossy().to_string()), Some(geoip.to_string_lossy().to_string()))
+            .with_dns("1.1.1.1".to_string(), 5, true, true);
+        let config_realip = builder_realip.build().expect("build config realip 应该成功");
+        let dns_rules_realip = config_realip["dns"]["rules"].as_array().unwrap();
+        let remote_idx = dns_rules_realip.iter().position(|r| r.get("action").and_then(|a| a.as_str()) == Some("route")
+            && r.get("server").and_then(|s| s.as_str()) == Some("remote"));
+        assert!(remote_idx.is_some(), "realip 模式下 v2 链尾 route→remote 应存在");
 
         let _ = std::fs::remove_file(&geosite);
         let _ = std::fs::remove_file(&geoip);
@@ -774,6 +1065,44 @@ mod tests {
         assert!(geosite_idx.is_some());
         assert!(ip_private_idx.is_some());
         assert!(geosite_idx.unwrap() < ip_private_idx.unwrap(), "geosite-cn 规则必须排在 ip_is_private 规则之前");
+    }
+
+    #[test]
+    fn test_custom_group_real_outbounds() {
+        let outbounds = vec![make_node("🇯🇵 日本-极速-001"), make_node("🇭🇰 香港-极速-001")];
+        let rules = vec![
+            json!({
+                "name": "日本优选", "enabled": true, "group_type": "selector",
+                "match_type": "keyword", "keywords": ["日本", "JP"], "order": 0
+            }),
+            json!({
+                "name": "空匹配组", "enabled": true, "group_type": "urltest",
+                "match_type": "keyword", "keywords": ["不存在的关键词"], "order": 1
+            }),
+            json!({
+                "name": "纯展示组", "enabled": true, "group_type": "virtual",
+                "match_type": "keyword", "keywords": ["香港"], "order": 2
+            }),
+        ];
+        let config = ConfigBuilder::new(outbounds)
+            .with_custom_groups(rules)
+            .build()
+            .expect("build config 应该成功");
+
+        let outs = config["outbounds"].as_array().unwrap();
+        let jp = outs.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("custom-日本优选")).expect("应生成 selector 自定义组");
+        assert_eq!(jp.get("type").and_then(|t| t.as_str()), Some("selector"));
+        let members = jp.get("outbounds").and_then(|o| o.as_array()).unwrap();
+        assert!(members.iter().any(|m| m.as_str() == Some("🇯🇵 日本-极速-001")));
+        assert!(!members.iter().any(|m| m.as_str() == Some("🇭🇰 香港-极速-001")), "关键词不匹配的节点不应入组");
+
+        assert!(outs.iter().all(|o| o.get("tag").and_then(|t| t.as_str()) != Some("custom-空匹配组")), "空匹配组不应生成");
+        assert!(outs.iter().all(|o| o.get("tag").and_then(|t| t.as_str()) != Some("custom-纯展示组")), "virtual 类型不进内核");
+
+        // proxy 主组应挂入自定义组 tag
+        let proxy = outs.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("proxy")).unwrap();
+        let proxy_members = proxy.get("outbounds").and_then(|o| o.as_array()).unwrap();
+        assert!(proxy_members.iter().any(|m| m.as_str() == Some("custom-日本优选")), "自定义组应挂入 proxy 主组");
     }
 
     #[test]
@@ -818,6 +1147,18 @@ mod tests {
             "local dns 应包含 neighbor_domain 3 项"
         );
 
+        // 节点域名专用解析器：bootstrap（国内直连 DoH，不经运营商递归、不经代理防回环）
+        let bootstrap_srv = servers.iter().find(|s| s.get("tag").and_then(|t| t.as_str()) == Some("bootstrap")).expect("应该包含 bootstrap dns");
+        assert_eq!(bootstrap_srv.get("type").and_then(|t| t.as_str()), Some("https"));
+        assert_eq!(bootstrap_srv.get("server").and_then(|s| s.as_str()), Some("223.5.5.5"));
+        assert!(bootstrap_srv.get("detour").is_none(), "bootstrap 不得 detour 经代理（用代理解析代理地址会回环）");
+
+        // 备用解析器：bootstrap-backup（默认 dnspod 1.12.12.12，异构运营商独立缓存对冲）
+        let backup_srv = servers.iter().find(|s| s.get("tag").and_then(|t| t.as_str()) == Some("bootstrap-backup")).expect("应该包含 bootstrap-backup dns");
+        assert_eq!(backup_srv.get("type").and_then(|t| t.as_str()), Some("https"));
+        assert_eq!(backup_srv.get("server").and_then(|s| s.as_str()), Some("1.12.12.12"));
+        assert!(backup_srv.get("detour").is_none(), "bootstrap-backup 不得 detour 经代理");
+
         // Direct 模式 DNS 规则必须前置（TUN 下劫持的查询在 Direct 模式走 local，
         // 不依赖 detour=proxy 的 remote DoH——节点故障时直连解析不受影响）
         let dns_rules = dns.get("rules").and_then(|r| r.as_array()).expect("dns rules 应存在");
@@ -832,6 +1173,16 @@ mod tests {
             Some("local")
         );
 
+        // 节点服务器域名规则：主备对冲链（evaluate→bootstrap / NXDOMAIN 切 backup / respond / 兜底）
+        let domain_rules: Vec<&Value> = dns_rules.iter().filter(|r| r.get("domain").is_some()).collect();
+        assert_eq!(domain_rules.len(), 5, "节点域名应生成 5 条对冲链规则");
+        assert_eq!(domain_rules[0].get("action").and_then(|a| a.as_str()), Some("evaluate"));
+        assert_eq!(domain_rules[0].get("server").and_then(|s| s.as_str()), Some("bootstrap"));
+        assert_eq!(domain_rules[1].get("response_rcode").and_then(|s| s.as_str()), Some("NXDOMAIN"), "主解析器负缓存毒化时切备用");
+        assert_eq!(domain_rules[1].get("server").and_then(|s| s.as_str()), Some("bootstrap-backup"));
+        assert_eq!(domain_rules[3].get("action").and_then(|a| a.as_str()), Some("respond"), "正常响应由 respond 采用主解析器答案");
+        assert_eq!(domain_rules[4].get("server").and_then(|s| s.as_str()), Some("bootstrap"), "兜底 route 必须在链尾防穿透");
+
         // 验证 auto urltest 策略组中过滤了公告伪节点
         let outbounds_arr = config.get("outbounds").and_then(|o| o.as_array()).expect("outbounds 应该存在");
         let auto_group = outbounds_arr.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("auto")).expect("应该包含 auto 分组");
@@ -841,6 +1192,58 @@ mod tests {
         assert!(!auto_tags.contains(&"认准官网地址".to_string()), "auto 分组不应包含公告节点");
         assert!(auto_tags.contains(&"🇯🇵 日本-极速-001".to_string()), "auto 分组应包含有效日本节点");
         assert!(auto_tags.contains(&"🇭🇰 香港-极速-001".to_string()), "auto 分组应包含有效香港节点");
+    }
+
+    #[test]
+    fn test_config_builder_sing_box_1_14_check() {
+        let outbounds = vec![make_node("🇯🇵 日本-极速-001"), make_node("🇭🇰 香港-极速-001")];
+        // 1. Fake-IP 模式全量配置
+        let config_fakeip = ConfigBuilder::new(outbounds.clone())
+            .build()
+            .expect("Fake-IP 配置构建应该成功");
+
+        let tmp = std::env::temp_dir();
+        let path_fakeip = tmp.join("test-singbox-fakeip-check.json");
+        std::fs::write(&path_fakeip, serde_json::to_string_pretty(&config_fakeip).unwrap()).unwrap();
+
+        // 2. Real-IP 模式全量配置
+        let config_realip = ConfigBuilder::new(outbounds)
+            .with_dns_mode("realip")
+            .build()
+            .expect("Real-IP 配置构建应该成功");
+        let path_realip = tmp.join("test-singbox-realip-check.json");
+        std::fs::write(&path_realip, serde_json::to_string_pretty(&config_realip).unwrap()).unwrap();
+
+        // 查找项目内置 sidecar 二进制进行内核级合法性校验
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let sidecar_bin = manifest_dir.join("sidecar-bin/macos-arm64/sing-box-1.14.0");
+
+        if sidecar_bin.exists() {
+            let out_fakeip = std::process::Command::new(&sidecar_bin)
+                .args(["check", "-c", &path_fakeip.to_string_lossy()])
+                .output()
+                .expect("执行 sing-box check fakeip 应该成功");
+            let stderr_fakeip = String::from_utf8_lossy(&out_fakeip.stderr);
+            assert!(
+                out_fakeip.status.success(),
+                "sing-box check fakeip 必须成功，stderr: {}",
+                stderr_fakeip
+            );
+
+            let out_realip = std::process::Command::new(&sidecar_bin)
+                .args(["check", "-c", &path_realip.to_string_lossy()])
+                .output()
+                .expect("执行 sing-box check realip 应该成功");
+            let stderr_realip = String::from_utf8_lossy(&out_realip.stderr);
+            assert!(
+                out_realip.status.success(),
+                "sing-box check realip 必须成功，stderr: {}",
+                stderr_realip
+            );
+        }
+
+        let _ = std::fs::remove_file(path_fakeip);
+        let _ = std::fs::remove_file(path_realip);
     }
 
     /// 构造测试用节点的辅助函数

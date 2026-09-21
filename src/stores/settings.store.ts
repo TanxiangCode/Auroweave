@@ -43,6 +43,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   pinned_nodes: [],
 
   // DNS / TUN 进阶（sing-box 1.14.0）
+  dns_mode: "fakeip",
   dns_remote_doh: "8.8.8.8",
   dns_timeout_secs: 5,
   dns_optimistic_cache: true,

@@ -2,6 +2,47 @@
   <div class="panel-container">
     <h2><BaseIcon name="Globe" :size="20" class="panel-header-icon" /> DNS 安全与延迟测试配置</h2>
     <div class="setting-group">
+      <!-- DNS 解析模式 (Fake-IP / 真实 IP) -->
+      <div class="setting-item-column">
+        <div class="item-label">
+          <span class="mode-header-title">DNS 解析模式 (Resolution Mode)</span>
+          <span class="sub-label">
+            选择内核处理境外与代理域名的 DNS 解析方式。切换后下次重启内核生效。
+          </span>
+        </div>
+        <div class="dns-mode-cards">
+          <button
+            type="button"
+            class="dns-mode-card"
+            :class="{ active: localDnsMode === 'fakeip' }"
+            @click="setDnsMode('fakeip')"
+          >
+            <div class="card-title">
+              <BaseIcon name="Zap" :size="15" class="mode-icon" />
+              <span>Fake-IP 模式</span>
+              <span class="recommend-badge">推荐 / 默认</span>
+            </div>
+            <div class="card-desc">
+              内核即时返回 198.18.0.0/15 保留 IP，0ms 解析响应，彻底免疫本地污染与递归 DNS 限流，无 DNS 泄露。
+            </div>
+          </button>
+          <button
+            type="button"
+            class="dns-mode-card"
+            :class="{ active: localDnsMode === 'realip' }"
+            @click="setDnsMode('realip')"
+          >
+            <div class="card-title">
+              <BaseIcon name="Globe" :size="15" class="mode-icon" />
+              <span>真实 IP 模式 (Real-IP)</span>
+            </div>
+            <div class="card-desc">
+              由远端 DoH 先行解析真实 IP 后再通过代理发起连接，兼容要求端到端校验真实 IP 的特定网络环境。
+            </div>
+          </button>
+        </div>
+      </div>
+
       <!-- 远端加密 DNS -->
       <div class="setting-item">
         <div class="item-label">
@@ -66,79 +107,50 @@
         />
       </div>
 
+      <!-- 节点域名解析 DNS（bootstrap） -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>节点域名解析 DNS (Bootstrap)</span>
+          <span class="sub-label">专用于解析节点服务器域名：国内直连加密 DoH（如 223.5.5.5 / 223.6.6.6），不经代理无回环，也不受运营商 DNS 污染影响；填域名时自动用 Local 解析其地址；保存后重启内核生效</span>
+        </div>
+        <input
+          v-model="localBootstrapDoh"
+          type="text"
+          class="text-input editable"
+          placeholder="223.5.5.5"
+          @blur="saveBootstrapDoh"
+          @keyup.enter="saveBootstrapDoh"
+        />
+      </div>
+
+      <!-- 节点域名解析备用 DNS（bootstrap-backup） -->
+      <div class="setting-item">
+        <div class="item-label">
+          <span>节点域名解析备用 DNS (Backup)</span>
+          <span class="sub-label">主解析器返回 NXDOMAIN/SERVFAIL 时自动切换至此——机场子域轮换的删除窗口会被单一递归 DNS 按负缓存放大成约 10 分钟死区，备用解析器须与主用异构运营商（如主 223.5.5.5 备 1.12.12.12）才有独立缓存对冲效果</span>
+        </div>
+        <input
+          v-model="localBackupDoh"
+          type="text"
+          class="text-input editable"
+          placeholder="1.12.12.12"
+          @blur="saveBackupDoh"
+          @keyup.enter="saveBackupDoh"
+        />
+      </div>
+
       <!-- 本地直连 DNS -->
       <div class="setting-item">
         <div class="item-label">
           <span>本地直连 DNS (Local)</span>
-          <span class="sub-label">type: local —— 走 macOS 系统原生解析器，自动跟随系统 DNS 配置</span>
+          <span class="sub-label">type: local —— 走 macOS 系统原生解析器，自动跟随系统 DNS 配置。必需：承担国内域名直连分流（geosite/evaluate）、Direct 模式解析与局域网 mDNS，不可删除</span>
         </div>
         <input type="text" value="system (type: local)" class="text-input readonly" readonly tabindex="-1" />
       </div>
 
-      <!-- 延迟测试目标 URL -->
-      <div class="setting-item">
-        <div class="item-label">
-          <span>出站 urltest 延迟测试地址</span>
-          <span class="sub-label">Sing-box 健康检测与测延迟的目标 URL</span>
-        </div>
-        <input
-          v-model="localTestUrl"
-          type="text"
-          class="text-input editable"
-          placeholder="http://www.gstatic.com/generate_204"
-          @blur="saveLatencyUrl"
-          @keyup.enter="saveLatencyUrl"
-        />
-      </div>
-
-      <!-- 延迟测试并发数量 -->
-      <div class="setting-item">
-        <div class="item-label">
-          <span>延迟测试并发数量 (Concurrency)</span>
-          <span class="sub-label">同时发起的测速请求数上限 (默认 20，推荐 10~50 防套接字耗尽)</span>
-        </div>
-        <div class="input-with-unit">
-          <input
-            v-model.number="localConcurrency"
-            type="number"
-            min="1"
-            max="100"
-            class="text-input number-input editable"
-            @blur="saveConcurrency"
-            @keyup.enter="saveConcurrency"
-          />
-          <span class="unit-label">个</span>
-        </div>
-      </div>
-
-      <!-- 延迟测试超时时间 -->
-      <div class="setting-item">
-        <div class="item-label">
-          <span>延迟测试超时时间 (Timeout)</span>
-          <span class="sub-label">单节点请求最大等待时间 (默认 3000ms，推荐 1000~10000ms)</span>
-        </div>
-        <div class="input-with-unit">
-          <input
-            v-model.number="localTimeoutMs"
-            type="number"
-            min="500"
-            max="30000"
-            step="500"
-            class="text-input number-input editable"
-            @blur="saveTimeoutMs"
-            @keyup.enter="saveTimeoutMs"
-          />
-          <span class="unit-label">ms</span>
-        </div>
-      </div>
-
-      <!-- 自动心跳检测间隔 -->
-      <div class="setting-item">
-        <div class="item-label">
-          <span>自动优选探测周期 (Interval) <span class="readonly-tag">只读</span></span>
-          <span class="sub-label">内核后台周期性探测间隔 (默认: {{ DEFAULT_LATENCY_TEST_INTERVAL_SEC }} 秒 / 容差 {{ DEFAULT_LATENCY_TEST_TOLERANCE_MS }}ms)</span>
-        </div>
-        <input type="text" :value="`${DEFAULT_LATENCY_TEST_INTERVAL_SEC}s`" class="text-input readonly" readonly tabindex="-1" />
+      <div class="dns-panel-hint">
+        延迟测试参数（目标 URL / 并发 / 超时 / 自动优选周期）已归并至「设置 → 测速与解锁」，
+        避免与 DNS 配置混淆。
       </div>
     </div>
   </div>
@@ -149,21 +161,15 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
 import { ref, watch } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
-import {
-  DEFAULT_LATENCY_TEST_URL,
-  DEFAULT_LATENCY_TEST_INTERVAL_SEC,
-  DEFAULT_LATENCY_TEST_TOLERANCE_MS,
-} from "@/constants";
 
 const settingsStore = useSettingsStore();
 const toast = useToast();
 
-const localTestUrl = ref(settingsStore.settings.latency_test_url || DEFAULT_LATENCY_TEST_URL);
-const localConcurrency = ref(settingsStore.settings.latency_test_concurrency || 20);
-const localTimeoutMs = ref(settingsStore.settings.latency_test_timeout_ms || 3000);
-
 // DNS 配置（sing-box 1.14.0）
+const localDnsMode = ref<"fakeip" | "realip">(settingsStore.settings.dns_mode === "realip" ? "realip" : "fakeip");
 const localRemoteDoh = ref(settingsStore.settings.dns_remote_doh || "8.8.8.8");
+const localBootstrapDoh = ref(settingsStore.settings.dns_bootstrap_doh || "223.5.5.5");
+const localBackupDoh = ref(settingsStore.settings.dns_bootstrap_backup_doh || "1.12.12.12");
 const localDnsTimeout = ref(settingsStore.settings.dns_timeout_secs || 5);
 const localOptimistic = ref(settingsStore.settings.dns_optimistic_cache !== false);
 const localSmartV2 = ref(settingsStore.settings.dns_smart_routing_v2 === true);
@@ -172,24 +178,36 @@ const localSmartV2 = ref(settingsStore.settings.dns_smart_routing_v2 === true);
 // 在无关字段变化时触发无意义的重置
 watch(
   () => [
-    settingsStore.settings.latency_test_url,
-    settingsStore.settings.latency_test_concurrency,
-    settingsStore.settings.latency_test_timeout_ms,
+    settingsStore.settings.dns_mode,
     settingsStore.settings.dns_remote_doh,
+    settingsStore.settings.dns_bootstrap_doh,
+    settingsStore.settings.dns_bootstrap_backup_doh,
     settingsStore.settings.dns_timeout_secs,
     settingsStore.settings.dns_optimistic_cache,
     settingsStore.settings.dns_smart_routing_v2,
   ] as const,
-  ([url, concurrency, timeoutMs, doh, dnsTimeout, optimistic, smartV2]) => {
-    localTestUrl.value = url || DEFAULT_LATENCY_TEST_URL;
-    localConcurrency.value = concurrency || 20;
-    localTimeoutMs.value = timeoutMs || 3000;
+  ([mode, doh, bootstrapDoh, backupDoh, dnsTimeout, optimistic, smartV2]) => {
+    localDnsMode.value = mode === "realip" ? "realip" : "fakeip";
     localRemoteDoh.value = doh || "8.8.8.8";
+    localBootstrapDoh.value = bootstrapDoh || "223.5.5.5";
+    localBackupDoh.value = backupDoh || "1.12.12.12";
     localDnsTimeout.value = dnsTimeout || 5;
     localOptimistic.value = optimistic !== false;
     localSmartV2.value = smartV2 === true;
   }
 );
+
+async function setDnsMode(mode: "fakeip" | "realip") {
+  if (localDnsMode.value === mode) return;
+  localDnsMode.value = mode;
+  const res = await settingsStore.updateSettings({ dns_mode: mode });
+  if (res.success) {
+    toast.success(
+      mode === "fakeip" ? "已切换为 Fake-IP 模式" : "已切换为真实 IP 模式",
+      "下次重启内核后生效"
+    );
+  }
+}
 
 async function saveRemoteDoh() {
   const val = localRemoteDoh.value.trim() || "8.8.8.8";
@@ -197,6 +215,27 @@ async function saveRemoteDoh() {
   const res = await settingsStore.updateSettings({ dns_remote_doh: val });
   if (res.success) {
     toast.success("远端 DoH 已更新", "下次重启内核后生效");
+  }
+}
+
+async function saveBootstrapDoh() {
+  const val = localBootstrapDoh.value.trim() || "223.5.5.5";
+  localBootstrapDoh.value = val;
+  const res = await settingsStore.updateSettings({ dns_bootstrap_doh: val });
+  if (res.success) {
+    toast.success("节点域名解析 DNS 已更新", "下次重启内核后生效");
+  }
+}
+
+async function saveBackupDoh() {
+  const val = localBackupDoh.value.trim() || "1.12.12.12";
+  localBackupDoh.value = val;
+  if (val === localBootstrapDoh.value.trim()) {
+    toast.error("备用解析器与主用相同", "主备同地址时负缓存对冲无效，请填异构运营商 DNS");
+  }
+  const res = await settingsStore.updateSettings({ dns_bootstrap_backup_doh: val });
+  if (res.success) {
+    toast.success("节点域名备用解析 DNS 已更新", "下次重启内核后生效");
   }
 }
 
@@ -226,33 +265,6 @@ async function toggleSmartV2() {
     toast.success("智能分流 v2 已" + (val ? "开启" : "关闭"), "下次重启内核后生效");
   }
 }
-
-async function saveLatencyUrl() {
-  const url = localTestUrl.value.trim() || DEFAULT_LATENCY_TEST_URL;
-  localTestUrl.value = url;
-  const res = await settingsStore.updateSettings({ latency_test_url: url });
-  if (res.success) {
-    toast.success("延迟测试 URL 已更新");
-  }
-}
-
-async function saveConcurrency() {
-  let val = Math.max(1, Math.min(100, Math.floor(localConcurrency.value || 20)));
-  localConcurrency.value = val;
-  const res = await settingsStore.updateSettings({ latency_test_concurrency: val });
-  if (res.success) {
-    toast.success("并发数已更新", `当前测试并发上限: ${val}`);
-  }
-}
-
-async function saveTimeoutMs() {
-  let val = Math.max(500, Math.min(30000, Math.floor(localTimeoutMs.value || 3000)));
-  localTimeoutMs.value = val;
-  const res = await settingsStore.updateSettings({ latency_test_timeout_ms: val });
-  if (res.success) {
-    toast.success("测试超时已更新", `当前超时阈值: ${val}ms`);
-  }
-}
 </script>
 
 <style scoped>
@@ -272,6 +284,88 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.setting-item-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.mode-header-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.dns-mode-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-top: 4px;
+}
+
+.dns-mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--surface-inset, var(--layer-2));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.dns-mode-card:hover {
+  background: var(--layer-3);
+  border-color: var(--border-normal);
+  transform: translateY(-1px);
+}
+
+.dns-mode-card.active {
+  background: var(--accent-cyan-glow, rgba(6, 182, 212, 0.08));
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+  box-shadow: 0 0 12px var(--accent-cyan-glow, rgba(6, 182, 212, 0.15));
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+}
+
+.mode-icon {
+  color: var(--accent-cyan);
+  flex-shrink: 0;
+}
+
+.recommend-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-cyan);
+  color: #0b111e;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.card-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.dns-mode-card.active .card-desc {
+  color: var(--text-secondary);
 }
 
 /* setting-item / item-label / sub-label 统一走 panel.css 全局定义 */
@@ -337,5 +431,14 @@ h2 {
   color: var(--text-tertiary);
   min-width: 20px;
 }
-</style>
 
+.dns-panel-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+  padding: 8px 12px;
+  background: var(--layer-1);
+  border-left: 2px solid var(--accent-cyan);
+  border-radius: 0 8px 8px 0;
+}
+</style>

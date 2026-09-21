@@ -184,7 +184,10 @@ export interface SubscriptionInspectData {
   name: string;
   format: string;
   node_count: number;
+  /** 清洗前原始文本（Base64 订阅已解码为明文 URI 列表） */
   raw_content: string;
+  /** 解码前的原始缓存文本（仅当 raw_content 经 Base64 解码时提供） */
+  raw_content_original?: string | null;
   parsed_nodes: ParsedOutboundNode[];
   final_config_json: string;
 }
@@ -205,6 +208,9 @@ export interface NodeSortConfig {
 /** 自定义分组匹配规则类型（unlock = 按解锁检测结果匹配） */
 export type GroupMatchType = "keyword" | "regex" | "protocol" | "unlock";
 
+/** 自定义分组类型：virtual=仅前端本地匹配展示；其余生成内核真实策略组 */
+export type CustomGroupType = "virtual" | "selector" | "urltest" | "balance";
+
 /** 解锁匹配规则的字段（match_type=unlock 时生效） */
 export interface UnlockMatchConfig {
   /** 目标服务 */
@@ -219,6 +225,8 @@ export interface CustomGroupRule {
   name: string;
   enabled: boolean;
   match_type: GroupMatchType;
+  /** 分组类型：默认 virtual（不进内核）；selector/urltest/balance 生成真实策略组 */
+  group_type?: CustomGroupType;
   /** 关键词列表 (match_type=keyword 时生效) */
   keywords: string[];
   /** 正则表达式 (match_type=regex 时生效) */
@@ -300,8 +308,16 @@ export interface AppSettings {
   enable_app_traffic_tracking: boolean;
 
   // DNS 配置（sing-box 1.14.0）
+  /** DNS 解析模式："fakeip"（默认推荐）/ "realip"（真实 IP 解析） */
+  dns_mode?: "fakeip" | "realip";
   /** 远端 DoH 服务器地址（type: https 的 server 字段） */
   dns_remote_doh?: string;
+  /** 节点域名解析专用直连 DoH（bootstrap）；IP 或 DoH 域名，默认 223.5.5.5 */
+  dns_bootstrap_doh?: string;
+  /** bootstrap 备用直连 DoH（异构运营商对冲负缓存毒化）；IP 或 DoH 域名，默认 1.12.12.12 */
+  dns_bootstrap_backup_doh?: string;
+  /** 自定义分组规则（CustomGroupRule JSON 数组；真实组类型由后端生成内核策略组） */
+  custom_group_rules?: any[];
   /** DNS 查询超时秒数（内核 dns.timeout） */
   dns_timeout_secs?: number;
   /** 乐观 DNS 缓存开关（过期缓存立即返回 + 后台刷新） */
