@@ -17,7 +17,7 @@ const emit = defineEmits<{
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
+    <div v-if="visible" class="modal-backdrop">
       <div class="modal-card glass-effect log-modal">
         <div class="modal-header">
           <span class="modal-icon"></span>

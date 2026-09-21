@@ -10,6 +10,7 @@ import DashboardPanel from "./panels/DashboardPanel.vue";
 import SubscriptionPanel from "./panels/SubscriptionPanel.vue";
 import RouteModePanel from "./panels/RouteModePanel.vue";
 import DnsPanel from "./panels/DnsPanel.vue";
+import SpeedtestPanel from "./panels/SpeedtestPanel.vue";
 import TunPanel from "./panels/TunPanel/index.vue";
 import AutomationPanel from "./panels/AutomationPanel.vue";
 import HotkeyPanel from "./panels/HotkeyPanel.vue";
@@ -24,6 +25,7 @@ type PanelKey =
   | "subscription"
   | "routemode"
   | "dns"
+  | "speedtest"
   | "tun"
   | "automation"
   | "hotkey"
@@ -50,11 +52,12 @@ const navItems: NavItem[] = [
   { key: "routemode", icon: "GitFork", label: "代理模式", keywords: ["模式", "规则", "全局", "直连", "mode", "rule", "global"] },
 
   { key: "dns", icon: "Globe", label: "DNS 配置", keywords: ["dns", "域名解析", "nameserver", "fakeip", "doh"] },
+  { key: "speedtest", icon: "Timer", label: "测速与解锁", keywords: ["测速", "延迟", "并发", "超时", "吞吐量", "优选", "解锁", "speedtest", "unlock", "gemini", "claude", "chatgpt"] },
   { key: "tun", icon: "Cpu", label: "TUN 网卡", keywords: ["tun", "虚拟网卡", "网关", "gvisor", "系统服务", "service"] },
   { key: "automation", icon: "Zap", label: "场景自动化", keywords: ["自动化", "wifi", "ssid", "切换", "auto"] },
   { key: "hotkey", icon: "Command", label: "全局热键", keywords: ["热键", "快捷键", "command palette", "hotkey"] },
   { key: "privacy", icon: "ShieldCheck", label: "隐私与日志", keywords: ["隐私", "日志", "清空", "导出", "log", "privacy"] },
-  { key: "advanced", icon: "FlaskConical", label: "高级与内核", keywords: ["高级", "sing-box", "内核", "升级", "版本", "测速", "延迟", "并发", "超时", "备份", "advanced", "speed", "core", "update"] },
+  { key: "advanced", icon: "FlaskConical", label: "高级与内核", keywords: ["高级", "sing-box", "内核", "升级", "版本", "备份", "性能", "灾备", "advanced", "core", "update"] },
 ];
 
 const filteredNavItems = computed(() => {
@@ -125,6 +128,7 @@ onMounted(() => {
       <SubscriptionPanel v-else-if="activePanel === 'subscription'" />
       <RouteModePanel v-else-if="activePanel === 'routemode'" />
       <DnsPanel v-else-if="activePanel === 'dns'" />
+      <SpeedtestPanel v-else-if="activePanel === 'speedtest'" />
       <TunPanel v-else-if="activePanel === 'tun'" />
       <AutomationPanel v-else-if="activePanel === 'automation'" />
       <HotkeyPanel v-else-if="activePanel === 'hotkey'" />

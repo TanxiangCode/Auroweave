@@ -162,7 +162,7 @@ function sizeLabel(bytes: number): string {
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
+    <div v-if="visible" class="modal-backdrop">
       <div class="modal-card glass-effect editor-modal">
         <div class="modal-header">
           <h3>编辑当前内核配置</h3>
