@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0A1128"/>
+      <stop offset="0.62" stop-color="#111A40"/>
+      <stop offset="1" stop-color="#231B55"/>
+    </linearGradient>
+    <radialGradient id="aur" cx="0.26" cy="0.02" r="0.85">
+      <stop offset="0" stop-color="#14506B" stop-opacity="0.8"/>
+      <stop offset="0.5" stop-color="#0E2743" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#0A1128" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vio" cx="0.84" cy="0.99" r="0.75">
+      <stop offset="0" stop-color="#332472" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#141B44" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="sq"><rect width="1024" height="1024" rx="231"/></clipPath>
+  </defs>
+  <g clip-path="url(#sq)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#aur)"/>
+    <rect width="1024" height="1024" fill="url(#vio)"/>
+  </g>
+</svg>

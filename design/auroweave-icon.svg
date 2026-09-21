@@ -1,0 +1,61 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0A1128"/>
+      <stop offset="0.62" stop-color="#111A40"/>
+      <stop offset="1" stop-color="#231B55"/>
+    </linearGradient>
+    <radialGradient id="aur" cx="0.26" cy="0.02" r="0.85">
+      <stop offset="0" stop-color="#14506B" stop-opacity="0.8"/>
+      <stop offset="0.5" stop-color="#0E2743" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#0A1128" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vio" cx="0.84" cy="0.99" r="0.75">
+      <stop offset="0" stop-color="#332472" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#141B44" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="agrad" x1="0.16" y1="0.12" x2="0.8" y2="0.9">
+      <stop offset="0" stop-color="#F0F8FF"/>
+      <stop offset="0.16" stop-color="#9FE1FF"/>
+      <stop offset="0.36" stop-color="#4FA8FF"/>
+      <stop offset="0.58" stop-color="#7C5CF7"/>
+      <stop offset="0.82" stop-color="#B458E8"/>
+      <stop offset="1" stop-color="#EF7BC4"/>
+    </linearGradient>
+
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="30"/>
+    </filter>
+
+    <!-- 外发光裁剪 mask：A 字形以外才显示 glow -->
+    <mask id="outsideA">
+      <rect width="1024" height="1024" fill="white"/>
+      <g transform="translate(207, 212) scale(0.435)">
+        <path d="M28.33343505859375 0 521.3320922851562 1443H832.3375244140625V1141.6640625H725.0023193359375L388.6719970703125 0ZM307.66778564453125 328.9974365234375 386.33502197265625 579.333740234375H1070.3363647460938L1149.0036010742188 328.9974365234375ZM1067.6660766601562 0 731.6690673828125 1141.6640625V1443H935.3392944335938L1428.004638671875 0Z" fill="black"/>
+      </g>
+    </mask>
+
+    <clipPath id="sq"><rect width="1024" height="1024" rx="231"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#sq)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#aur)"/>
+    <rect width="1024" height="1024" fill="url(#vio)"/>
+
+    <!-- 外发光（只在字形外） -->
+    <g mask="url(#outsideA)">
+      <g transform="translate(207, 212) scale(0.435)">
+        <path d="M28.33343505859375 0 521.3320922851562 1443H832.3375244140625V1141.6640625H725.0023193359375L388.6719970703125 0ZM307.66778564453125 328.9974365234375 386.33502197265625 579.333740234375H1070.3363647460938L1149.0036010742188 328.9974365234375ZM1067.6660766601562 0 731.6690673828125 1141.6640625V1443H935.3392944335938L1428.004638671875 0Z"
+              fill="url(#agrad)" filter="url(#glow)" opacity="0.5"/>
+      </g>
+    </g>
+
+    <!-- 主体 -->
+    <g transform="translate(207, 212) scale(0.435)">
+      <path d="M28.33343505859375 0 521.3320922851562 1443H832.3375244140625V1141.6640625H725.0023193359375L388.6719970703125 0ZM307.66778564453125 328.9974365234375 386.33502197265625 579.333740234375H1070.3363647460938L1149.0036010742188 328.9974365234375ZM1067.6660766601562 0 731.6690673828125 1141.6640625V1443H935.3392944335938L1428.004638671875 0Z"
+            fill="url(#agrad)"/>
+    </g>
+  </g>
+</svg>
