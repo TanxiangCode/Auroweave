@@ -58,3 +58,24 @@ export async function listenSpeedTestProgress(
     callback(event.payload);
   });
 }
+
+export interface LatencyProgressPayload {
+  current_index: number;
+  total: number;
+  current_node: string;
+  delay: number;
+}
+
+/** 取消当前正在运行的批量延迟测试 */
+export async function cancelLatencyTest(): Promise<ApiResponse<void>> {
+  return await invokeWithTimeout("speedtest_cancel_latency");
+}
+
+/** 监听批量延迟测试实时进度事件 */
+export async function listenLatencyTestProgress(
+  callback: (payload: LatencyProgressPayload) => void
+): Promise<UnlistenFn> {
+  return await listen<LatencyProgressPayload>("latency-test-progress", (event) => {
+    callback(event.payload);
+  });
+}

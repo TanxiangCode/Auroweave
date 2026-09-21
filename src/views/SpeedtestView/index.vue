@@ -85,7 +85,7 @@ onMounted(() => {
 
     <!-- 批量测速确认 Modal -->
     <Teleport to="body">
-      <div v-if="showConfirmModal" class="modal-backdrop" @click.self="showConfirmModal = false">
+      <div v-if="showConfirmModal" class="modal-backdrop">
         <div class="modal-card glass-effect">
           <h3><BaseIcon name="AlertTriangle" :size="20" color="#f59e0b" /> 批量吞吐量测速确认</h3>
           <p>将对分组 <strong>「{{ activeGroupTag }}」</strong> 的 <strong>{{ currentNodes.length }}</strong> 个节点依次进行带宽测试。</p>

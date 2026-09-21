@@ -119,6 +119,7 @@ pub fn run() {
             commands::subscription::subscription_refresh,
             commands::subscription::subscription_activate,
             commands::subscription::subscription_inspect,
+            commands::subscription::custom_groups_apply,
             commands::subscription::ruleset_force_update,
             commands::subscription::ruleset_get_status,
             commands::settings::settings_get_all,
@@ -136,6 +137,7 @@ pub fn run() {
             commands::speedtest::speedtest_run_single,
             commands::speedtest::speedtest_run_batch,
             commands::speedtest::speedtest_cancel_batch,
+            commands::speedtest::speedtest_cancel_latency,
             commands::speedtest::speedtest_get_results,
             commands::speedtest::speedtest_get_history,
             // AI 服务解锁检测

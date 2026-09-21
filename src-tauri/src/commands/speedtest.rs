@@ -6,11 +6,32 @@ use crate::speedtest::scheduler::SpeedTestScheduler;
 use crate::speedtest::throughput::run_single_throughput_test_with_url;
 use crate::speedtest::ThroughputResult;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tracing::info;
 
-/// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试，使用配置的 Semaphore 动态并发）
+/// 批量延迟测试取消标志
+static LATENCY_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// 批量延迟测试实时进度事件负载
+#[derive(Clone, serde::Serialize)]
+pub struct LatencyProgressPayload {
+    pub current_index: usize,
+    pub total: usize,
+    pub current_node: String,
+    pub delay: u16,
+}
+
+/// 取消当前正在进行的批量延迟测速
+#[tauri::command]
+pub async fn speedtest_cancel_latency() -> Result<ApiResponse<()>, AppError> {
+    LATENCY_CANCELLED.store(true, Ordering::Relaxed);
+    info!("[speedtest] 收到取消批量延迟测试指令");
+    Ok(ApiResponse::ok(()))
+}
+
+/// 触发延迟测速（调用 ClashAPI /proxies/{tag}/delay 触发测试，使用配置的 Semaphore 动态并发，削峰平滑调度）
 ///
 /// 返回 HashMap<String, u16>：
 /// - delay > 0：测速成功，值为延迟毫秒数
@@ -22,7 +43,8 @@ pub async fn speedtest_run_latency(
     node_tags: Vec<String>,
 ) -> Result<ApiResponse<HashMap<String, u16>>, AppError> {
     let settings = crate::commands::settings::settings_get_internal(&app_handle);
-    let concurrency = (settings.latency_test_concurrency as usize).clamp(1, 100);
+    // 削峰限制：测延迟默认并发收敛在 16，上限 32，防止大批量随机子域并发轰炸触发公共 DNS 限流
+    let concurrency = (settings.latency_test_concurrency as usize).clamp(1, 32);
 
     let timeout_ms = settings.latency_test_timeout_ms.clamp(500, 30000);
     let test_url = if settings.latency_test_url.trim().is_empty() {
@@ -48,6 +70,13 @@ pub async fn speedtest_run_latency(
         ));
     }
 
+    // 重置取消标志
+    LATENCY_CANCELLED.store(false, Ordering::Relaxed);
+
+    // 测速前轻量刷新本地系统 DNS 缓存（环境自洁，杜绝旧客户端 Fake-IP 残留导致 15 秒假死）
+    crate::system::sysproxy::flush_system_dns_cache();
+
+    let total = node_tags.len();
     let clash_client = Arc::new(ClashApiClient::default());
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut join_set = tokio::task::JoinSet::new();
@@ -60,32 +89,70 @@ pub async fn speedtest_run_latency(
             if crate::core::parser::is_announcement_or_fake_node(&tag, None, None) {
                 return (tag, 0u16);
             }
-            // 错峰 sleep 在 acquire 之前——在 permit 临界区内睡觉会占用并发槽
-            // （原实现 300 节点浪费 ~30×15ms 槽位时间）
-            if idx > 0 && idx % 10 == 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+
+            // 平滑启动调度：每个节点按索引间隔 25ms 平滑推入（上限 2000ms），削平瞬时流量毛刺
+            let stagger_ms = (idx as u64 * 25).min(2000);
+            if stagger_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(stagger_ms)).await;
             }
+
+            // 检查是否已收到取消指令
+            if LATENCY_CANCELLED.load(Ordering::Relaxed) {
+                return (tag, 0u16);
+            }
+
             let _permit = sem.acquire().await.ok();
-            match client.get_node_delay(&tag, &url, timeout_ms).await {
-                Ok(delay) => (tag, delay),
+            if LATENCY_CANCELLED.load(Ordering::Relaxed) {
+                return (tag, 0u16);
+            }
+
+            let mut delay = match client.get_node_delay(&tag, &url, timeout_ms).await {
+                Ok(d) => d,
                 Err(e) => {
-                    log::debug!("[speedtest] 节点 [{}] 延迟测试失败: {}", tag, e);
-                    (tag, 0u16)
+                    log::debug!("[speedtest] 节点 [{}] 延迟测试初次失败: {}", tag, e);
+                    0u16
+                }
+            };
+
+            // 偶发抖动退避重试（若超时且未取消，等待 400ms 退避重试 1 次，过滤网络瞬态丢包）
+            if delay == 0 && !LATENCY_CANCELLED.load(Ordering::Relaxed) {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                if !LATENCY_CANCELLED.load(Ordering::Relaxed) {
+                    if let Ok(retry_d) = client.get_node_delay(&tag, &url, timeout_ms).await {
+                        delay = retry_d;
+                    }
                 }
             }
+
+            (tag, delay)
         });
     }
 
-
     let mut results = HashMap::new();
     let mut pending_records: Vec<(String, u16)> = Vec::new();
+    let mut current_index = 0;
+
     while let Some(res) = join_set.join_next().await {
         if let Ok((tag, delay)) = res {
+            current_index += 1;
+
+            // 实时向前端广播批量测延迟进度
+            let _ = app_handle.emit(
+                "latency-test-progress",
+                LatencyProgressPayload {
+                    current_index: current_index.min(total),
+                    total,
+                    current_node: tag.clone(),
+                    delay,
+                },
+            );
+
             // 持久化延迟历史（0=失败也留痕，可看节点存活趋势）——先攒批
             pending_records.push((tag.clone(), delay));
             results.insert(tag, delay);
         }
     }
+
     // 攒批写库：300 节点原逐条 fsync，合并为单事务（spawn_blocking 不阻塞 async worker）
     if !pending_records.is_empty() {
         tokio::task::spawn_blocking(move || {
@@ -114,7 +181,6 @@ pub async fn speedtest_run_latency(
         results.values().filter(|&&d| d == 0).count(),
         results.len()
     );
-
 
     Ok(ApiResponse::ok(results))
 }

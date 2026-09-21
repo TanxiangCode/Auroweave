@@ -10,8 +10,10 @@ import {
   runSingleThroughputTest,
   runBatchSpeedTest,
   cancelBatchSpeedTest,
+  cancelLatencyTest,
   getSpeedTestResults,
   listenSpeedTestProgress,
+  listenLatencyTestProgress,
   type BatchProgressPayload,
 } from "@/api/ipc/speedtest";
 import {
@@ -33,8 +35,10 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
   const testingLatencyNodes = ref<Set<string>>(new Set());
   // 是否正在进行批量/全局延迟测试（并发计数归零时才为 false）
   const isTestingLatency = ref(false);
+  // 批量测延迟进度
+  const latencyBatchProgress = ref<BatchProgressPayload | null>(null);
 
-  // 批量测速状态
+  // 批量吞吐量测速状态
   const isBatchTesting = ref(false);
   const batchProgress = ref<BatchProgressPayload | null>(null);
 
@@ -46,6 +50,7 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
   // 初始化监听
   let unlistenProgress: (() => void) | null = null;
+  let unlistenLatencyProgress: (() => void) | null = null;
 
   // init() 幂等哨兵：并发调用共享同一 Promise，防止重复注册事件监听
   let initPromise: Promise<void> | null = null;
@@ -91,6 +96,22 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
           }
         });
       }
+
+      if (!unlistenLatencyProgress) {
+        unlistenLatencyProgress = await listenLatencyTestProgress((payload) => {
+          latencyBatchProgress.value = {
+            current_index: payload.current_index,
+            total: payload.total,
+            current_node: payload.current_node,
+          };
+          if (payload.delay > 0) {
+            latencyMap.value = {
+              ...latencyMap.value,
+              [payload.current_node]: payload.delay,
+            };
+          }
+        });
+      }
     })().catch((e) => {
       // 初始化失败不应缓存失败的 Promise，允许下次重试
       initPromise = null;
@@ -109,6 +130,15 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     isTestingLatency.value = true;
     batchTags.forEach((tag) => testingLatencyNodes.value.add(tag));
     testingLatencyNodes.value = new Set(testingLatencyNodes.value);
+
+    // 批量测试（大于1个节点）时，初始化批量进度条
+    if (batchTags.length > 1) {
+      latencyBatchProgress.value = {
+        current_index: 0,
+        total: batchTags.length,
+        current_node: "正在准备测延迟...",
+      };
+    }
 
     try {
       const res = await runLatencyTest(groupTag, nodeTags);
@@ -143,8 +173,16 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
       if (activeLatencyTests <= 0) {
         activeLatencyTests = 0; // 容错：异常路径下防止负数
         isTestingLatency.value = false;
+        latencyBatchProgress.value = null;
       }
     }
+  }
+
+  /** 取消批量延迟测试 */
+  async function cancelLatencyBatch() {
+    latencyBatchProgress.value = null;
+    const res = await cancelLatencyTest();
+    return res;
   }
 
   /** 单节点吞吐量测试 */
@@ -209,11 +247,13 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     testingNodes,
     testingLatencyNodes,
     isTestingLatency,
+    latencyBatchProgress,
     isBatchTesting,
     batchProgress,
     batchCancelled,
     init,
     testLatency,
+    cancelLatencyBatch,
     testSingleThroughput,
     startBatchTest,
     cancelBatch,

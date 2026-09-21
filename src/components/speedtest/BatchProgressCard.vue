@@ -61,36 +61,54 @@ if (props.progress && props.progress.total === 0) {
 .batch-progress-card {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
-  margin-bottom: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .progress-info {
   display: flex;
-  gap: var(--space-4);
+  align-items: center;
+  gap: var(--space-2);
   flex-shrink: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .progress-info strong {
   color: var(--accent-cyan-vivid);
-  max-width: 200px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
 }
 
 .progress-bar-bg {
   flex: 1;
+  min-width: 40px;
+  height: 6px;
+  background: var(--bg-surface-elevated, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-full, 9999px);
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan-vivid), var(--accent-blue-vivid, #3b82f6));
+  border-radius: var(--radius-full, 9999px);
+  transition: width 0.2s ease-out;
 }
 
 .btn-cancel {
   flex-shrink: 0;
-  padding: 5px 14px;
-  font-size: var(--text-xs);
+  padding: 3px 8px;
+  font-size: 11px;
   font-weight: var(--weight-semibold);
   color: var(--status-danger);
   background: transparent;
