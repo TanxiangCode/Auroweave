@@ -36,29 +36,34 @@ export function formatBytes(bytes: number, fractionDigits: 1 | 2 = 2): string {
 }
 
 /**
- * 将比特率（bps）格式化为带单位的可读速率字符串
+ * 将实时速率（字节/秒）格式化为带单位的可读字符串
  *
- * 非有限值（NaN/Infinity）与非正数（0/负数）统一返回 "0 bps"，
+ * 后端 traffic 快照的 download_speed/upload_speed 语义为字节/秒
+ * （traffic_monitor.rs：Clash API connections 字节 delta / 采集周期），
+ * 全站实时速率展示（首页 SpeedChart / 连接审计页）统一走本函数，
+ * 按 1024 字节进制输出 KB/s / MB/s（与 formatThroughputCompact 同口径）
+ *
+ * 非有限值（NaN/Infinity）与非正数（0/负数）统一返回 "0 KB/s"，
  * 防止 Math.log 产生 NaN 或单位索引越界输出 "NaN undefined"
  *
- * @param bps - 每秒比特数
- * @returns 格式化后的速率字符串，如 "1.50 Mbps"
+ * @param bytesPerSec - 每秒字节数
+ * @returns 格式化后的速率字符串，如 "1.50 MB/s"
  *
  * @example
- * formatSpeed(0)          // "0 bps"
- * formatSpeed(-1)         // "0 bps"
- * formatSpeed(NaN)        // "0 bps"
- * formatSpeed(1000000)   // "1.00 Mbps"
+ * formatSpeed(0)          // "0 KB/s"
+ * formatSpeed(-1)         // "0 KB/s"
+ * formatSpeed(NaN)        // "0 KB/s"
+ * formatSpeed(1048576)   // "1.00 MB/s"
  */
-export function formatSpeed(bps: number): string {
-  if (!Number.isFinite(bps) || bps <= 0) return "0 bps";
-  const k = 1000;
-  const sizes = ["bps", "Kbps", "Mbps", "Gbps"];
+export function formatSpeed(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "0 KB/s";
+  const k = 1024;
+  const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
   const i = Math.min(
-    Math.floor(Math.log(bps) / Math.log(k)),
+    Math.floor(Math.log(bytesPerSec) / Math.log(k)),
     sizes.length - 1
   );
-  return parseFloat((bps / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
 /**

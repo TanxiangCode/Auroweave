@@ -80,6 +80,7 @@ function getBadgeClass(badge: string): string {
 
 <style scoped>
 .semantic-rule-card {
+  flex-shrink: 0; /* 防止 flex 容器压缩行高（记录较多时被压成横线） */
   display: flex;
   justify-content: space-between;
   align-items: center;

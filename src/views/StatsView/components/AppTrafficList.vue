@@ -59,6 +59,7 @@ defineProps<{
 }
 
 .app-item {
+  flex-shrink: 0; /* 防止 flex 容器压缩行高 */
   display: flex;
   justify-content: space-between;
   align-items: center;

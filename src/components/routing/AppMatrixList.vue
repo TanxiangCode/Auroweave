@@ -489,6 +489,7 @@ onMounted(() => {
 }
 
 .process-card {
+  flex-shrink: 0; /* 防止 flex 容器压缩行高（进程较多时被压成横线） */
   display: flex;
   justify-content: space-between;
   align-items: center;

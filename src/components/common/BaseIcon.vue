@@ -77,6 +77,12 @@ import {
   Pause,
   Square,
   Sparkles,
+  // process-helper 图标库扩展：此前 Bot/Box/Gamepad2/Music 未注册，
+  // 全部静默落入 HelpCircle fallback，应用图标显示为问号
+  Bot,
+  Box,
+  Gamepad2,
+  Music,
 } from "lucide-vue-next";
 
 
@@ -170,6 +176,10 @@ const iconMap: Record<string, any> = {
   Pause,
   Square,
   Sparkles,
+  Bot,
+  Box,
+  Gamepad2,
+  Music,
 };
 
 

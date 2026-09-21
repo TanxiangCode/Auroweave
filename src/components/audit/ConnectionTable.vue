@@ -81,11 +81,11 @@
               </span>
             </td>
 
-            <!-- 累计传输 -->
+            <!-- 累计传输：下行/上行各占一行，行内不折行 -->
             <td class="td-traffic">
               <div class="traffic-cell">
-                <span class="traffic-down">↓ {{ formatBytes(rec.download_bytes) }}</span>
-                <span class="traffic-up">↑ {{ formatBytes(rec.upload_bytes) }}</span>
+                <span class="traffic-down" title="下行累计">↓ {{ formatBytes(rec.download_bytes) }}</span>
+                <span class="traffic-up" title="上行累计">↑ {{ formatBytes(rec.upload_bytes) }}</span>
               </div>
             </td>
 
@@ -102,7 +102,7 @@
                   title="查看详细溯源信息"
                   @click="$emit('select', rec)"
                 >
-                  
+                  <BaseIcon name="Eye" :size="12" /> 溯源
                 </button>
                 <button
                   v-if="isActive(rec.id)"
@@ -110,8 +110,9 @@
                   title="切断此连接"
                   @click="$emit('close', rec.id)"
                 >
-                  
+                  <BaseIcon name="X" :size="12" /> 切断
                 </button>
+                <span v-else class="action-closed-tag">已断开</span>
               </div>
             </td>
           </tr>
@@ -227,7 +228,9 @@ function getDuration(startTime: number): string {
 
 .table-wrap {
   flex: 1;
+  /* fixed 列宽布局下表格可能宽于视口：纵向滚动 + 必要时横向滚动 */
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .data-table {
@@ -235,6 +238,31 @@ function getDuration(startTime: number): string {
   border-collapse: collapse;
   font-size: 12px;
   text-align: left;
+  /* 列宽策略：窄窗口下浏览器默认按内容均摊，应用进程/出站/操作列被
+     目标主机长域名挤窄。显式锁定次要列宽，弹性列声明 min-width 让
+     表格按需溢出横向滚动而非压缩内容 */
+  table-layout: fixed;
+}
+
+/* 状态灯列 */
+.th-status, .td-status { width: 40px; }
+/* 应用进程列：保证双行文本不换行 */
+.th-app, .td-app { width: 170px; }
+/* 目标主机列：弹性收缩 + 内部省略号 */
+.th-dest, .td-dest { width: auto; min-width: 180px; }
+/* 出站节点列 */
+.th-outbound, .td-outbound { width: auto; min-width: 180px; }
+/* 匹配规则列 */
+.th-rule, .td-rule { width: auto; min-width: 130px; }
+/* 累计传输列 */
+.th-traffic, .td-traffic { width: 90px; }
+/* 持续时长列 */
+.th-duration, .td-duration { width: 60px; }
+/* 操作列 */
+.th-actions, .td-actions { width: 130px; }
+
+.table-wrap {
+  overflow-x: auto;
 }
 
 thead {
@@ -296,6 +324,15 @@ td {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.app-cell .table-app-icon {
+  flex-shrink: 0;
+}
+
+.app-info {
+  min-width: 0;
 }
 
 .app-icon {
@@ -390,6 +427,8 @@ td {
   gap: 1px;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  /* 下行/上行各占一行，行内不折行 */
+  white-space: nowrap;
 }
 
 .traffic-down { color: var(--accent-cyan-vivid); }
@@ -398,31 +437,52 @@ td {
 .duration-text {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
 }
 
 .action-btns {
   display: flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .btn-icon-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
-  padding: 4px 6px;
+  padding: 4px 7px;
   font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
   cursor: pointer;
   transition: all 0.15s;
+  white-space: nowrap;
 }
 
 .btn-icon-action:hover {
   background: rgba(255, 255, 255, 0.15);
   border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.btn-icon-action.danger {
+  color: rgba(248, 113, 113, 0.9);
 }
 
 .btn-icon-action.danger:hover {
   background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
+  color: #f87171;
+}
+
+/* 已断开行：无切断按钮时占位，保持列视觉平衡 */
+.action-closed-tag {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.25);
+  padding: 4px 7px;
+  white-space: nowrap;
 }
 </style>

@@ -4,7 +4,6 @@
       <div
         v-if="visible"
         class="modal-backdrop"
-        @click.self="handleCancel"
       >
         <div class="modal-card confirm-card" role="alertdialog" :aria-label="title">
           <div class="confirm-icon" :class="level">

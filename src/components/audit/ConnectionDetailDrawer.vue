@@ -1,10 +1,15 @@
 <template>
-  <div v-if="record" class="drawer-overlay" @click.self="$emit('close')">
+  <div v-if="record" class="drawer-overlay">
     <div class="drawer-panel glass-effect">
       <!-- 头部 -->
       <div class="drawer-header">
         <div class="header-main">
-          <span class="app-icon">{{ record.appIcon }}</span>
+          <span class="app-icon">
+            <!-- emoji 图标直接渲染文本；lucide 图标名走 BaseIcon（此前直接
+                 输出图标名字符串，页面上显示的是乱码方块） -->
+            <template v-if="isEmojiIcon(record.appIcon)">{{ record.appIcon }}</template>
+            <BaseIcon v-else :name="record.appIcon || 'Cpu'" :size="26" />
+          </span>
           <div class="header-titles">
             <h3>{{ record.appDisplayName }}</h3>
             <span class="header-sub" :title="record.domain">{{ record.domain }}</span>
@@ -40,7 +45,10 @@
           <div class="section-title"> 分流路由拓扑链</div>
           <div class="chain-flow">
             <div class="node-step">
-              <span class="step-icon">{{ record.appIcon }}</span>
+              <span class="step-icon">
+                <template v-if="isEmojiIcon(record.appIcon)">{{ record.appIcon }}</template>
+                <BaseIcon v-else :name="record.appIcon || 'Cpu'" :size="13" />
+              </span>
               <span class="step-name">{{ record.appDisplayName }}</span>
             </div>
             <span class="arrow-right">→</span>
@@ -174,6 +182,12 @@ function copyText(text: string) {
   toast.success("已复制到剪贴板", text);
 }
 
+/** process-helper 的 icon 字段混用 lucide 图标名与 emoji 字符，据此分流渲染 */
+function isEmojiIcon(icon?: string): boolean {
+  if (!icon) return false;
+  return /\p{Extended_Pictographic}/u.test(icon);
+}
+
 function getDuration(startTime: number): string {
   if (!startTime) return "0s";
   const sec = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
@@ -244,10 +258,19 @@ function handleClose(id: string) {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0; /* 允许标题区整体收缩，为右侧状态徽章让位 */
 }
 
 .app-icon {
   font-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.header-titles {
+  min-width: 0;
 }
 
 .header-titles h3 {
@@ -255,18 +278,27 @@ function handleClose(id: string) {
   font-size: 16px;
   font-weight: 700;
   color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .header-sub {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.5);
   font-family: monospace;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-right {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .status-badge {
@@ -274,6 +306,9 @@ function handleClose(id: string) {
   padding: 3px 8px;
   border-radius: 6px;
   font-weight: 600;
+  /* 域名过长时由左侧 header-titles 收缩让位，徽章本体永不折行压扁 */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .status-badge.online {

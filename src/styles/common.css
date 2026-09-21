@@ -23,7 +23,7 @@
    模态弹窗系统 (.modal-backdrop / .modal-card)
    用法：
    <Teleport to="body">
-     <div class="modal-backdrop" @click.self="close">
+     <div class="modal-backdrop">
        <div class="modal-card glass-effect">
          <div class="modal-header">...</div>
          <div class="modal-body">...</div>
@@ -34,6 +34,12 @@
        </div>
      </div>
    </Teleport>
+
+   约定：
+   - 遮罩不挂 @click.self 点外关闭——编辑到一半误点外部会丢内容，
+     关闭一律走显式按钮（X/取消/关闭）或 Esc
+   - 弹层类（下拉菜单等 Teleport 小浮层）z-index 须高于 99999，
+     否则被本遮罩盖住表现为"点击无反应"
    ============================================================ */
 .modal-backdrop {
   position: fixed;

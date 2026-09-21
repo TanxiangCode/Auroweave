@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="visible" class="command-palette-backdrop" @click.self="close">
+      <div v-if="visible" class="command-palette-backdrop">
         <div class="command-palette-modal glass-effect">
           <!-- 搜索框 -->
           <div class="search-bar">
@@ -17,6 +17,7 @@
               @keydown.esc="close"
             />
             <span class="hotkey-hint">ESC 退出</span>
+            <button class="close-x" title="关闭 (Esc)" @click="close">×</button>
           </div>
 
           <!-- 搜索结果列表 -->
@@ -236,12 +237,16 @@ const executeCommand = (item: CommandItem) => {
   close();
 };
 
-// 监听快捷键 Ctrl+Space 或 Cmd+Shift+P 呼出
+// 监听快捷键 Ctrl+Space 或 Cmd+Shift+P 呼出；Esc 全局兜底关闭
+// （输入框失焦时 @keydown.esc 收不到事件，须在 window 层拦截）
 const handleGlobalKeyDown = (e: KeyboardEvent) => {
   if ((e.ctrlKey || e.metaKey) && e.code === "Space") {
     e.preventDefault();
     if (visible.value) close();
     else open();
+  } else if (e.key === "Escape" && visible.value) {
+    e.preventDefault();
+    close();
   }
 };
 
@@ -308,6 +313,21 @@ defineExpose({ open, close });
   background: rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   color: rgba(255, 255, 255, 0.5);
+}
+
+.close-x {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: color 0.15s;
+}
+
+.close-x:hover {
+  color: #fff;
 }
 
 .result-list {

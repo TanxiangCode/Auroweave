@@ -6,11 +6,10 @@
  * 职责：全景仪表盘、多维过滤流控、三重视图协同与溯源抽屉交互
  */
 import { ref, computed } from "vue";
-import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useConnectionStore } from "@/stores/connection.store";
 import { useConnectionAudit } from "./hooks/useConnectionAudit";
 import AuditOverviewBanner from "@/components/audit/AuditOverviewBanner.vue";
-import AuditFilterToolbar from "@/components/audit/AuditFilterToolbar.vue";
+import AuditFilterToolbar, { type AuditSortMode } from "@/components/audit/AuditFilterToolbar.vue";
 import SemanticRuleCard from "@/components/audit/SemanticRuleCard.vue";
 import ConnectionTable from "@/components/audit/ConnectionTable.vue";
 import ConnectionDetailDrawer from "@/components/audit/ConnectionDetailDrawer.vue";
@@ -37,6 +36,12 @@ const protocolFilter = ref<"all" | "tcp" | "udp">("all");
 const autoPauseOnHover = ref(false);
 // 手动暂停标志：用户点击暂停按钮后，鼠标离开不再自动恢复
 const manuallyPaused = ref(false);
+// 历史会话显示开关：默认关闭（仅展示活跃连接），勾选后附加历史记录
+const showHistory = ref(false);
+// 排序方式（语义流/明细表共用）：default 保持原有"活跃优先+最新在前"顺序
+const sortMode = ref<AuditSortMode>("default");
+// 升降序切换：作用于 time/traffic/domain 排序键（default 模式下忽略）
+const sortAscending = ref(false);
 
 function handleTogglePause() {
   // 点击"暂停/恢复"按钮时切换手动暂停标志
@@ -57,11 +62,17 @@ const filteredRecords = computed(() => {
   const noStatus = statusFilter.value === "all";
   const noProtocol = protocolFilter.value === "all";
   const noSearch = !searchQuery.value.trim();
-  if (noStatus && noProtocol && noSearch) {
+  const showAll = showHistory.value;
+  if (noStatus && noProtocol && noSearch && showAll) {
     return allRecords.value;
   }
 
   let list = allRecords.value;
+
+  // 0. 活跃/历史开关：关闭时仅保留活跃连接
+  if (!showAll) {
+    list = list.filter((r) => activeIdSet.value.has(r.id));
+  }
 
   // 1. 状态胶囊过滤
   if (!noStatus) {
@@ -91,6 +102,37 @@ const filteredRecords = computed(() => {
   return list;
 });
 
+// 排序：叠加在过滤链之后。default 保持原顺序零开销（直接返回过滤结果）；
+// 其余模式浅拷贝后排序，避免每拍 WS 快照 mutate 原数组
+const sortedRecords = computed(() => {
+  const list = filteredRecords.value;
+  if (sortMode.value === "default") return list;
+
+  const dir = sortAscending.value ? 1 : -1;
+  const sorted = [...list];
+  switch (sortMode.value) {
+    case "time-desc":
+    case "time-asc":
+      // start 为连接建立时间戳；缺值（0）排末尾避免污染时间序
+      sorted.sort((a, b) =>
+        (a.start || 0) === (b.start || 0) ? 0 : (a.start || 0) < (b.start || 0) ? -1 : 1
+      );
+      if (dir === -1) sorted.reverse();
+      break;
+    case "traffic-desc": {
+      const trafficOf = (r: SemanticAuditRecord) => (r.download_bytes || 0) + (r.upload_bytes || 0);
+      sorted.sort((a, b) => trafficOf(a) - trafficOf(b));
+      if (dir === -1) sorted.reverse();
+      break;
+    }
+    case "domain-asc":
+      sorted.sort((a, b) => a.domain.localeCompare(b.domain, "zh-Hans-CN"));
+      if (dir === -1) sorted.reverse();
+      break;
+  }
+  return sorted;
+});
+
 function handleSelectRecord(record: SemanticAuditRecord) {
   selectedRecord.value = record;
 }
@@ -111,13 +153,8 @@ function handleMouseLeave() {
 
 <template>
   <div class="audit-view">
-    <!-- 页面头部 -->
-    <header class="page-header">
-      <div class="title-area">
-        <h1><BaseIcon name="ShieldCheck" :size="24" class="title-icon" /> 安全审计</h1>
-        <p class="subtitle">实时连接语义流、流量溯源与连通性检测；悬停暂停以细读链路</p>
-      </div>
-    </header>
+    <!-- 页面标题由全局顶栏 routeTitle 提供（Windows 无边框自绘标题栏同样常驻显示），
+         内容区不再重复渲染标题与副标题 -->
 
     <!-- 顶部紧凑全景指标看板与流控 -->
     <AuditOverviewBanner
@@ -133,14 +170,18 @@ function handleMouseLeave() {
       @clear-history="clearHistory"
     />
 
-    <!-- 多维过滤工具栏 (第二行整合：事件统计 + 悬停暂停开关 + 视图Tab)
-         组件内部在 raw 视图下自动隐藏搜索/过滤行（原始日志流不走过滤逻辑） -->
+    <!-- 多维过滤工具栏
+         第一行：视图 Tab + 事件统计（所有视图常驻）
+         第二行：搜索/状态/协议过滤 + 排序方式（仅语义流/明细表显示，raw/connectivity 整行隐藏） -->
     <AuditFilterToolbar
       v-model:search-query="searchQuery"
       v-model:status-filter="statusFilter"
       v-model:protocol-filter="protocolFilter"
       v-model:view-mode="viewMode"
       v-model:auto-pause-on-hover="autoPauseOnHover"
+      v-model:sort-mode="sortMode"
+      v-model:sort-ascending="sortAscending"
+      v-model:show-history="showHistory"
       :total-count="allRecords.length"
       :match-count="filteredRecords.length"
       :is-paused="isPaused"
@@ -155,13 +196,13 @@ function handleMouseLeave() {
         @mouseenter="handleMouseEnter"
         @mouseleave="handleMouseLeave"
       >
-        <div v-if="filteredRecords.length === 0" class="empty-feed glass-effect">
+        <div v-if="sortedRecords.length === 0" class="empty-feed glass-effect">
           {{ allRecords.length === 0 ? '尚无网络会话记录，发起请求或浏览网页时将实时显示...' : '未找到符合过滤条件的网络连接' }}
         </div>
 
         <div v-else class="feed-list">
           <SemanticRuleCard
-            v-for="rec in filteredRecords"
+            v-for="rec in sortedRecords"
             :key="rec.id"
             :record="rec"
             @select="handleSelectRecord"
@@ -172,7 +213,7 @@ function handleMouseLeave() {
       <!-- 视图 2：连接拓扑明细表 -->
       <ConnectionTable
         v-else-if="viewMode === 'table'"
-        :records="filteredRecords"
+        :records="sortedRecords"
         :active-id-set="activeIdSet"
         @select="handleSelectRecord"
         @close="handleCloseConnection"

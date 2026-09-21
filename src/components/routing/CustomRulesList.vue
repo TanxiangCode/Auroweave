@@ -132,7 +132,7 @@
               title="删除此条规则"
               @click="handleDeleteRule(rule.id)"
             >
-              
+              <BaseIcon name="Trash2" :size="14" />
             </button>
           </div>
         </div>
@@ -140,7 +140,7 @@
     </div>
 
     <!-- 添加/编辑规则模态弹窗 -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
+    <div v-if="showModal" class="modal-overlay">
       <div class="modal-card glass-effect">
         <div class="modal-header">
           <h3>{{ isEditing ? '编辑分流规则' : '添加自定义分流规则' }}</h3>
@@ -410,6 +410,8 @@ async function handleDeleteRule(id: string) {
   if (res.success) {
     rules.value = rules.value.filter((r) => r.id !== id);
     toast.success("规则已删除", "分流策略已同步热重载");
+  } else {
+    toast.error("删除规则失败", res.error || "未知异常，请重试");
   }
 }
 
@@ -548,6 +550,7 @@ onMounted(() => {
 }
 
 .rule-card {
+  flex-shrink: 0; /* 防止 flex 容器压缩行高（大量规则时被压成横线） */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -644,16 +647,21 @@ onMounted(() => {
 }
 
 .btn-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
   background: transparent;
   border: none;
-  font-size: 14px;
+  color: rgba(255, 255, 255, 0.35);
   cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.15s;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
 }
 
 .btn-delete:hover {
   opacity: 1;
+  color: var(--status-danger, #f87171);
 }
 
 .state-box {
