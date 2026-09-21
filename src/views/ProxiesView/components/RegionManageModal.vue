@@ -8,6 +8,8 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
  */
 import { useProxyStore } from "@/stores/proxy.store";
 import { useRegionRules } from "../hooks/useRegionRules";
+import { builtinRegionGroups } from "../utils/builtin-regions";
+import { ref, computed } from "vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
 
 defineProps<{
@@ -29,11 +31,16 @@ function matchTypeLabel(t: string): string {
   }
 }
 
+/** 快捷填充分洲：当前激活的洲（默认亚洲，避免 60+ 按钮平铺把弹窗撑高） */
+const activeContinent = ref(builtinRegionGroups[0]?.continent ?? "");
+const activeContinentRegions = computed(() => {
+  return builtinRegionGroups.find((g) => g.continent === activeContinent.value)?.regions ?? [];
+});
+
 const proxyStore = useProxyStore();
 const {
   editingRule,
   isNewRule,
-  builtinRegions,
   addNewRule,
   editRule,
   applyBuiltinRegion,
@@ -44,7 +51,7 @@ const {
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
+    <div v-if="visible" class="modal-backdrop">
       <div class="modal-card glass-effect region-modal">
         <h3><BaseIcon name="Globe" :size="16" /> 自定义区域管理</h3>
 
@@ -62,6 +69,22 @@ const {
               <option value="protocol">协议类型</option>
               <option value="unlock">解锁检测结果</option>
             </select>
+          </div>
+          <div class="form-row">
+            <label>分组类型</label>
+            <select
+              v-model="editingRule.group_type"
+              class="form-input"
+              @change="editingRule.group_type = ($event.target as HTMLSelectElement).value as any"
+            >
+              <option value="virtual">仅本地匹配（不进内核）</option>
+              <option value="selector">Selector 手动选择</option>
+              <option value="urltest">URLTest 自动优选</option>
+              <option value="balance">Balance 负载均衡</option>
+            </select>
+            <span v-if="editingRule.group_type && editingRule.group_type !== 'virtual'" class="form-hint">
+              将生成真实策略组 custom-{{ editingRule.name || '…' }} 并重启内核，可在节点列表中直接切换
+            </span>
           </div>
           <div v-if="editingRule.match_type === 'keyword'" class="form-row">
             <label>关键词列表</label>
@@ -113,12 +136,23 @@ const {
             按节点最近一次解锁检测结果匹配；从未检测的节点不会命中任何状态。
           </div>
 
-          <!-- 内置区域快捷填充 -->
+          <!-- 内置区域快捷填充（按洲分组，避免 60+ 按钮平铺撑高弹窗） -->
           <div v-if="isNewRule" class="builtin-regions">
             <span class="form-hint">快捷填充内置区域：</span>
+            <div class="builtin-tabs">
+              <button
+                v-for="g in builtinRegionGroups"
+                :key="g.continent"
+                class="builtin-tab"
+                :class="{ active: activeContinent === g.continent }"
+                @click="activeContinent = g.continent"
+              >
+                {{ g.continent }}
+              </button>
+            </div>
             <div class="builtin-tags">
               <button
-                v-for="region in builtinRegions"
+                v-for="region in activeContinentRegions"
                 :key="region.name"
                 class="builtin-tag"
                 @click="applyBuiltinRegion(region)"
@@ -194,6 +228,9 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* 规则多时限高滚动，防撑高弹窗 */
+  max-height: 45vh;
+  overflow-y: auto;
 }
 
 .rule-item {
@@ -273,9 +310,46 @@ h3 {
   gap: var(--space-2);
 }
 
-/* 解锁匹配双下拉行 */
+/* 洲切换 tab：一行紧凑胶囊，控制单屏按钮数量 */
+.builtin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.builtin-tab {
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.builtin-tab.active {
+  background: var(--accent-blue-glow);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  font-weight: var(--weight-semibold);
+}
+
+.rule-edit-form {
+  /* 修复表单拥挤：行间拉开 14px，label 与控件间 6px */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rule-edit-form .form-row {
+  gap: 6px;
+}
+
+/* 解锁匹配双下拉行：覆盖全局 form-row 的 column 方向，两个下拉并排 */
 .unlock-match-row {
   display: flex;
+  flex-direction: row;
   gap: var(--space-2);
 }
 

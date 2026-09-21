@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
+    <div v-if="visible" class="modal-backdrop">
       <div class="modal-card glass-effect">
         <h3>批量吞吐量测速确认</h3>
         <p>将对分组 <strong>「{{ groupTag }}」</strong> 的所有节点依次进行带宽测试。</p>

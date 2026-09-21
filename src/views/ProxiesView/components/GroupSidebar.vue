@@ -25,13 +25,16 @@ const props = defineProps<{
   selectedGroupTag: string;
   /** 当前活跃路由链路分组标签集合 */
   routingGroupTags: Set<string>;
+  /** 自定义分组规则总数（含无匹配节点的，用于空态提示） */
+  customRulesCount?: number;
 }>();
 
 const emit = defineEmits<{
   select: [groupTag: string];
   'edit-group': [groupTag: string];
   'manage-regions': [];
-}>();
+  'edit-rule': [groupTag: string];
+}>();;
 
 const groupSearch = ref("");
 
@@ -288,15 +291,15 @@ function getGroupTypeLabel(tag: string, type: string): string {
       </div>
     </div>
 
-    <!-- 自定义分组（本地匹配虚拟分组，不进内核） -->
-    <div v-if="customGroupItems.length > 0" class="group-section">
+    <!-- 自定义分组（真实策略组 + 本地匹配虚拟分组；空规则态给出提示避免「找不到」） -->
+    <div v-if="customGroupItems.length > 0 || (customRulesCount ?? 0) > 0" class="group-section">
       <div class="section-title-row">
         <span class="section-title">
           <BaseIcon name="Folder" :size="11" class="icon-gap" />
           自定义分组
         </span>
         <div class="section-actions">
-          <span class="section-count-badge">{{ customGroupItems.length }}</span>
+          <span v-if="customGroupItems.length > 0" class="section-count-badge">{{ customGroupItems.length }}</span>
           <button class="btn-add-region" @click="emit('manage-regions')" title="管理自定义分组规则">
             <SvgIcon name="plus" :size="11" />
           </button>
@@ -304,6 +307,9 @@ function getGroupTypeLabel(tag: string, type: string): string {
       </div>
 
       <div class="groups-list">
+        <div v-if="customGroupItems.length === 0" class="custom-empty-hint">
+          规则已保存，但暂无匹配节点（虚拟匹配需 proxy 主组节点池）——点击右上 + 编辑规则
+        </div>
         <div
           v-for="{ group, name } in customGroupItems"
           :key="group.tag"
@@ -318,14 +324,26 @@ function getGroupTypeLabel(tag: string, type: string): string {
               <div class="group-name-wrapper">
                 <span class="group-name" :title="name">{{ name }}</span>
               </div>
-              <span class="group-type-badge custom-badge">本地</span>
+              <!-- 真实策略组（custom- 前缀）显示内核类型；虚拟匹配组显示「本地」 -->
+              <span v-if="group.tag.includes('custom-')" class="group-type-badge custom-badge">
+                {{ group.type === 'urltest' ? '优选' : group.type === 'selector' ? '选择' : group.type }}
+              </span>
+              <span v-else class="group-type-badge custom-badge">本地</span>
             </div>
             <div class="group-footer-info">
-              <span v-if="group.proxies.length > 0" class="group-current-node muted">
+              <span v-if="group.now" class="group-current-node muted">{{ group.now }}</span>
+              <span v-else-if="group.proxies.length > 0" class="group-current-node muted">
                 {{ group.proxies.length }} 个节点
               </span>
               <span v-else class="group-current-node muted">空分组</span>
             </div>
+          </button>
+          <button
+            class="btn-edit-rule"
+            title="编辑该分组规则"
+            @click.stop="emit('edit-rule', group.tag)"
+          >
+            <SvgIcon name="edit" :size="11" />
           </button>
         </div>
       </div>
@@ -694,6 +712,33 @@ function getGroupTypeLabel(tag: string, type: string): string {
   border-color: var(--accent-cyan);
 }
 
+/* 自定义分组卡片右侧的编辑入口（hover 显示） */
+.btn-edit-rule {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 4px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.group-item-wrapper:hover .btn-edit-rule {
+  opacity: 1;
+}
+
+.btn-edit-rule:hover {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
 .icon-gap {
   margin-right: 4px;
 }
@@ -715,5 +760,15 @@ function getGroupTypeLabel(tag: string, type: string): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.custom-empty-hint {
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  background: var(--layer-1);
+  border: 1px dashed var(--border-normal);
+  border-radius: var(--radius-sm);
 }
 </style>

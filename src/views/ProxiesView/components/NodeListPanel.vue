@@ -89,26 +89,31 @@ const speedtestStore = useSpeedtestStore();
       : `搜索「${searchText}」无结果，试试其他关键词`"
   />
 
-  <!-- 节点列表 / 网格容器 -->
+  <!-- 节点列表 / 网格容器：data-node-tag 供"定位当前节点"滚动选择器使用 -->
   <div v-else class="nodes-scroll">
     <div class="nodes-container" :class="layoutMode">
-      <NodeCard
+      <div
         v-for="node in nodes"
         :key="node.tag"
-        :node-tag="node.tag"
-        :node-type="node.type"
-        :is-active="node.is_active"
-        :latency="speedtestStore.latencyMap[node.tag]"
-        :speed-bps="speedtestStore.throughputMap[node.tag]?.download_bps"
-        :is-selectable="isSelectable"
-        :layout-mode="layoutMode"
-        :is-pinned="pinnedSet.has(node.tag)"
-        @select="emit('select', node.tag)"
-        @test-latency="emit('test-latency', node.tag)"
-        @test-speed="emit('test-speed', node.tag)"
-        @check-unlock="emit('check-unlock', node.tag)"
-        @toggle-pin="emit('toggle-pin', node.tag)"
-      />
+        class="node-slot"
+        :data-node-tag="node.tag"
+      >
+        <NodeCard
+          :node-tag="node.tag"
+          :node-type="node.type"
+          :is-active="node.is_active"
+          :latency="speedtestStore.latencyMap[node.tag]"
+          :speed-bps="speedtestStore.throughputMap[node.tag]?.download_bps"
+          :is-selectable="isSelectable"
+          :layout-mode="layoutMode"
+          :is-pinned="pinnedSet.has(node.tag)"
+          @select="emit('select', node.tag)"
+          @test-latency="emit('test-latency', node.tag)"
+          @test-speed="emit('test-speed', node.tag)"
+          @check-unlock="emit('check-unlock', node.tag)"
+          @toggle-pin="emit('toggle-pin', node.tag)"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -142,6 +147,11 @@ const speedtestStore = useSpeedtestStore();
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* 定位标记插槽：不引入额外布局盒子 */
+.node-slot {
+  display: contents;
 }
 
 .state-tip {

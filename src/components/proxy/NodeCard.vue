@@ -549,3 +549,16 @@ function getLatencyColor(ms?: number): string {
 }
 </style>
 
+
+<style>
+/* 定位高亮闪烁（ProxiesView「定位」按钮运行时添加类，须全局样式） */
+.locate-flash {
+  animation: locate-flash-anim 1.2s ease;
+}
+
+@keyframes locate-flash-anim {
+  0% { box-shadow: 0 0 0 0 var(--accent-cyan-glow); border-color: var(--accent-cyan); }
+  30% { box-shadow: 0 0 14px 3px var(--accent-cyan-glow); border-color: var(--accent-cyan); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+</style>

@@ -3,7 +3,8 @@
  * 作者: TanXiang
  *
  * 职责：管理单节点解锁检测、批量解锁检测确认与启动
- * 与 useSpeedtestActions 同构，均含"临时切换出口"语义
+ * 检测走 test-core 独立测试内核（零打扰，不切当前出口）；
+ * selector 轮换仅为测试内核拉起失败时的降级路径
  */
 import { ref, computed, type Ref, type ComputedRef } from "vue";
 import { useUnlockStore } from "@/stores/unlock.store";
@@ -33,7 +34,7 @@ export function useUnlockActions(options: UseUnlockActionsOptions) {
 
   /** 单节点解锁检测（卡片按钮） */
   async function handleSingleUnlockCheck(nodeTag: string) {
-    toast.info("开始解锁检测", `正在检测: ${nodeTag}（将临时切换出口，结束后还原）`);
+    toast.info("开始解锁检测", `正在检测: ${nodeTag}（独立测试内核，不影响当前网络）`);
     try {
       const res = await unlockStore.checkSingle(nodeTag);
       if (res.success && res.data) {
@@ -65,7 +66,7 @@ export function useUnlockActions(options: UseUnlockActionsOptions) {
       return;
     }
     await unlockStore.startBatchCheck(selectedGroupTag.value, tags);
-    toast.info("已启动批量解锁检测", `${tags.length} 个节点将逐个检测，完成后自动还原出口`);
+    toast.info("已启动批量解锁检测", `${tags.length} 个节点将在独立测试内核中并发检测，不影响当前网络`);
   }
 
   /** 批量检测预估信息（并发 8 路：单节点耗时 / 并发数） */

@@ -11,9 +11,8 @@ import { useProxyStore } from "@/stores/proxy.store";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import { useUnlockStore } from "@/stores/unlock.store";
 import { useToast } from "@/composables/useToast";
-import BaseIcon from "@/components/common/BaseIcon.vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
-import BatchProgressCard from "@/components/speedtest/BatchProgressCard.vue";
+import BatchTaskDock from "@/components/speedtest/BatchTaskDock.vue";
 
 // 子组件
 import GroupSidebar from "./components/GroupSidebar.vue";
@@ -42,7 +41,7 @@ const toast = useToast();
 const {
   groups, loading, selectedGroupTag,
   systemGroups, regionGroups, customGroups,
-  isSelectorGroup, routingGroupTags, rawNodes,
+  isSelectorGroup, routingGroupTags, rawNodes, currentGroup,
   initSelectedGroup, handleGroupSelect,
 } = useProxyGroups();
 
@@ -75,6 +74,7 @@ const {
   showRegionModal,
   openRegionModal,
   closeRegionModal,
+  editRuleByTag,
 } = useRegionRules();
 
 /** 含 unlock 匹配的规则名集合（GroupSidebar 时效提示用） */
@@ -138,6 +138,37 @@ async function saveGroupConfig() {
   }
 }
 
+// ==================== 定位当前节点 ====================
+
+/** 当前分组内被选中的节点 tag（selector 组的 now / urltest 组的 now） */
+const activeNodeTag = computed(() => currentGroup.value?.now ?? "");
+
+/** 当前分组内是否有选中节点（定位按钮可用性） */
+const hasActiveNode = computed(() => {
+  if (!activeNodeTag.value) return false;
+  // 选中节点须在展示列表中（可能被搜索/筛选/订阅刷新移出）
+  return displayNodes.value.some((n) => n.tag === activeNodeTag.value);
+});
+
+/** 定位：滚动到当前选中节点卡片并高亮闪烁一拍 */
+function handleLocateActive() {
+  const tag = activeNodeTag.value;
+  if (!tag) return;
+  // NodeListPanel 内卡片带 data-node-tag 标记；grid 布局的
+  // content-visibility 不影响 offsetParent 定位
+  const el = document.querySelector<HTMLElement>(`[data-node-tag="${CSS.escape(tag)}"]`);
+  if (!el) {
+    if (!hasActiveNode.value) {
+      toast.warning("当前节点不在展示列表中", "可能已被搜索或筛选条件排除，试试清除过滤");
+    }
+    return;
+  }
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  const card = el.querySelector<HTMLElement>(".node-card") ?? el;
+  card.classList.add("locate-flash");
+  setTimeout(() => card.classList.remove("locate-flash"), 1200);
+}
+
 // ==================== 事件协调 ====================
 
 /** 分组切换：清除搜索 + 调用 Hook */
@@ -157,11 +188,20 @@ onMounted(() => {
 
 // KeepAlive 激活时：重新拉取分组与节点数据
 // 解决订阅刷新后 nodeMap 被清空但 ProxiesView 未重新挂载导致节点不显示的问题
+// 性能：原来五个 await 串行（mode→groups→speedtest→unlock→nodes），
+// 每次进入页面都叠加多轮 IPC 往返，路由切换动画期间阻塞渲染出现明显卡顿。
+// 现在：分组数据先行（渲染依赖它），测速/解锁 store 初始化与节点拉取并行，
+// 未完成的初始化不阻塞视图出现。
 onActivated(async () => {
+  // 事件监听注册型初始化（幂等，已有缓存直接返回）——后台并行，不阻塞渲染
+  const storesInit = Promise.all([
+    speedtestStore.init(),
+    unlockStore.init(),
+  ]).catch(() => {});
+
   await proxyStore.fetchGroups();
-  await speedtestStore.init();
-  await unlockStore.init();
   await initSelectedGroup();
+  await storesInit;
 
   // 定期刷新分组列表以更新 URLTest 组的 now 字段（当前选中节点）
   if (groupRefreshTimer) clearInterval(groupRefreshTimer);
@@ -181,29 +221,8 @@ onDeactivated(() => {
 
 <template>
   <div class="proxies-view">
-    <!-- 页面头部 -->
-    <header class="page-header">
-      <div class="title-area">
-        <h1><BaseIcon name="Layers" :size="24" class="title-icon" /> 代理节点</h1>
-        <p class="subtitle">分组浏览、切换出站与单点测速；收藏置顶常用节点</p>
-      </div>
-    </header>
-
-    <!-- 批量测速进度条（共享组件） -->
-    <BatchProgressCard
-      :visible="speedtestStore.isBatchTesting && !!speedtestStore.batchProgress"
-      :progress="speedtestStore.batchProgress!"
-      @cancel="speedtestStore.cancelBatch"
-    />
-
-    <!-- 批量解锁检测进度条（复用共享进度卡片，标题区分） -->
-    <BatchProgressCard
-      :visible="unlockStore.isBatchChecking && !!unlockStore.batchProgress"
-      :progress="unlockStore.batchProgress!"
-      action-label="解锁检测"
-      cancel-label="取消检测"
-      @cancel="unlockStore.cancelBatch"
-    />
+    <!-- 页面标题由全局顶栏 routeTitle 提供（Windows 无边框自绘标题栏同样常驻显示），
+         内容区不再重复渲染标题与副标题 -->
 
     <!-- 双栏布局区域 -->
     <div v-if="groups.length > 0" class="proxies-layout">
@@ -212,6 +231,7 @@ onDeactivated(() => {
         :system-groups="systemGroups"
         :region-groups="regionGroups"
         :custom-groups="customGroups"
+        :custom-rules-count="proxyStore.customGroupRules.length"
         :unlock-rule-names="unlockRuleNames"
         :recent-groups="proxyStore.recentGroups"
         :selected-group-tag="selectedGroupTag"
@@ -219,6 +239,7 @@ onDeactivated(() => {
         @select="onGroupSelect"
         @edit-group="openGroupEdit"
         @manage-regions="openRegionModal"
+        @edit-rule="editRuleByTag"
       />
 
       <!-- 右栏：节点内容区 -->
@@ -236,6 +257,7 @@ onDeactivated(() => {
           :is-testing-latency="speedtestStore.isTestingLatency"
           :is-unlock-checking="unlockStore.isBatchChecking"
           :unlock-filter="unlockFilter"
+          :has-active-node="hasActiveNode"
           @update:search-text="searchText = $event"
           @update:unlock-filter="unlockFilter = $event"
           @cycle-sort="cycleSortKey"
@@ -244,6 +266,7 @@ onDeactivated(() => {
           @run-latency="handleRunLatency"
           @show-batch-modal="showConfirmModal = true"
           @show-unlock-modal="showUnlockModal = true"
+          @locate-active="handleLocateActive"
           @refresh="proxyStore.fetchGroups"
         />
 
@@ -278,6 +301,9 @@ onDeactivated(() => {
         重试刷新
       </button>
     </div>
+
+    <!-- 批量任务聚合吸底 Dock（自适应横向并排，支持测延迟、测速与解锁检测，总高度锁定） -->
+    <BatchTaskDock />
 
     <!-- 弹窗区 -->
     <BatchSpeedConfirmModal
@@ -327,7 +353,10 @@ onDeactivated(() => {
 .proxies-layout {
   display: flex;
   gap: var(--space-4);
-  height: 100%;
+  /* flex:1 填满剩余高度；批量进度条出现在底部时自动让出空间
+     （原 height:100% 会把进度条挤出视口） */
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -343,7 +372,6 @@ onDeactivated(() => {
 /* 批量测速进度条 */
 .batch-progress-card {
   padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);

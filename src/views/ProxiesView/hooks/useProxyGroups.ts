@@ -36,10 +36,13 @@ export function useProxyGroups() {
     return groups.value.filter((g) => systemGroupTags.includes(g.tag));
   });
 
-  /** 地区分组（非系统分组的 urltest 类型） */
+  /** 地区分组（非系统分组、非自定义真实组的 urltest 类型） */
   const regionGroups = computed<ProxyGroup[]>(() => {
     return groups.value.filter(
-      (g) => !systemGroupTags.includes(g.tag) && g.type === "urltest"
+      (g) =>
+        !systemGroupTags.includes(g.tag) &&
+        !g.tag.startsWith("custom-") &&
+        g.type === "urltest"
     );
   });
 
@@ -49,27 +52,48 @@ export function useProxyGroups() {
   );
 
   /**
-   * 自定义虚拟分组视图：把匹配结果包装成 ProxyGroup 形态供 GroupSidebar 展示
-   * （tag 为 custom:{规则名}，前端本地聚合不进内核）
+   * 自定义分组视图（两部分合并）：
+   * 1. 真实策略组：内核 groups 中 tag 以 custom- 前缀的组（selector/urltest/balance，
+   *    由 settings.custom_group_rules 经 ConfigBuilder 生成，可直接切换/自动优选）
+   * 2. 虚拟匹配组：group_type=virtual 的规则在前端对 proxy 主组节点池本地匹配，
+   *    tag 带 custom: 前缀（不进内核，不可切换内核选择）
    */
   const customGroups = computed<ProxyGroup[]>(() => {
-    if (proxyStore.customGroupRules.length === 0) return [];
-    // 全量节点池 = 主 selector 组的全部成员（自定义规则对该池做匹配）
-    const pool = proxyStore.nodeMap.get("proxy") ?? [];
-    if (pool.length === 0) return [];
-    const grouped = proxyStore.applyCustomGroups(pool);
     const out: ProxyGroup[] = [];
-    for (const rule of proxyStore.customGroupRules) {
-      if (!rule.enabled) continue;
-      // "其他" 分桶不属于任何规则，跳过
-      const nodes = grouped.get(rule.name);
-      if (!nodes) continue;
-      out.push({
-        tag: `${CUSTOM_GROUP_PREFIX}${rule.name}`,
-        type: "selector", // 仅用于展示层徽章；不可真实切换内核选择
-        proxies: nodes.map((n) => n.tag),
-        now: nodes.length > 0 ? `${nodes.length} 个节点` : undefined,
-      });
+
+    // 1) 真实组直接透传（保持内核顺序）
+    for (const g of groups.value) {
+      if (g.tag.startsWith("custom-")) out.push(g);
+    }
+    const realTags = new Set(out.map((g) => g.tag));
+
+    // 2) 虚拟规则组（本地匹配）。非 virtual 规则在真实组尚未生成时也兜底展示（标注未生效），
+    //    避免「切了类型后分组消失」的观感问题
+    if (proxyStore.customGroupRules.length > 0) {
+      // 全量节点池 = 主 selector 组的全部成员（自定义规则对该池做匹配）
+      const pool = proxyStore.nodeMap.get("proxy") ?? [];
+      const grouped = pool.length > 0
+        ? proxyStore.applyCustomGroups(pool)
+        : new Map<string, ProxyNode[]>();
+      for (const rule of proxyStore.customGroupRules) {
+        if (!rule.enabled) continue;
+        const gt = rule.group_type ?? "virtual";
+        if (gt !== "virtual" && realTags.has(`custom-${rule.name}`)) continue; // 真实组已从内核透传
+        const nodes = grouped.get(rule.name) ?? [];
+        if (gt === "virtual" && nodes.length === 0) continue; // 虚拟组无匹配不显示（空态由侧栏提示）
+        const pending = gt !== "virtual";
+        out.push({
+          tag: `${CUSTOM_GROUP_PREFIX}${rule.name}`,
+          type: "selector", // 仅用于展示层徽章；不可真实切换内核选择
+          proxies: nodes.map((n) => n.tag),
+          now:
+            nodes.length > 0
+              ? `${nodes.length} 个节点`
+              : pending
+                ? "未生效 · 无匹配节点"
+                : undefined,
+        });
+      }
     }
     return out;
   });
@@ -131,12 +155,23 @@ export function useProxyGroups() {
   /** 初始化：从 URL query 或首个分组确定选中分组，保留已有选择 */
   async function initSelectedGroup() {
     if (groups.value.length > 0) {
+      // 虚拟自定义分组依赖 proxy 主组节点池做本地匹配，未加载过则预取，
+      // 否则新增自定义分组后侧栏永远不出现（修复「添加分组后找不到」）
+      if (!proxyStore.nodeMap.get("proxy")) {
+        try {
+          await proxyStore.fetchGroupNodes("proxy");
+        } catch {
+          // 预取失败不阻塞分组初始化（如 proxy 组尚未就绪），下次选中时自然加载
+        }
+      }
       const qGroup = route.query.group as string;
       const qExists = qGroup && groups.value.some((g) => g.tag === qGroup);
       const currentExists = selectedGroupTag.value &&
         (isCustomGroup.value
           ? customGroups.value.some((g) => g.tag === selectedGroupTag.value)
-          : groups.value.some((g) => g.tag === selectedGroupTag.value));
+          : selectedGroupTag.value.startsWith("custom-")
+            ? groups.value.some((g) => g.tag === selectedGroupTag.value)
+            : groups.value.some((g) => g.tag === selectedGroupTag.value));
 
       if (qExists) {
         selectedGroupTag.value = qGroup;

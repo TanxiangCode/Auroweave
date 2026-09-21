@@ -9,9 +9,11 @@ import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode, getProxyM
 import { RECENT_GROUPS_MAX } from "@/constants";
 import { useToast } from "@/composables/useToast";
 import { useUnlockStore } from "@/stores/unlock.store";
+import { useSettingsStore } from "@/stores/settings.store";
 
 export const useProxyStore = defineStore("proxy", () => {
   const toast = useToast();
+  const settingsStore = useSettingsStore();
   // ---- 状态 ----
   const groups = ref<ProxyGroup[]>([]);
   /** 各分组的节点缓存 key=groupTag */
@@ -20,46 +22,76 @@ export const useProxyStore = defineStore("proxy", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  // ---- 自定义分组规则（从 localStorage 持久化） ----
+  // ---- 自定义分组规则（settings.json 为真相源；localStorage 仅旧数据迁移兼容） ----
   const customGroupRules = ref<CustomGroupRule[]>([]);
 
   function loadCustomGroupRules() {
     try {
+      // 迁移策略：settings.custom_group_rules 非空则优先（后端生成真实组依赖它）；
+      // 否则读旧版 localStorage 数据并回写 settings 完成一次性迁移
+      const fromSettings = settingsStore.settings.custom_group_rules;
+      if (Array.isArray(fromSettings) && fromSettings.length > 0) {
+        customGroupRules.value = fromSettings as CustomGroupRule[];
+        return;
+      }
       const stored = localStorage.getItem("auroweave_custom_group_rules");
       if (stored) {
         customGroupRules.value = JSON.parse(stored);
+        if (customGroupRules.value.length > 0) {
+          void syncRulesToSettings();
+        }
       }
     } catch (e) {
       console.error("加载自定义分组规则失败:", e);
     }
   }
 
-  function saveCustomGroupRules() {
+  function saveCustomGroupRules(): Promise<void> {
     localStorage.setItem("auroweave_custom_group_rules", JSON.stringify(customGroupRules.value));
+    return syncRulesToSettings();
   }
 
-  function addCustomGroupRule(rule: Omit<CustomGroupRule, "id">) {
+  /**
+   * 规则同步到 settings.json（后端 ConfigBuilder 生成真实策略组的数据源）。
+   * 返回 Promise 供「保存后立即重建内核」的调用方 await，消除写配置与重建的竞态。
+   */
+  function syncRulesToSettings(): Promise<void> {
+    return settingsStore
+      .updateSettings({ custom_group_rules: JSON.parse(JSON.stringify(customGroupRules.value)) })
+      .then((res) => {
+        if (!res.success) {
+          toast.error("自定义分组规则保存失败", res.error ?? "未知错误");
+        }
+      })
+      .catch((e) => {
+        console.error("同步自定义分组规则到 settings 失败:", e);
+        toast.error("自定义分组规则保存失败", String(e));
+      });
+  }
+
+  function addCustomGroupRule(rule: Omit<CustomGroupRule, "id">): Promise<void> {
     const newRule: CustomGroupRule = {
       ...rule,
       id: Date.now().toString(),
     };
     customGroupRules.value.push(newRule);
     customGroupRules.value.sort((a, b) => a.order - b.order);
-    saveCustomGroupRules();
+    return saveCustomGroupRules();
   }
 
-  function updateCustomGroupRule(rule: CustomGroupRule) {
+  function updateCustomGroupRule(rule: CustomGroupRule): Promise<void> {
     const idx = customGroupRules.value.findIndex((r) => r.id === rule.id);
     if (idx !== -1) {
       customGroupRules.value[idx] = rule;
       customGroupRules.value.sort((a, b) => a.order - b.order);
-      saveCustomGroupRules();
+      return saveCustomGroupRules();
     }
+    return Promise.resolve();
   }
 
-  function deleteCustomGroupRule(id: string) {
+  function deleteCustomGroupRule(id: string): Promise<void> {
     customGroupRules.value = customGroupRules.value.filter((r) => r.id !== id);
-    saveCustomGroupRules();
+    return saveCustomGroupRules();
   }
 
   /** 根据自定义规则对所有节点进行分组返回 */
@@ -204,7 +236,9 @@ export const useProxyStore = defineStore("proxy", () => {
   }
 
   async function fetchGroups() {
-    await syncProxyMode();
+    // mode 同步与分组拉取并行：串行时进入代理页要等两次 HTTP 往返
+    // （/configs + /proxies）叠加完成才进入 loading，加剧路由切换卡顿
+    const modeSync = syncProxyMode();
     loading.value = true;
     error.value = null;
     try {
@@ -243,6 +277,9 @@ export const useProxyStore = defineStore("proxy", () => {
       }
     } finally {
       loading.value = false;
+      // 等待并行的 mode 同步收尾（吞错：mode 失败不阻塞分组渲染，
+      // syncProxyMode 内部已兜底 direct）
+      modeSync.catch(() => {});
     }
   }
 
@@ -405,6 +442,7 @@ export const useProxyStore = defineStore("proxy", () => {
     changeProxyMode,
     recordGroupUsage,
     loadCustomGroupRules,
+    syncRulesToSettings,
     addCustomGroupRule,
     updateCustomGroupRule,
     deleteCustomGroupRule,

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import BaseIcon from "@/components/common/BaseIcon.vue";
 /**
- * 节点工具栏 (升级版)
+ * 节点工具栏 (双行版)
  * 作者: TanXiang
  *
- * 包含：搜索过滤、排序切换、Grid/List 视图模式切换、测延迟 (带加载态)、批量测速、刷新
+ * 第一行：分组标题 + 节点数（左） / 搜索框（右）
+ * 第二行：排序、视图切换、解锁筛选、定位当前节点、测延迟、批量测速、解锁检测、刷新
  */
 import SvgIcon from "@/components/common/SvgIcon.vue";
 import type { NodeSortConfig } from "@/types";
@@ -33,12 +34,15 @@ withDefaults(
     isUnlockChecking?: boolean;
     /** 服务筛选状态（空串=未筛选） */
     unlockFilter?: string;
+    /** 当前分组内是否有选中节点（定位按钮可用性） */
+    hasActiveNode?: boolean;
   }>(),
   {
     viewMode: "grid",
     isTestingLatency: false,
     isUnlockChecking: false,
     unlockFilter: "",
+    hasActiveNode: false,
   }
 );
 
@@ -52,12 +56,14 @@ const emit = defineEmits<{
   'toggle-view-mode': [mode: "grid" | "list"];
   refresh: [];
   'update:unlockFilter': [value: string];
+  'locate-active': [];
 }>();
 </script>
 
 <template>
   <div class="nodes-toolbar">
-    <!-- 左侧：标题 + 节点状态统计 -->
+  <!-- 第一行：分组标题 + 统计（左） / 搜索框（右） -->
+  <div class="toolbar-row-primary">
     <div class="toolbar-left">
       <div class="group-title-row">
         <h2 class="group-title">{{ groupTag }}</h2>
@@ -69,134 +75,162 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <!-- 右侧：搜索 + 排序 + 视图切换 + 操作组 -->
-    <div class="toolbar-right">
-      <!-- 搜索框 -->
-      <div class="search-box">
-        <SvgIcon name="search" :size="12" class="search-icon" />
-        <input
-          :value="searchText"
-          @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
-          type="text"
-          placeholder="搜索节点名称/协议..."
-          class="search-input"
-        />
-        <button v-if="searchText" class="search-clear" @click="emit('update:searchText', '')">×</button>
-      </div>
+    <div class="search-box">
+      <SvgIcon name="search" :size="12" class="search-icon" />
+      <input
+        :value="searchText"
+        @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
+        type="text"
+        placeholder="搜索节点名称/协议..."
+        class="search-input"
+      />
+      <button v-if="searchText" class="search-clear" @click="emit('update:searchText', '')">×</button>
+    </div>
+  </div>
 
-      <!-- 排序切换按钮 -->
-      <div class="sort-button-group">
-        <button
-          class="btn-sort"
-          @click="emit('cycle-sort')"
-          :title="`当前按 ${sortLabels[sortConfig.key]} 排序，点击切换排序字段`"
-        >
-          <SvgIcon name="sort" :size="12" class="icon-gap" />
-          <span>{{ sortLabels[sortConfig.key] }}</span>
-        </button>
-        <button
-          class="btn-sort-dir"
-          @click.stop="emit('toggle-sort-order')"
-          :title="sortConfig.order === 'asc' ? '升序 (点击切换为降序)' : '降序 (点击切换为升序)'"
-        >
-          {{ sortConfig.order === 'asc' ? '↑' : '↓' }}
-        </button>
-      </div>
-
-      <!-- 视图模式切换 (Grid / List) -->
-      <div class="view-mode-group">
-        <button
-          class="view-btn"
-          :class="{ active: viewMode === 'grid' }"
-          @click="emit('toggle-view-mode', 'grid')"
-          title="网格卡片视图"
-        >
-          ▦
-        </button>
-        <button
-          class="view-btn"
-          :class="{ active: viewMode === 'list' }"
-          @click="emit('toggle-view-mode', 'list')"
-          title="紧凑列表视图"
-        >
-          <BaseIcon name="List" :size="14" />
-        </button>
-      </div>
-
-      <!-- 解锁服务筛选片（按检测结果过滤节点列表） -->
-      <div class="unlock-filter-group">
-        <select
-          class="unlock-filter-select"
-          :value="unlockFilter"
-          title="按 AI 服务解锁状态筛选节点"
-          @change="emit('update:unlockFilter', ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">全部节点</option>
-          <option value="gemini:yes">Gemini 可用</option>
-          <option value="claude:yes">Claude 可用</option>
-          <option value="chatgpt:yes">ChatGPT 可用</option>
-          <option value="gemini:no">Gemini 封锁</option>
-          <option value="claude:no">Claude 封锁</option>
-        </select>
-      </div>
-
-      <div class="divider-vertical"></div>
-
-      <!-- 操作按钮组 -->
+  <!-- 第二行：过滤与操作工具链 -->
+  <div class="toolbar-row-actions">
+    <!-- 排序切换按钮 -->
+    <div class="sort-button-group">
       <button
-        class="btn-action ping"
-        :class="{ loading: isTestingLatency }"
-        :disabled="isTestingLatency"
-        @click="emit('run-latency')"
-        title="并发测试全部节点延迟"
+        class="btn-sort"
+        @click="emit('cycle-sort')"
+        :title="`当前按 ${sortLabels[sortConfig.key]} 排序，点击切换排序字段`"
       >
-        <span v-if="isTestingLatency" class="spinner-ring"></span>
-        <SvgIcon v-else name="bolt" :size="12" class="icon-gap" />
-        <span>{{ isTestingLatency ? '测试中...' : '测延迟' }}</span>
+        <SvgIcon name="sort" :size="12" class="icon-gap" />
+        <span>{{ sortLabels[sortConfig.key] }}</span>
       </button>
-
       <button
-        class="btn-action speed"
-        @click="emit('show-batch-modal')"
-        title="开启批量吞吐量下载测速"
+        class="btn-sort-dir"
+        @click.stop="emit('toggle-sort-order')"
+        :title="sortConfig.order === 'asc' ? '升序 (点击切换为降序)' : '降序 (点击切换为升序)'"
       >
-        <SvgIcon name="wifi" :size="12" class="icon-gap" />
-        <span>批量测速</span>
-      </button>
-
-      <button
-        class="btn-action unlock"
-        :class="{ loading: isUnlockChecking }"
-        :disabled="isUnlockChecking"
-        @click="emit('show-unlock-modal')"
-        title="批量检测 AI 服务解锁状态（Gemini/Claude/ChatGPT）"
-      >
-        <span v-if="isUnlockChecking" class="spinner-ring unlock"></span>
-        <BaseIcon v-else name="Sparkles" :size="12" class="icon-gap" />
-        <span>{{ isUnlockChecking ? '检测中...' : '解锁检测' }}</span>
-      </button>
-
-      <button
-        class="btn-action refresh"
-        @click="emit('refresh')"
-        title="刷新节点与策略组列表"
-      >
-        <SvgIcon name="refresh" :size="12" />
+        {{ sortConfig.order === 'asc' ? '↑' : '↓' }}
       </button>
     </div>
+
+    <!-- 视图模式切换 (Grid / List) -->
+    <div class="view-mode-group">
+      <button
+        class="view-btn"
+        :class="{ active: viewMode === 'grid' }"
+        @click="emit('toggle-view-mode', 'grid')"
+        title="网格卡片视图"
+      >
+        ▦
+      </button>
+      <button
+        class="view-btn"
+        :class="{ active: viewMode === 'list' }"
+        @click="emit('toggle-view-mode', 'list')"
+        title="紧凑列表视图"
+      >
+        <BaseIcon name="List" :size="14" />
+      </button>
+    </div>
+
+    <!-- 解锁服务筛选片（按检测结果过滤节点列表） -->
+    <div class="unlock-filter-group">
+      <select
+        class="unlock-filter-select"
+        :value="unlockFilter"
+        title="按 AI 服务解锁状态筛选节点"
+        @change="emit('update:unlockFilter', ($event.target as HTMLSelectElement).value)"
+      >
+        <option value="">全部节点</option>
+        <option value="gemini:yes">Gemini 可用</option>
+        <option value="claude:yes">Claude 可用</option>
+        <option value="chatgpt:yes">ChatGPT 可用</option>
+        <option value="gemini:no">Gemini 封锁</option>
+        <option value="claude:no">Claude 封锁</option>
+      </select>
+    </div>
+
+    <!-- 定位当前节点 -->
+    <button
+      class="btn-action locate"
+      :disabled="!hasActiveNode"
+      @click="emit('locate-active')"
+      :title="hasActiveNode ? '滚动到当前选中节点' : '当前分组暂无选中节点'"
+    >
+      <BaseIcon name="Crosshair" :size="12" class="icon-gap" />
+      <span>定位</span>
+    </button>
+
+    <div class="divider-vertical"></div>
+
+    <!-- 操作按钮组 -->
+    <button
+      class="btn-action ping"
+      :class="{ loading: isTestingLatency }"
+      :disabled="isTestingLatency"
+      @click="emit('run-latency')"
+      title="并发测试全部节点延迟"
+    >
+      <span v-if="isTestingLatency" class="spinner-ring"></span>
+      <SvgIcon v-else name="bolt" :size="12" class="icon-gap" />
+      <span>{{ isTestingLatency ? '测试中...' : '测延迟' }}</span>
+    </button>
+
+    <button
+      class="btn-action speed"
+      @click="emit('show-batch-modal')"
+      title="开启批量吞吐量下载测速"
+    >
+      <SvgIcon name="wifi" :size="12" class="icon-gap" />
+      <span>批量测速</span>
+    </button>
+
+    <button
+      class="btn-action unlock"
+      :class="{ loading: isUnlockChecking }"
+      :disabled="isUnlockChecking"
+      @click="emit('show-unlock-modal')"
+      title="批量检测 AI 服务解锁状态（Gemini/Claude/ChatGPT）"
+    >
+      <span v-if="isUnlockChecking" class="spinner-ring unlock"></span>
+      <BaseIcon v-else name="Sparkles" :size="12" class="icon-gap" />
+      <span>{{ isUnlockChecking ? '检测中...' : '解锁检测' }}</span>
+    </button>
+
+    <button
+      class="btn-action refresh"
+      @click="emit('refresh')"
+      title="刷新节点与策略组列表"
+    >
+      <SvgIcon name="refresh" :size="12" />
+    </button>
+  </div>
   </div>
 </template>
 
 <style scoped>
+/* 双行容器 */
 .nodes-toolbar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 0;
+}
+
+/* 第一行：标题/统计 左 — 搜索 右（纯间距分隔，不画分隔线） */
+.toolbar-row-primary {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: var(--space-3);
   gap: var(--space-3);
   flex-wrap: wrap;
+  padding-bottom: var(--space-3);
+}
+
+/* 第二行：操作工具链 */
+.toolbar-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: var(--space-3);
 }
 
 .toolbar-left {
@@ -232,14 +266,7 @@ const emit = defineEmits<{
   color: var(--text-tertiary);
 }
 
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* 搜索框 */
+/* 搜索框（第一行右侧） */
 .search-box {
   display: flex;
   align-items: center;
@@ -250,6 +277,9 @@ const emit = defineEmits<{
   height: 30px;
   gap: 6px;
   transition: all var(--duration-fast);
+  min-width: 200px;
+  max-width: 320px;
+  flex: 0 1 auto;
 }
 
 .search-box:focus-within {
@@ -268,7 +298,7 @@ const emit = defineEmits<{
   outline: none;
   color: var(--text-primary);
   font-size: var(--text-xs);
-  width: 140px;
+  width: 100%;
 }
 
 .search-input::placeholder {
@@ -398,6 +428,11 @@ const emit = defineEmits<{
   border-color: var(--border-accent);
 }
 
+.btn-action.locate:hover:not(:disabled) {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
 .btn-action.ping:hover:not(:disabled) {
   color: var(--accent-orange);
   border-color: var(--accent-orange);
@@ -482,5 +517,3 @@ const emit = defineEmits<{
   margin-right: 4px;
 }
 </style>
-
-

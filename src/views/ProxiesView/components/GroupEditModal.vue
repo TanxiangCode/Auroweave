@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
+    <div v-if="visible" class="modal-backdrop">
       <div class="modal-card glass-effect">
         <h3><BaseIcon name="Sliders" :size="16" /> 编辑分组配置 — {{ groupTag }}</h3>
         <div class="edit-form">

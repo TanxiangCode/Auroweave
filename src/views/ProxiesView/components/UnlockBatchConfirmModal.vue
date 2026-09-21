@@ -22,7 +22,7 @@ const emit = defineEmits<{
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="modal-backdrop" @click.self="emit('close')">
+    <div v-if="visible" class="modal-backdrop">
       <div class="modal-card glass-effect">
         <h3>批量解锁检测确认</h3>
         <p>将对分组 <strong>「{{ groupTag }}」</strong> 的 {{ nodeCount }} 个节点依次检测 Gemini / Claude / ChatGPT 解锁状态与出口 IP 归属。</p>
