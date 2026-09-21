@@ -134,7 +134,7 @@ async function handleSave() {
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="visible && subscription" class="modal-backdrop" @click.self="emit('update:visible', false)">
+      <div v-if="visible && subscription" class="modal-backdrop">
         <div class="edit-modal glass-effect">
           <!-- 头部 -->
           <div class="modal-header">

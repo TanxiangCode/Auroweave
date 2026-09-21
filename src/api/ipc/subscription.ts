@@ -106,13 +106,15 @@ export async function updateSubscriptionMeta(
   );
 }
 
-/** 查看订阅完整配置（清洗前原始文本、清洗后节点列表、最终运行时配置） */
+/** 查看订阅完整配置（清洗前原始文本、清洗后节点列表、最终运行时配置）
+ *  大订阅需为全量节点构建 config.json，序列化耗时较长，显式放宽 IPC 超时 */
 export async function inspectSubscription(
   id: string
 ): Promise<ApiResponse<import("@/types").SubscriptionInspectData>> {
   return invokeWithTimeout<ApiResponse<import("@/types").SubscriptionInspectData>>(
     "subscription_inspect",
-    { id }
+    { id },
+    30_000
   );
 }
 

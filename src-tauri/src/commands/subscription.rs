@@ -488,12 +488,27 @@ async fn build_and_apply_config(
 
     let settings = crate::commands::settings::settings_get_internal(app_handle);
     let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(app_handle);
+    // unlock 匹配数据源：节点最近一次解锁检测结果（stats_db 持久化，启动期回填同源）
+    let unlock_state: std::collections::HashMap<String, serde_json::Value> =
+        crate::core::stats_db::get_latest_unlock_per_node()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|r| {
+                r.services
+                    .as_object()
+                    .map(|m| (r.node_tag, serde_json::Value::Object(m.clone())))
+            })
+            .collect();
     let config_builder = ConfigBuilder::new(outbounds)
         .with_ports(mixed_port, clash_api_port)
         .with_allow_lan(settings.allow_lan)
         .with_local_rule_sets(geosite_cn_path, geoip_cn_path)
         .with_group_configs(settings.group_configs.clone())
-        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache, settings.dns_smart_routing_v2);
+        .with_custom_groups(settings.custom_group_rules.clone())
+        .with_unlock_state(unlock_state)
+        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache, settings.dns_smart_routing_v2)
+        .with_bootstrap_doh(settings.dns_bootstrap_doh.clone())
+        .with_bootstrap_backup_doh(settings.dns_bootstrap_backup_doh.clone());
     let config_json = config_builder.build()?;
 
 
@@ -1133,12 +1148,31 @@ pub struct SubscriptionInspectData {
     pub name: String,
     pub format: String,
     pub node_count: usize,
-    /// 清洗前原始文本
+    /// 清洗前原始文本（Base64 订阅已解码为明文 URI 列表，供直接阅读）
     pub raw_content: String,
+    /// 解码前的原始缓存文本（仅当 raw_content 经 Base64 解码时提供，供对照/复制原始数据）
+    pub raw_content_original: Option<String>,
     /// 清洗解析后的出站节点列表
     pub parsed_nodes: Vec<crate::core::parser::ParsedOutbound>,
     /// 该订阅生效后的 sing-box 完整运行时配置 JSON
     pub final_config_json: String,
+}
+
+/// 原始数据明文化：Base64 (v2ray) 订阅解码为可读的 URI 列表再返回，
+/// 否则详情界面"清洗前原始数据"整屏都是 base64 乱码；解码失败时保持原文兜底。
+/// 返回 (展示用文本, 解码前的原始缓存文本 Option)
+fn decode_raw_for_display(raw: &str, fmt: SubscriptionFormat) -> (String, Option<String>) {
+    match fmt {
+        SubscriptionFormat::Base64Uri => {
+            match crate::core::parser::v2ray::flexible_base64_decode(raw.trim()) {
+                Some(decoded) if decoded.contains("://") && decoded != raw => {
+                    (decoded, Some(raw.to_string()))
+                }
+                _ => (raw.to_string(), None),
+            }
+        }
+        _ => (raw.to_string(), None),
+    }
 }
 
 /// 检查订阅详情：包含清洗前原始数据、清洗后节点与最终配置预览（支持全平台查看）
@@ -1156,7 +1190,7 @@ pub async fn subscription_inspect(
         None => return Ok(ApiResponse::err("找不到对应的订阅记录", 404)),
     };
 
-    let raw_content = load_raw_subscription(&id).unwrap_or_else(|| {
+    let raw_content_cached = load_raw_subscription(&id).unwrap_or_else(|| {
         if sub.source_type == "remote" {
             format!("# 暂无本地原始数据缓存\n# 订阅 URL: {}", sub.url)
         } else {
@@ -1164,7 +1198,11 @@ pub async fn subscription_inspect(
         }
     });
 
-    let (_, outbounds) = parse_subscription_content(&raw_content).unwrap_or((SubscriptionFormat::Unknown, Vec::new()));
+    let (fmt, outbounds) = parse_subscription_content(&raw_content_cached)
+        .unwrap_or((SubscriptionFormat::Unknown, Vec::new()));
+
+    let (raw_content, raw_content_original) = decode_raw_for_display(&raw_content_cached, fmt);
+
     let filtered_outbounds = apply_filter_rules(outbounds, sub.filter_rule.as_ref());
     let node_count = filtered_outbounds.len();
 
@@ -1174,7 +1212,9 @@ pub async fn subscription_inspect(
         .with_ports(mixed_port, clash_api_port)
         .with_allow_lan(settings.allow_lan)
         .with_group_configs(settings.group_configs.clone())
-        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache, settings.dns_smart_routing_v2);
+        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache, settings.dns_smart_routing_v2)
+        .with_bootstrap_doh(settings.dns_bootstrap_doh.clone())
+        .with_bootstrap_backup_doh(settings.dns_bootstrap_backup_doh.clone());
     let final_config = config_builder.build().unwrap_or_default();
     let final_config_json = serde_json::to_string_pretty(&final_config).unwrap_or_default();
 
@@ -1184,6 +1224,7 @@ pub async fn subscription_inspect(
         format: sub.format,
         node_count,
         raw_content,
+        raw_content_original,
         parsed_nodes: filtered_outbounds,
         final_config_json,
     }))
@@ -1224,6 +1265,38 @@ pub async fn subscription_update_meta(
         ApiResponse::ok(sub)
     } else {
         ApiResponse::err("找不到对应订阅", 404)
+    }
+}
+
+/// 自定义分组规则变更后调用：从订阅 raw 缓存重建节点列表 → 生成配置
+/// （含 selector/urltest/balance 真实自定义组）→ 内核按新配置重启。
+/// 不拉取远程订阅，仅本地重建。
+/// rules 由前端显式传入（当前生效的规则数组）：先同步落盘 settings 再重建，
+/// 消除「前端异步写 settings 与内核重建」的竞态（旧实现曾导致组不出现）。
+#[tauri::command]
+pub async fn custom_groups_apply(
+    app_handle: AppHandle,
+    rules: Option<Vec<serde_json::Value>>,
+) -> ApiResponse<u32> {
+    if let Some(rules) = &rules {
+        if let Err(e) = crate::commands::settings::update_settings_internal(
+            &app_handle,
+            serde_json::json!({ "custom_group_rules": rules }),
+        ) {
+            return ApiResponse::err(format!("规则落盘失败: {}", e), 500);
+        }
+    }
+    let aggregated = match collect_active_outbounds() {
+        Ok(a) => a,
+        Err(e) => return ApiResponse::err(e, 500),
+    };
+    if aggregated.is_empty() {
+        return ApiResponse::err("当前无活跃订阅节点，无法生成配置".to_string(), 400);
+    }
+    let sidecar_manager = crate::core::sidecar::SidecarManager::new();
+    match build_and_apply_config(&app_handle, aggregated, &sidecar_manager).await {
+        Ok(n) => ApiResponse::ok(n),
+        Err(e) => ApiResponse::err(e, 500),
     }
 }
 
@@ -1307,4 +1380,44 @@ pub fn start_auto_update_scheduler(app_handle: AppHandle) {
             crate::system::subscription_alert::check_subscription_alerts();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Base64 订阅的原始数据应解码为明文 URI 列表，并保留原始缓存供对照
+    #[test]
+    fn test_decode_raw_for_display_base64_subscription() {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        let plain = "vmess://AAAA\ntrojan://BBBB";
+        let b64 = STANDARD.encode(plain);
+        let (display, original) = decode_raw_for_display(&b64, SubscriptionFormat::Base64Uri);
+        assert_eq!(display, plain);
+        assert_eq!(original.as_deref(), Some(b64.as_str()));
+    }
+
+    /// 非 Base64 格式（Clash/singbox/明文 URI）应原样返回，不产生 original
+    #[test]
+    fn test_decode_raw_for_display_plain_content_untouched() {
+        let plain = "vmess://AAAA\ntrojan://BBBB";
+        let (display, original) = decode_raw_for_display(plain, SubscriptionFormat::Base64Uri);
+        assert_eq!(display, plain);
+        assert!(original.is_none());
+
+        let yaml = "proxies:\n  - name: a";
+        let (display, original) = decode_raw_for_display(yaml, SubscriptionFormat::ClashYaml);
+        assert_eq!(display, yaml);
+        assert!(original.is_none());
+    }
+
+    /// Base64 解码失败或解码结果不像 URI 列表时应保持原文兜底
+    #[test]
+    fn test_decode_raw_for_display_decode_failure_fallback() {
+        let garbage = "this is not base64 !!";
+        let (display, original) = decode_raw_for_display(garbage, SubscriptionFormat::Base64Uri);
+        assert_eq!(display, garbage);
+        assert!(original.is_none());
+    }
 }

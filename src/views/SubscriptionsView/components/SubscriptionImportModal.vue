@@ -160,7 +160,7 @@ async function handleSubmit() {
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="visible" class="modal-backdrop" @click.self="emit('update:visible', false)">
+      <div v-if="visible" class="modal-backdrop">
         <div class="import-modal glass-effect">
           <!-- 弹窗头部 -->
           <div class="modal-header">

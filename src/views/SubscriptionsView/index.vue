@@ -223,19 +223,11 @@ async function handleDelete(sub: Subscription) {
 
 <template>
   <div class="subscriptions-view-container">
-    <!-- 顶部状态栏与操作工具条 -->
+    <!-- 顶部状态栏与操作工具条
+         页面标题由全局顶栏 routeTitle 提供（Windows 无边框自绘标题栏同样常驻显示），
+         此处仅保留统计徽章与操作按钮 -->
     <header class="subscriptions-header glass-effect">
       <div class="header-left">
-        <div class="title-row">
-          <div class="icon-orb">
-            <BaseIcon name="Rss" :size="20" color="var(--accent-cyan-vivid)" />
-          </div>
-          <div>
-            <h1 class="page-title">订阅中心</h1>
-            <p class="page-subtitle">统一管理机场订阅源、流量消耗监控与全量节点池</p>
-          </div>
-        </div>
-
         <!-- 统计徽章群 -->
         <div class="stats-badges">
           <div class="stat-badge">
@@ -489,37 +481,7 @@ async function handleDelete(sub: Subscription) {
   display: flex;
   align-items: center;
   gap: 24px;
-}
-
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.icon-orb {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: radial-gradient(circle at center, color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent) 0%, rgba(0, 0, 0, 0) 70%);
-  border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: 0.5px;
-}
-
-.page-subtitle {
-  margin: 2px 0 0 0;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  min-width: 0;
 }
 
 .stats-badges {

@@ -40,19 +40,32 @@ const searchKeyword = ref("");
 /** 当前展开详情的节点 tag（以 tag 而非索引为键，过滤后展开态不漂移） */
 const expandedNodeTag = ref<string | null>(null);
 const isFullscreen = ref(false);
+/** 原始数据视图：默认显示解码后的明文（Base64 订阅），可切换查看原始缓存内容 */
+const showOriginalRaw = ref(false);
+
+/** 当前展示的原始文本：解码后明文 or 原始 Base64 缓存 */
+const displayRawContent = computed(() => {
+  if (!inspectData.value) return "";
+  if (showOriginalRaw.value && inspectData.value.raw_content_original) {
+    return inspectData.value.raw_content_original;
+  }
+  return inspectData.value.raw_content;
+});
 
 // 已拉取过详情的订阅 ID，避免同一订阅反复打开时重复请求
 let lastFetchedSubId: string | null = null;
 
 // 监听弹窗显示：仅由 visible 驱动重置 UI；
 // 订阅对象引用可能每次打开都变化，故比较 sub.id 判断是否需要重新拉取
+// （同时监听订阅 id：弹窗保持打开时切换订阅对象也能刷新数据）
 watch(
-  () => props.visible,
-  async (visible) => {
+  () => [props.visible, props.subscription?.id] as const,
+  async ([visible]) => {
     const sub = props.subscription;
     if (visible && sub) {
       searchKeyword.value = "";
       expandedNodeTag.value = null;
+      showOriginalRaw.value = false;
       activeTab.value = "nodes";
       if (sub.id !== lastFetchedSubId || !inspectData.value) {
         await fetchInspectData(sub.id);
@@ -151,7 +164,6 @@ function getProtocolBadgeClass(type: string) {
       v-if="visible"
       class="modal-backdrop"
       :class="{ fullscreen: isFullscreen }"
-      @click.self="closeModal"
     >
       <div class="inspect-modal" :class="{ fullscreen: isFullscreen }">
         <!-- 头部 -->
@@ -218,12 +230,23 @@ function getProtocolBadgeClass(type: string) {
           <!-- TAB 1: 原始文本 -->
           <div v-else-if="activeTab === 'raw'" class="tab-pane">
             <div class="pane-toolbar">
-              <span>原始文本字符数: {{ inspectData?.raw_content.length || 0 }} 字节</span>
-              <button class="btn-copy" @click="copyText(inspectData?.raw_content || '', '原始订阅文本')">
-                <BaseIcon name="Copy" :size="13" /> 复制原始数据
-              </button>
+              <span>原始文本字符数: {{ displayRawContent.length || 0 }} 字节</span>
+              <div class="toolbar-right">
+                <button
+                  v-if="inspectData?.raw_content_original"
+                  class="btn-copy"
+                  :title="showOriginalRaw ? '切换为解码后的明文内容' : '切换为解码前的原始 Base64 缓存'"
+                  @click="showOriginalRaw = !showOriginalRaw"
+                >
+                  <BaseIcon :name="showOriginalRaw ? 'FileText' : 'FileCode'" :size="13" />
+                  {{ showOriginalRaw ? "查看解码明文" : "查看原始 Base64" }}
+                </button>
+                <button class="btn-copy" @click="copyText(displayRawContent, showOriginalRaw ? '原始 Base64 数据' : '解码后的订阅明文')">
+                  <BaseIcon name="Copy" :size="13" /> 复制{{ showOriginalRaw ? "原始数据" : "解码明文" }}
+                </button>
+              </div>
             </div>
-            <div class="raw-content">{{ inspectData?.raw_content || "# 暂无原始数据" }}</div>
+            <div class="raw-content">{{ displayRawContent || "# 暂无原始数据" }}</div>
           </div>
 
           <!-- TAB 2: 解析后节点 -->
@@ -252,7 +275,7 @@ function getProtocolBadgeClass(type: string) {
             <div class="nodes-list">
               <div
                 v-for="(node, idx) in filteredNodes"
-                :key="node.tag"
+                :key="`${idx}-${node.tag}`"
                 class="node-row"
               >
                 <div class="node-summary" @click="toggleNodeExpand(node.tag)">
@@ -642,6 +665,10 @@ function getProtocolBadgeClass(type: string) {
 }
 
 .node-row {
+  /* 关键：禁止 flex 压缩。nodes-list 是固定高度纵向 flex 容器，
+     大订阅（数百节点）时子项默认 flex-shrink:1 会被压缩成 2px 横线，
+     必须保持自然行高让容器滚动 */
+  flex-shrink: 0;
   overflow: hidden;
   background: var(--layer-2);
   border: 1px solid var(--border-subtle);
