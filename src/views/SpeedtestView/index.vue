@@ -50,6 +50,7 @@ onMounted(() => {
     <BatchProgressCard
       :visible="speedtestStore.isBatchTesting && !!speedtestStore.batchProgress"
       :progress="speedtestStore.batchProgress!"
+      :cancelling="speedtestStore.batchCancelled"
       @cancel="speedtestStore.cancelBatch"
     />
 

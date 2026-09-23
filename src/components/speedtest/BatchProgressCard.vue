@@ -1,7 +1,7 @@
 <template>
   <div v-if="visible" class="batch-progress-card glass-effect">
     <div class="progress-info">
-      <span>{{ actionLabel }}: <strong>{{ progress.current_node }}</strong></span>
+      <span>{{ actionLabel }}: <strong>{{ cancelling ? "取消中，等待当前节点结束…" : progress.current_node }}</strong></span>
       <span>进度: {{ progress.current_index }} / {{ progress.total }}</span>
     </div>
     <div class="progress-bar-bg">
@@ -10,7 +10,9 @@
         :style="{ width: `${(progress.current_index / progress.total) * 100}%` }"
       ></div>
     </div>
-    <button class="btn-cancel" @click="emit('cancel')">{{ cancelLabel }}</button>
+    <button class="btn-cancel" :disabled="cancelling" @click="emit('cancel')">
+      {{ cancelling ? "取消中…" : cancelLabel }}
+    </button>
   </div>
 </template>
 
@@ -42,10 +44,13 @@ const props = withDefaults(
     actionLabel?: string;
     /** 取消按钮文案 */
     cancelLabel?: string;
+    /** 已发出取消请求、等待后端终止事件：按钮锁定并显示"取消中" */
+    cancelling?: boolean;
   }>(),
   {
     actionLabel: "正在测速",
     cancelLabel: "取消测速",
+    cancelling: false,
   }
 );
 
@@ -118,7 +123,12 @@ if (props.progress && props.progress.total === 0) {
   transition: all var(--duration-fast) var(--ease-out);
 }
 
-.btn-cancel:hover {
+.btn-cancel:hover:not(:disabled) {
   background: var(--accent-red-glow);
+}
+
+.btn-cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

@@ -144,11 +144,18 @@ export const useUnlockStore = defineStore("unlock", () => {
   ) {
     isBatchChecking.value = true;
     batchCancelled.value = false;
-    batchProgress.value = null;
+    // 立即铺一条 0/total 进度：test-core 按批（32 节点）探测，整批跑完才发首个
+    // 事件——留空会让进度条在数十秒内完全缺席，取消按钮也就无从点起
+    batchProgress.value = {
+      current_index: 0,
+      total: nodeTags.length,
+      current_node: "正在准备检测...",
+    };
     try {
       const res = await runUnlockCheckBatch(groupTag, nodeTags, [], withIp);
       if (!res.success) {
         isBatchChecking.value = false;
+        batchProgress.value = null;
         useToast().error(
           "批量解锁检测启动失败",
           res.error ?? "请确认 Sing-box 核心是否在运行。"
@@ -157,6 +164,7 @@ export const useUnlockStore = defineStore("unlock", () => {
       return res;
     } catch (e) {
       isBatchChecking.value = false;
+      batchProgress.value = null;
       useToast().error("批量解锁检测启动失败", "与后端通信异常，请稍后重试。");
       throw e;
     }

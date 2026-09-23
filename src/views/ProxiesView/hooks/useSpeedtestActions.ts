@@ -94,10 +94,12 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
   async function confirmBatchSpeedTest() {
     showConfirmModal.value = false;
     if (!selectedGroupTag.value) return;
-    await speedtestStore.startBatchTest(
-      selectedGroupTag.value,
-      rawNodes.value.map((n) => n.tag)
-    );
+    const tags = rawNodes.value.map((n) => n.tag);
+    if (tags.length === 0) {
+      toast.warning("该策略组内没有可测速的节点");
+      return;
+    }
+    await speedtestStore.startBatchTest(selectedGroupTag.value, tags);
     toast.info("已启动批量串行测速任务");
   }
 

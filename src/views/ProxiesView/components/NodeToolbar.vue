@@ -30,6 +30,8 @@ withDefaults(
     viewMode?: "grid" | "list";
     /** 是否正在测延迟 */
     isTestingLatency?: boolean;
+    /** 是否正在批量吞吐量测速 */
+    isBatchSpeedTesting?: boolean;
     /** 是否正在批量解锁检测 */
     isUnlockChecking?: boolean;
     /** 服务筛选状态（空串=未筛选） */
@@ -40,6 +42,7 @@ withDefaults(
   {
     viewMode: "grid",
     isTestingLatency: false,
+    isBatchSpeedTesting: false,
     isUnlockChecking: false,
     unlockFilter: "",
     hasActiveNode: false,
@@ -174,11 +177,14 @@ const emit = defineEmits<{
 
     <button
       class="btn-action speed"
+      :class="{ loading: isBatchSpeedTesting }"
+      :disabled="isBatchSpeedTesting"
       @click="emit('show-batch-modal')"
       title="开启批量吞吐量下载测速"
     >
-      <SvgIcon name="wifi" :size="12" class="icon-gap" />
-      <span>批量测速</span>
+      <span v-if="isBatchSpeedTesting" class="spinner-ring speed"></span>
+      <SvgIcon v-else name="wifi" :size="12" class="icon-gap" />
+      <span>{{ isBatchSpeedTesting ? '测速中...' : '批量测速' }}</span>
     </button>
 
     <button
@@ -451,6 +457,14 @@ const emit = defineEmits<{
   border-color: var(--accent-cyan);
 }
 
+.btn-action.speed.loading {
+  background: var(--layer-2);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  opacity: 0.9;
+  cursor: wait;
+}
+
 .btn-action.unlock:hover:not(:disabled) {
   color: var(--accent-green);
   border-color: var(--accent-green);
@@ -506,6 +520,11 @@ const emit = defineEmits<{
   animation: spin 0.8s linear infinite;
   margin-right: 6px;
   flex-shrink: 0;
+}
+
+.spinner-ring.speed {
+  border-color: rgba(34, 211, 238, 0.25);
+  border-top-color: var(--accent-cyan);
 }
 
 @keyframes spin {

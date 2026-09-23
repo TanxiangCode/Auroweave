@@ -18,6 +18,7 @@
         :progress="speedtestStore.batchProgress"
         action-label="正在测速"
         cancel-label="取消"
+        :cancelling="speedtestStore.batchCancelled"
         @cancel="speedtestStore.cancelBatch"
       />
 
@@ -28,6 +29,7 @@
         :progress="unlockStore.batchProgress"
         action-label="解锁检测"
         cancel-label="取消"
+        :cancelling="unlockStore.batchCancelled"
         @cancel="unlockStore.cancelBatch"
       />
     </div>

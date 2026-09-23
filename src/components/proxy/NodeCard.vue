@@ -76,7 +76,7 @@
         <button
           class="card-action-btn ping-btn"
           :class="{ active: isLatencyTesting }"
-          :disabled="isLatencyTesting"
+          :disabled="isLatencyTesting || latencyBatchLocked"
           title="单个节点延迟测试"
           @click.stop="$emit('test-latency', nodeTag)"
         >
@@ -87,7 +87,7 @@
         <button
           class="card-action-btn speed-btn"
           :class="{ active: isTesting }"
-          :disabled="isTesting"
+          :disabled="isTesting || speedBatchLocked"
           title="单个节点下行测速"
           @click.stop="$emit('test-speed', nodeTag)"
         >
@@ -99,7 +99,7 @@
         <button
           class="card-action-btn unlock-btn"
           :class="{ active: isUnlockChecking }"
-          :disabled="isUnlockChecking"
+          :disabled="isUnlockChecking || unlockBatchLocked"
           title="AI 服务解锁检测（Gemini/Claude/ChatGPT + 出口 IP），在独立测试内核中进行，不影响当前网络"
           @click.stop="$emit('check-unlock', nodeTag)"
         >
@@ -200,6 +200,15 @@ const unlockTitle = computed(() => {
   return parts.join(" · ");
 });
 
+/** 本卡片是否处于该任务的批次队列中：批次占用期锁住对应按钮，
+ *  避免单节点请求与批次抢占同一测试内核/出口轮换 */
+const speedBatchLocked = computed(() => speedtestStore.isBatchTesting);
+const latencyBatchLocked = computed(() => !!speedtestStore.latencyBatchProgress);
+const unlockBatchLocked = computed(() => unlockStore.isBatchChecking);
+
+/** 转圈态：本节点在该任务的在测集合中（测延迟批量会一次性登记全部排队节点）。
+ *  测速与解锁检测的 test-core 路径只在节点完成时发事件，没有可靠的
+ *  「本节点在飞」信号，故这两类批量期间只做上面的按钮锁定，不逐个转圈。 */
 const isTesting = computed(() => speedtestStore.testingNodes.has(props.nodeTag));
 const isLatencyTesting = computed(() => speedtestStore.testingLatencyNodes.has(props.nodeTag));
 const isUnlockChecking = computed(() => unlockStore.checkingNodes.has(props.nodeTag));

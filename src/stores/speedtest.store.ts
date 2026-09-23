@@ -209,7 +209,13 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
   async function startBatchTest(groupTag: string, nodeTags: string[]) {
     isBatchTesting.value = true;
     batchCancelled.value = false;
-    batchProgress.value = null;
+    // 立即铺一条 0/total 进度：批次首个节点结束前后端不发事件，
+    // 留空会让进度条（连带取消按钮）在整批首轮探测期间缺席
+    batchProgress.value = {
+      current_index: 0,
+      total: nodeTags.length,
+      current_node: "正在准备测速...",
+    };
     try {
       const res = await runBatchSpeedTest(groupTag, nodeTags);
       // Rust 端 run_batch 为 fire-and-forget：invoke 结果仅反映"启动是否成功"。
@@ -217,12 +223,14 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
       // 启动成功后 isBatchTesting 由终止事件复位。
       if (!res.success) {
         isBatchTesting.value = false;
+        batchProgress.value = null;
         useToast().error("批量测速启动失败", res.error ?? "请确认 Sing-box 核心是否在运行。");
       }
       return res;
     } catch (e) {
       // invoke 本身抛错（超时/后端异常）→ 批次未启动，复位并提示
       isBatchTesting.value = false;
+      batchProgress.value = null;
       useToast().error("批量测速启动失败", "与后端通信异常，请稍后重试。");
       throw e;
     }

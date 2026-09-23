@@ -255,6 +255,7 @@ onDeactivated(() => {
           :sort-labels="sortLabels"
           :view-mode="viewMode"
           :is-testing-latency="speedtestStore.isTestingLatency"
+          :is-batch-speed-testing="speedtestStore.isBatchTesting"
           :is-unlock-checking="unlockStore.isBatchChecking"
           :unlock-filter="unlockFilter"
           :has-active-node="hasActiveNode"
