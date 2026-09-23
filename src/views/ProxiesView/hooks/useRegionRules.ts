@@ -12,18 +12,22 @@ import type { CustomGroupRule } from "@/types";
 import { builtinRegions } from "../utils/builtin-regions";
 
 /**
+ * 弹窗状态提升为模块级单例：ProxiesView 与 RegionManageModal 各自调用本 Hook，
+ * 两侧必须读写同一份 editingRule，否则侧栏「编辑该分组规则」按钮只会在弹窗里
+ * 停在规则列表页，进不了编辑表单。
+ */
+const showRegionModal = ref(false);
+/** 当前编辑的规则 */
+const editingRule = ref<CustomGroupRule | null>(null);
+/** 是否为新增规则（vs 编辑已有规则） */
+const isNewRule = ref(false);
+
+/**
  * 自定义区域规则管理 Hook
  */
 export function useRegionRules() {
   const proxyStore = useProxyStore();
   const toast = useToast();
-
-  /** 区域管理弹窗可见性 */
-  const showRegionModal = ref(false);
-  /** 当前编辑的规则 */
-  const editingRule = ref<CustomGroupRule | null>(null);
-  /** 是否为新增规则（vs 编辑已有规则） */
-  const isNewRule = ref(false);
 
   /** 打开区域管理弹窗 */
   function openRegionModal() {
@@ -93,37 +97,93 @@ export function useRegionRules() {
     const removed = proxyStore.customGroupRules.find((r) => r.id === id);
     await proxyStore.deleteCustomGroupRule(id);
     toast.success("区域规则已删除");
-    if (removed && (removed.group_type ?? "virtual") !== "virtual") {
-      await rebuildIfRealGroups();
+    if (
+      removed &&
+      (removed.group_type ?? "virtual") !== "virtual" &&
+      (await rebuildIfRealGroups())
+    ) {
       toast.info("内核已重启", "对应自定义分组已从节点列表移除");
     }
   }
 
   /**
-   * 存在真实组类型规则时：invoke custom_groups_apply 并显式传规则（后端先落盘再重建），
-   * 确保自定义策略组进入内核且 settings.json 与前端状态一致
+   * 期望的真实组与内核现状不一致时：invoke custom_groups_apply 并显式传规则
+   * （后端先落盘再重建），确保自定义策略组进/出内核且 settings.json 与前端同步。
+   * 按"期望 vs 现状"而非"是否存在真实规则"判定——删除唯一的真实组时期望为空、
+   * 内核里却还挂着旧组，同样必须重启才能摘掉。返回是否实际重启过。
    */
-  async function rebuildIfRealGroups() {
+  async function rebuildIfRealGroups(): Promise<boolean> {
     const rules = proxyStore.customGroupRules;
-    const hasRealGroup = rules.some(
-      (r) => r.enabled && (r.group_type ?? "virtual") !== "virtual"
+    const desired = new Set(
+      rules
+        .filter((r) => r.enabled && (r.group_type ?? "virtual") !== "virtual")
+        .map((r) => `custom-${r.name}`)
     );
-    if (!hasRealGroup) return;
+    const current = new Set(kernelRealGroupTags());
+    if (
+      desired.size === current.size &&
+      [...desired].every((t) => current.has(t))
+    ) {
+      return false;
+    }
     try {
       const res: any = await invoke("custom_groups_apply", {
         rules: JSON.parse(JSON.stringify(rules)),
       });
       if (res?.success) {
-        toast.success(
-          "真实策略组已生成",
-          "内核已重启，自定义分组已可在节点列表中查看与切换"
-        );
-      } else {
-        toast.error("自定义分组生成失败", res?.error ?? "未知错误");
+        const settled = await waitRealGroupsInited();
+        if (settled) {
+          toast.success(
+            "真实策略组已生成",
+            "内核已重启，自定义分组已可在节点列表中查看与切换"
+          );
+        } else {
+          toast.warning(
+            "策略组未在内核中生成",
+            "该规则没有匹配到节点，或名称与既有分组冲突；列表中已标注「未生效」"
+          );
+        }
+        return true;
       }
+      toast.error("自定义分组生成失败", res?.error ?? "未知错误");
+      return false;
     } catch (e) {
       toast.error("自定义分组生成失败", e instanceof Error ? e.message : String(e));
+      return false;
     }
+  }
+
+  /** 内核里现有的自定义真实组 tag（custom- 前缀） */
+  function kernelRealGroupTags(): string[] {
+    return proxyStore.groups
+      .filter((g) => g.tag.startsWith("custom-"))
+      .map((g) => g.tag);
+  }
+
+  /**
+   * 内核重启后轮询分组列表，直到 custom- 前缀的真实自定义组与规则一致。
+   * 组的增删只存在于内核，不轮询则侧栏要等下一次 15s 静默刷新才更新
+   * （新建完就找不到的观感来源）。返回 false 表示始终不一致——
+   * 通常是规则无匹配节点（内核按设计跳过生成）。
+   */
+  async function waitRealGroupsInited(): Promise<boolean> {
+    const expected = new Set(
+      proxyStore.customGroupRules
+        .filter((r) => r.enabled && (r.group_type ?? "virtual") !== "virtual")
+        .map((r) => `custom-${r.name}`)
+    );
+    for (let i = 0; i < 10; i++) {
+      await proxyStore.refreshGroups();
+      const inKernel = kernelRealGroupTags();
+      if (
+        inKernel.length === expected.size &&
+        inKernel.every((t) => expected.has(t))
+      ) {
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
   }
 
   /**

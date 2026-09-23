@@ -480,13 +480,32 @@ impl ConfigBuilder {
             final_outbounds.push(group_json);
             custom_group_tags.push(group_tag);
         }
-        // 自定义组挂入 proxy 主组成员（尾部追加，Clash 面板可见可切换）
+        // 自定义组挂入 proxy 主组：插在其他策略组（auto / balance / {region}-auto）之后、
+        // 实体节点之前。尾部追加会让它沉在数百个成员末尾，面板里等同于看不见。
         if !custom_group_tags.is_empty() {
+            let policy_tags: std::collections::HashSet<String> = final_outbounds
+                .iter()
+                .filter(|o| {
+                    matches!(
+                        o.get("type").and_then(|t| t.as_str()),
+                        Some("selector") | Some("urltest")
+                    )
+                })
+                .filter_map(|o| o.get("tag").and_then(|t| t.as_str()).map(|s| s.to_string()))
+                .collect();
             for ob in final_outbounds.iter_mut() {
-                if ob.get("tag").and_then(|t| t.as_str()) == Some("proxy") {
-                    if let Some(arr) = ob.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
-                        arr.extend(custom_group_tags.iter().map(|t| serde_json::Value::String(t.clone())));
-                    }
+                if ob.get("tag").and_then(|t| t.as_str()) != Some("proxy") {
+                    continue;
+                }
+                if let Some(arr) = ob.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+                    let at = arr
+                        .iter()
+                        .position(|t| !policy_tags.contains(t.as_str().unwrap_or_default()))
+                        .unwrap_or(arr.len());
+                    arr.splice(
+                        at..at,
+                        custom_group_tags.iter().map(|t| serde_json::Value::String(t.clone())),
+                    );
                 }
             }
         }
@@ -1103,6 +1122,12 @@ mod tests {
         let proxy = outs.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some("proxy")).unwrap();
         let proxy_members = proxy.get("outbounds").and_then(|o| o.as_array()).unwrap();
         assert!(proxy_members.iter().any(|m| m.as_str() == Some("custom-日本优选")), "自定义组应挂入 proxy 主组");
+
+        // 自定义组须排在实体节点之前（与其他策略组同区），否则在数百成员的
+        // proxy 列表里沉底看不见
+        let custom_idx = proxy_members.iter().position(|m| m.as_str() == Some("custom-日本优选")).unwrap();
+        let node_idx = proxy_members.iter().position(|m| m.as_str() == Some("🇯🇵 日本-极速-001")).unwrap();
+        assert!(custom_idx < node_idx, "自定义组应排在实体节点之前");
     }
 
     #[test]
