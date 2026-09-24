@@ -17,6 +17,22 @@ const VALID_RULE_TYPES: [&str; 5] = [
     "ip_cidr",
 ];
 
+/// 从指定配置提取真实存在的 outbound tag，供保存校验与配置重建共用。
+/// 不预置 direct/block/proxy：调用方必须以当前配置实际声明为准。
+pub fn outbound_tags_from_config(config: &serde_json::Value) -> std::collections::HashSet<String> {
+    config
+        .get("outbounds")
+        .and_then(|outbounds| outbounds.as_array())
+        .map(|outbounds| {
+            outbounds
+                .iter()
+                .filter_map(|outbound| outbound.get("tag").and_then(|tag| tag.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// 读取 config.json 提取所有出站 tag 集合，用于校验 outbound_tag 合法性
 ///
 /// 校验策略：
@@ -24,18 +40,14 @@ const VALID_RULE_TYPES: [&str; 5] = [
 /// 2. 读取 config.json 的 outbounds[].tag 补充当前节点/策略组 tag
 /// 3. config.json 缺失或解析失败时退化为仅基础白名单（宽松降级，不阻断操作）
 fn known_outbound_tags() -> std::collections::HashSet<String> {
-    let mut tags: std::collections::HashSet<String> =
-        ["direct", "block", "proxy"].iter().map(|s| s.to_string()).collect();
+    let mut tags: std::collections::HashSet<String> = ["direct", "block", "proxy"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let config_path = crate::get_config_dir().join("config.json");
     if let Ok(content) = fs::read_to_string(&config_path) {
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(outbounds) = val.get("outbounds").and_then(|o| o.as_array()) {
-                for ob in outbounds {
-                    if let Some(tag) = ob.get("tag").and_then(|t| t.as_str()) {
-                        tags.insert(tag.to_string());
-                    }
-                }
-            }
+            tags.extend(outbound_tags_from_config(&val));
         }
     }
     tags
@@ -113,7 +125,9 @@ pub fn load_app_rules_internal() -> HashMap<String, String> {
 
 /// 获取已保存的 App-Matrix 进程规则
 #[tauri::command]
-pub async fn routing_get_app_rules(_app_handle: AppHandle) -> Result<ApiResponse<HashMap<String, String>>, AppError> {
+pub async fn routing_get_app_rules(
+    _app_handle: AppHandle,
+) -> Result<ApiResponse<HashMap<String, String>>, AppError> {
     Ok(ApiResponse::ok(load_app_rules_internal()))
 }
 
@@ -128,7 +142,10 @@ pub async fn routing_save_app_rule(
     // 进程名也做基础校验（去首尾空白，防空白名污染规则文件）
     let process_name = process_name.trim().to_string();
     if process_name.is_empty() {
-        return Ok(ApiResponse::err(AppError::Validation("进程名不能为空".to_string()), 400));
+        return Ok(ApiResponse::err(
+            AppError::Validation("进程名不能为空".to_string()),
+            400,
+        ));
     }
     let outbound_tag = outbound_tag.trim().to_string();
     if let Err(e) = validate_outbound_tag(&outbound_tag) {
@@ -154,7 +171,10 @@ pub async fn routing_save_app_rule(
 
     // 重新根据最新 app-rules 重建 config.json（失败记录详情，不再静默丢弃）
     if let Err(e) = crate::commands::settings::rebuild_config_from_settings(&app_handle) {
-        log::error!("[routing] 重建 config.json 失败（应用分流规则可能未生效）: {}", e);
+        log::error!(
+            "[routing] 重建 config.json 失败（应用分流规则可能未生效）: {}",
+            e
+        );
     }
 
     // 若内核正在运行，通过统一自愈流程让新 config.json 生效
@@ -162,7 +182,10 @@ pub async fn routing_save_app_rule(
     let running_res = crate::commands::settings::core_query_running(app_handle.clone()).await;
     if running_res.data.unwrap_or(false) {
         if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
-            log::error!("[routing] 规则已保存但内核重启失败（下次启动自动生效）: {}", e);
+            log::error!(
+                "[routing] 规则已保存但内核重启失败（下次启动自动生效）: {}",
+                e
+            );
         }
         info!("应用分流规则已更新并同步至 sing-box");
     }
@@ -197,7 +220,10 @@ pub fn load_custom_rules_internal() -> Vec<CustomRuleItem> {
 }
 
 /// 内部保存自定义规则并触发配置重建与热重载
-async fn save_custom_rules_internal(app_handle: &AppHandle, rules: &[CustomRuleItem]) -> Result<(), AppError> {
+async fn save_custom_rules_internal(
+    app_handle: &AppHandle,
+    rules: &[CustomRuleItem],
+) -> Result<(), AppError> {
     // 保存前逐条校验：类型白名单 + 出站集合 + 正则可编译
     for rule in rules {
         if rule.enabled {
@@ -216,7 +242,10 @@ async fn save_custom_rules_internal(app_handle: &AppHandle, rules: &[CustomRuleI
 
     // 重新根据最新规则重建 config.json（失败记录详情，不再静默丢弃）
     if let Err(e) = crate::commands::settings::rebuild_config_from_settings(app_handle) {
-        log::error!("[routing] 重建 config.json 失败（自定义规则可能未生效）: {}", e);
+        log::error!(
+            "[routing] 重建 config.json 失败（自定义规则可能未生效）: {}",
+            e
+        );
     }
 
     // 若内核正在运行，通过统一自愈流程让新 config.json 生效
@@ -224,7 +253,10 @@ async fn save_custom_rules_internal(app_handle: &AppHandle, rules: &[CustomRuleI
     let running_res = crate::commands::settings::core_query_running(app_handle.clone()).await;
     if running_res.data.unwrap_or(false) {
         if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
-            log::error!("[routing] 规则已保存但内核重启失败（下次启动自动生效）: {}", e);
+            log::error!(
+                "[routing] 规则已保存但内核重启失败（下次启动自动生效）: {}",
+                e
+            );
         }
         info!("自定义分流规则已更新并同步至 sing-box");
     }
@@ -234,7 +266,9 @@ async fn save_custom_rules_internal(app_handle: &AppHandle, rules: &[CustomRuleI
 
 /// 获取所有自定义分流规则
 #[tauri::command]
-pub async fn routing_get_custom_rules(_app_handle: AppHandle) -> Result<ApiResponse<Vec<CustomRuleItem>>, AppError> {
+pub async fn routing_get_custom_rules(
+    _app_handle: AppHandle,
+) -> Result<ApiResponse<Vec<CustomRuleItem>>, AppError> {
     Ok(ApiResponse::ok(load_custom_rules_internal()))
 }
 
@@ -319,7 +353,10 @@ pub async fn routing_import_rules(
         .map_err(|e| AppError::Validation(format!("导入文件格式错误: {}", e)))?;
 
     if data.version != 1 {
-        return Ok(ApiResponse::err(format!("不支持的导出版本: {}", data.version), 400));
+        return Ok(ApiResponse::err(
+            format!("不支持的导出版本: {}", data.version),
+            400,
+        ));
     }
 
     // ---- 自定义规则：逐条校验后合并/替换 ----
@@ -377,7 +414,9 @@ pub async fn routing_import_rules(
     }
     save_custom_rules_internal(&app_handle, &custom_rules).await?;
 
-    info!("[routing] 规则导入完成: 导入 {} 条, 跳过 {} 条", imported_count, skipped);
+    info!(
+        "[routing] 规则导入完成: 导入 {} 条, 跳过 {} 条",
+        imported_count, skipped
+    );
     Ok(ApiResponse::ok((imported_count, skipped)))
 }
-

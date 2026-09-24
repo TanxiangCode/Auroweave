@@ -14,8 +14,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 
-
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SubscriptionUserInfo {
     pub upload_bytes: u64,
@@ -54,7 +52,6 @@ pub struct Subscription {
 fn default_source_type() -> String {
     "remote".to_string()
 }
-
 
 /// 获取订阅持久化文件路径
 fn get_subscriptions_path() -> std::path::PathBuf {
@@ -108,7 +105,6 @@ fn save_subscriptions(subs: &[Subscription]) -> Result<(), AppError> {
     crate::fs_utils::atomic_write_json(&path, &subs.to_vec())
         .map_err(|e| AppError::Io(format!("写入订阅列表失败: {}", e)))
 }
-
 
 /// 解析 HTTP 响应头中的 Subscription-Userinfo
 /// 格式示例: upload=1073741824; download=10737418240; total=107374182400; expire=1735689600
@@ -189,7 +185,8 @@ fn read_local_subscription_file(sub: &Subscription) -> Result<String, AppError> 
             let url = sub.url.trim();
             if url.starts_with("file://") {
                 Some(url.trim_start_matches("file://").to_string())
-            } else if !url.starts_with("http://") && !url.starts_with("https://") && !url.is_empty() {
+            } else if !url.starts_with("http://") && !url.starts_with("https://") && !url.is_empty()
+            {
                 Some(url.to_string())
             } else {
                 None
@@ -202,7 +199,18 @@ fn read_local_subscription_file(sub: &Subscription) -> Result<String, AppError> 
 }
 
 /// 内部核心函数：拉取订阅 URL 内容并解析为 outbounds 与 userinfo
-async fn fetch_and_parse(url: &str, custom_ua: Option<&str>) -> Result<(SubscriptionFormat, Vec<crate::core::parser::ParsedOutbound>, Option<SubscriptionUserInfo>, String), AppError> {
+async fn fetch_and_parse(
+    url: &str,
+    custom_ua: Option<&str>,
+) -> Result<
+    (
+        SubscriptionFormat,
+        Vec<crate::core::parser::ParsedOutbound>,
+        Option<SubscriptionUserInfo>,
+        String,
+    ),
+    AppError,
+> {
     let ua = custom_ua.unwrap_or(DEFAULT_SUBSCRIPTION_UA);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
@@ -278,7 +286,8 @@ pub fn collect_active_outbounds() -> Result<Vec<crate::core::parser::ParsedOutbo
                         }
                         log::info!(
                             "[subscription] 节点 [{}] 与已有出站重名，重命名为 [{}]",
-                            original_tag, node.tag
+                            original_tag,
+                            node.tag
                         );
                     }
                     outbounds.push(node);
@@ -288,7 +297,8 @@ pub fn collect_active_outbounds() -> Result<Vec<crate::core::parser::ParsedOutbo
                 // 单个坏订阅不拖垮整体：跳过并告警
                 log::warn!(
                     "[subscription] 活跃订阅 {} 解析失败，已跳过聚合: {}",
-                    sub.name, e
+                    sub.name,
+                    e
                 );
             }
         }
@@ -302,14 +312,18 @@ pub fn collect_active_outbounds() -> Result<Vec<crate::core::parser::ParsedOutbo
     Ok(outbounds)
 }
 
-
 /// 下载 rule-set .srs 文件到本地缓存目录
 ///
 /// 缓存自愈策略：
 /// - force=false：已存在且大小 > 100 字节 → 直接使用（正常 .srs 不会小于 100 字节，避免半截损坏缓存被永久复用）
 /// - 已存在但过小/缺失/force=true → 下载到 .tmp 临时文件，成功后再 rename 原子替换
 /// - 下载失败 → 返回 None（配置降级为无 rule-set），损坏的旧缓存保留待下次自愈
-async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str, force: bool) -> Option<String> {
+async fn download_rule_set(
+    config_dir: &std::path::Path,
+    name: &str,
+    url: &str,
+    force: bool,
+) -> Option<String> {
     let local_path = config_dir.join(format!("{}.srs", name));
 
     // 缓存有效且非强制刷新则直接使用（基本大小校验，防半截文件永久复用）
@@ -318,7 +332,11 @@ async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str, 
             if meta.len() > 100 {
                 return Some(local_path.to_string_lossy().to_string());
             }
-            log::warn!("[subscription] rule-set {} 缓存疑似损坏 ({} 字节)，重新下载", name, meta.len());
+            log::warn!(
+                "[subscription] rule-set {} 缓存疑似损坏 ({} 字节)，重新下载",
+                name,
+                meta.len()
+            );
         }
     }
 
@@ -348,7 +366,11 @@ async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str, 
                         let _ = std::fs::remove_file(&tmp_path);
                         return None;
                     }
-                    log::info!("[subscription] rule-set {} 下载成功 ({} bytes)", name, bytes.len());
+                    log::info!(
+                        "[subscription] rule-set {} 下载成功 ({} bytes)",
+                        name,
+                        bytes.len()
+                    );
                     Some(local_path.to_string_lossy().to_string())
                 }
                 Ok(_) => {
@@ -362,7 +384,11 @@ async fn download_rule_set(config_dir: &std::path::Path, name: &str, url: &str, 
             }
         }
         Err(e) => {
-            log::warn!("[subscription] 下载 {} 网络错误: {}（将使用无 rule-set 降级配置）", name, e);
+            log::warn!(
+                "[subscription] 下载 {} 网络错误: {}（将使用无 rule-set 降级配置）",
+                name,
+                e
+            );
             None
         }
     }
@@ -405,7 +431,8 @@ pub async fn ruleset_force_update(app_handle: AppHandle) -> ApiResponse<(bool, b
     if !geosite_ok || !geoip_ok {
         log::warn!(
             "[subscription] 规则集更新不完整: geosite={} geoip={}（旧缓存仍有效）",
-            geosite_ok, geoip_ok
+            geosite_ok,
+            geoip_ok
         );
     }
 
@@ -440,7 +467,10 @@ pub async fn ruleset_get_status() -> ApiResponse<RuleSetStatus> {
             Ok(m) => (
                 true,
                 m.len(),
-                m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64),
+                m.modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64),
             ),
             Err(_) => (false, 0, None),
         }
@@ -464,7 +494,9 @@ async fn build_and_apply_config(
     _sidecar_manager: &SidecarManager,
 ) -> Result<u32, AppError> {
     if outbounds.is_empty() {
-        return Err(AppError::Config("解析出的节点为空，无法生成配置".to_string()));
+        return Err(AppError::Config(
+            "解析出的节点为空，无法生成配置".to_string(),
+        ));
     }
 
     let node_count = outbounds.len() as u32;
@@ -478,13 +510,15 @@ async fn build_and_apply_config(
         "geosite-cn",
         "https://fastly.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
         false,
-    ).await;
+    )
+    .await;
     let geoip_cn_path = download_rule_set(
         &config_dir,
         "geoip-cn",
         "https://fastly.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-cn.srs",
         false,
-    ).await;
+    )
+    .await;
 
     let settings = crate::commands::settings::settings_get_internal(app_handle);
     let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(app_handle);
@@ -506,11 +540,15 @@ async fn build_and_apply_config(
         .with_group_configs(settings.group_configs.clone())
         .with_custom_groups(settings.custom_group_rules.clone())
         .with_unlock_state(unlock_state)
-        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache, settings.dns_smart_routing_v2)
+        .with_dns(
+            settings.dns_remote_doh.clone(),
+            settings.dns_timeout_secs,
+            settings.dns_optimistic_cache,
+            settings.dns_smart_routing_v2,
+        )
         .with_bootstrap_doh(settings.dns_bootstrap_doh.clone())
         .with_bootstrap_backup_doh(settings.dns_bootstrap_backup_doh.clone());
     let config_json = config_builder.build()?;
-
 
     let config_path = config_dir.join("config.json");
     let backup_path = config_dir.join("config.backup.json");
@@ -535,7 +573,10 @@ async fn build_and_apply_config(
     // 统一走 apply_core_mode_with_fallback 让内核按新配置重启/拉起。
     let clash_client = ClashApiClient::default();
     if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(app_handle).await {
-        log::error!("[subscription] 拉起 sing-box 失败 ({})，尝试自动回滚备份...", e);
+        log::error!(
+            "[subscription] 拉起 sing-box 失败 ({})，尝试自动回滚备份...",
+            e
+        );
         if backup_path.exists() {
             let _ = fs::copy(&backup_path, &config_path);
             let _ = crate::system::startup::apply_core_mode_with_fallback(app_handle).await;
@@ -566,10 +607,15 @@ async fn build_and_apply_config(
         let urltest_groups = match clash_client.get_proxies().await {
             Ok(json) => {
                 if let Some(proxies) = json.get("proxies").and_then(|p| p.as_object()) {
-                    proxies.iter()
+                    proxies
+                        .iter()
                         .filter(|(_, v)| {
                             v.get("type").and_then(|t| t.as_str()) == Some("URLTest")
-                                && !v.get("now").and_then(|n| n.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
+                                && !v
+                                    .get("now")
+                                    .and_then(|n| n.as_str())
+                                    .map(|s| !s.is_empty())
+                                    .unwrap_or(false)
                         })
                         .map(|(name, _)| name.clone())
                         .collect::<Vec<_>>()
@@ -585,22 +631,28 @@ async fn build_and_apply_config(
 
         if !urltest_groups.is_empty() {
             let test_count = urltest_groups.len();
-            log::info!("[subscription] 检测到 {} 个未选择节点的 URLTest 组，开始自动测速", test_count);
-            
+            log::info!(
+                "[subscription] 检测到 {} 个未选择节点的 URLTest 组，开始自动测速",
+                test_count
+            );
+
             for group_tag in urltest_groups {
                 log::info!("[subscription] 触发 URLTest 组 {} 的自动测速", group_tag);
                 // 调用新添加的 trigger_urltest_group_delay 方法
                 let delay_url = "http://www.gstatic.com/generate_204";
                 let _ = tokio::time::timeout(
                     tokio::time::Duration::from_secs(10),
-                    clash_client.trigger_urltest_group_delay(&group_tag, delay_url, 5000)
-                ).await;
-
+                    clash_client.trigger_urltest_group_delay(&group_tag, delay_url, 5000),
+                )
+                .await;
 
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
 
-            log::info!("[subscription] 已触发 {} 个 URLTest 组的自动测速，使其选择最优节点", test_count);
+            log::info!(
+                "[subscription] 已触发 {} 个 URLTest 组的自动测速，使其选择最优节点",
+                test_count
+            );
         }
     }
 
@@ -624,14 +676,25 @@ pub async fn subscription_import(
     _auto_group: bool,
     sidecar_manager: State<'_, Arc<SidecarManager>>,
 ) -> Result<ApiResponse<Subscription>, AppError> {
-    log::info!("[subscription] 开始导入订阅: {} (URL: {})", name, sanitize_subscription_url(&url));
+    log::info!(
+        "[subscription] 开始导入订阅: {} (URL: {})",
+        name,
+        sanitize_subscription_url(&url)
+    );
 
     // 0. 重复检测：如果 URL 已存在则提示已存在
     let existing = load_subscriptions();
     if let Some(existing_sub) = existing.iter().find(|s| s.url == url) {
-        log::warn!("[subscription] 订阅 URL 已存在: {} (ID: {})", existing_sub.name, existing_sub.id);
+        log::warn!(
+            "[subscription] 订阅 URL 已存在: {} (ID: {})",
+            existing_sub.name,
+            existing_sub.id
+        );
         return Ok(ApiResponse::err(
-            format!("订阅「{}」已存在，请勿重复导入；如需更新请使用刷新功能", existing_sub.name),
+            format!(
+                "订阅「{}」已存在，请勿重复导入；如需更新请使用刷新功能",
+                existing_sub.name
+            ),
             409,
         ));
     }
@@ -690,17 +753,29 @@ pub async fn subscription_import(
     }
 
     // 聚合所有活跃订阅（含刚导入的）节点生成配置
-    let aggregated = collect_active_outbounds().map_err(|e| {
-        log::error!("[subscription] 聚合活跃订阅失败: {}", e);
-        e
-    })?;
-    let node_count = match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
-        Ok(n) => n,
+    let aggregated = match collect_active_outbounds() {
+        Ok(nodes) => nodes,
         Err(e) => {
-            log::error!("[subscription] 应用配置失败: {}", e);
+            log::error!("[subscription] 聚合活跃订阅失败: {}", e);
+            let mut rollback_subs = existing.clone();
+            rollback_subs.retain(|item| item.id != sub.id);
+            let _ = save_subscriptions(&rollback_subs);
+            let _ = fs::remove_file(get_raw_subscription_path(&sub.id));
             return Ok(ApiResponse::err(e, 500));
         }
     };
+    let node_count =
+        match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
+            Ok(n) => n,
+            Err(e) => {
+                log::error!("[subscription] 应用配置失败: {}", e);
+                let mut rollback_subs = existing.clone();
+                rollback_subs.retain(|item| item.id != sub.id);
+                let _ = save_subscriptions(&rollback_subs);
+                let _ = fs::remove_file(get_raw_subscription_path(&sub.id));
+                return Ok(ApiResponse::err(e, 500));
+            }
+        };
 
     // 6. 持久化：更新最终 node_count（聚合总数）
     let mut all_subs = existing;
@@ -709,7 +784,10 @@ pub async fn subscription_import(
     all_subs.push(final_sub.clone());
     if let Err(e) = save_subscriptions(&all_subs) {
         log::error!("[subscription] 持久化订阅列表失败: {}", e);
-        return Ok(ApiResponse::err(format!("订阅已生效但持久化失败: {}", e), 500));
+        return Ok(ApiResponse::err(
+            format!("订阅已生效但持久化失败: {}", e),
+            500,
+        ));
     }
 
     Ok(ApiResponse::ok(final_sub))
@@ -785,7 +863,10 @@ pub async fn subscription_delete_all() -> ApiResponse<()> {
 
     if !all_tags.is_empty() {
         crate::core::stats_db::delete_history_by_tags(&all_tags);
-        log::info!("[subscription] 已联动清理 {} 个节点的历史记录", all_tags.len());
+        log::info!(
+            "[subscription] 已联动清理 {} 个节点的历史记录",
+            all_tags.len()
+        );
     }
 
     log::info!("[subscription] 所有订阅已清空");
@@ -880,10 +961,11 @@ pub async fn subscription_refresh(
             return Ok(ApiResponse::err(e, 500));
         }
     };
-    let node_count = match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
-        Ok(n) => n,
-        Err(e) => return Ok(ApiResponse::err(e, 500)),
-    };
+    let node_count =
+        match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
+            Ok(n) => n,
+            Err(e) => return Ok(ApiResponse::err(e, 500)),
+        };
 
     for s in all_subs.iter_mut() {
         if s.id == id {
@@ -897,14 +979,13 @@ pub async fn subscription_refresh(
     }
     if let Err(e) = save_subscriptions(&all_subs) {
         log::error!("[subscription] 刷新后持久化订阅列表失败: {}", e);
-        return Ok(ApiResponse::err(format!("订阅已刷新但持久化失败: {}", e), 500));
+        return Ok(ApiResponse::err(
+            format!("订阅已刷新但持久化失败: {}", e),
+            500,
+        ));
     }
 
-    let updated = all_subs
-        .iter()
-        .find(|s| s.id == id)
-        .cloned()
-        .unwrap_or(sub);
+    let updated = all_subs.iter().find(|s| s.id == id).cloned().unwrap_or(sub);
     let _ = own_outbounds; // 过滤结果已并入聚合统计，node_count 以聚合结果为准
     Ok(ApiResponse::ok(updated))
 }
@@ -956,14 +1037,19 @@ pub async fn subscription_activate(
                     return Ok(ApiResponse::err(e, 500));
                 }
             };
-            if let Err(e) = build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
+            if let Err(e) =
+                build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await
+            {
                 return Ok(ApiResponse::err(e, 500));
             }
         }
 
         if let Err(e) = save_subscriptions(&all_subs) {
             log::error!("[subscription] 移除聚合后持久化失败: {}", e);
-            return Ok(ApiResponse::err(format!("已移除聚合但持久化失败: {}", e), 500));
+            return Ok(ApiResponse::err(
+                format!("已移除聚合但持久化失败: {}", e),
+                500,
+            ));
         }
         let updated = all_subs.iter().find(|s| s.id == id).cloned().unwrap_or(sub);
         return Ok(ApiResponse::ok(updated));
@@ -1025,13 +1111,14 @@ pub async fn subscription_activate(
             return Ok(ApiResponse::err(e, 500));
         }
     };
-    let node_count = match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
-        Ok(n) => n,
-        Err(e) => {
-            log::error!("[subscription] 切换订阅应用配置失败: {}", e);
-            return Ok(ApiResponse::err(e, 500));
-        }
-    };
+    let node_count =
+        match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
+            Ok(n) => n,
+            Err(e) => {
+                log::error!("[subscription] 切换订阅应用配置失败: {}", e);
+                return Ok(ApiResponse::err(e, 500));
+            }
+        };
 
     for s in all_subs.iter_mut() {
         if s.id == id {
@@ -1046,14 +1133,13 @@ pub async fn subscription_activate(
     }
     if let Err(e) = save_subscriptions(&all_subs) {
         log::error!("[subscription] 切换后持久化订阅列表失败: {}", e);
-        return Ok(ApiResponse::err(format!("订阅已切换但持久化失败: {}", e), 500));
+        return Ok(ApiResponse::err(
+            format!("订阅已切换但持久化失败: {}", e),
+            500,
+        ));
     }
 
-    let updated = all_subs
-        .iter()
-        .find(|s| s.id == id)
-        .cloned()
-        .unwrap_or(sub);
+    let updated = all_subs.iter().find(|s| s.id == id).cloned().unwrap_or(sub);
     Ok(ApiResponse::ok(updated))
 }
 
@@ -1068,7 +1154,11 @@ pub async fn subscription_import_content(
     _auto_group: bool,
     sidecar_manager: State<'_, Arc<SidecarManager>>,
 ) -> Result<ApiResponse<Subscription>, AppError> {
-    log::info!("[subscription] 导入自定义文本/文件: {} ({})", name, source_type);
+    log::info!(
+        "[subscription] 导入自定义文本/文件: {} ({})",
+        name,
+        source_type
+    );
 
     let (format, outbounds) = match parse_subscription_content(&content) {
         Ok(res) => res,
@@ -1090,7 +1180,9 @@ pub async fn subscription_import_content(
     let sub = Subscription {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.clone(),
-        url: file_path.clone().unwrap_or_else(|| "clipboard://local".to_string()),
+        url: file_path
+            .clone()
+            .unwrap_or_else(|| "clipboard://local".to_string()),
         format: format_str.clone(),
         source_type: source_type.clone(),
         local_file_path: file_path.clone(),
@@ -1118,16 +1210,25 @@ pub async fn subscription_import_content(
         Ok(a) => a,
         Err(e) => {
             log::error!("[subscription] 聚合活跃订阅失败: {}", e);
+            let mut rollback_subs = load_subscriptions();
+            rollback_subs.retain(|item| item.id != sub.id);
+            let _ = save_subscriptions(&rollback_subs);
+            let _ = fs::remove_file(get_raw_subscription_path(&sub.id));
             return Ok(ApiResponse::err(e, 500));
         }
     };
-    let node_count = match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
-        Ok(n) => n,
-        Err(e) => {
-            log::error!("[subscription] 应用配置失败: {}", e);
-            return Ok(ApiResponse::err(e, 500));
-        }
-    };
+    let node_count =
+        match build_and_apply_config(&app_handle, aggregated, sidecar_manager.inner()).await {
+            Ok(n) => n,
+            Err(e) => {
+                log::error!("[subscription] 应用配置失败: {}", e);
+                let mut rollback_subs = load_subscriptions();
+                rollback_subs.retain(|item| item.id != sub.id);
+                let _ = save_subscriptions(&rollback_subs);
+                let _ = fs::remove_file(get_raw_subscription_path(&sub.id));
+                return Ok(ApiResponse::err(e, 500));
+            }
+        };
 
     // 持久化最终订阅列表（更新聚合后的 node_count）
     let mut all_subs = load_subscriptions();
@@ -1136,7 +1237,10 @@ pub async fn subscription_import_content(
     all_subs.push(final_sub.clone());
     if let Err(e) = save_subscriptions(&all_subs) {
         log::error!("[subscription] 持久化订阅列表失败: {}", e);
-        return Ok(ApiResponse::err(format!("订阅已生效但持久化失败: {}", e), 500));
+        return Ok(ApiResponse::err(
+            format!("订阅已生效但持久化失败: {}", e),
+            500,
+        ));
     }
 
     Ok(ApiResponse::ok(final_sub))
@@ -1212,7 +1316,12 @@ pub async fn subscription_inspect(
         .with_ports(mixed_port, clash_api_port)
         .with_allow_lan(settings.allow_lan)
         .with_group_configs(settings.group_configs.clone())
-        .with_dns(settings.dns_remote_doh.clone(), settings.dns_timeout_secs, settings.dns_optimistic_cache, settings.dns_smart_routing_v2)
+        .with_dns(
+            settings.dns_remote_doh.clone(),
+            settings.dns_timeout_secs,
+            settings.dns_optimistic_cache,
+            settings.dns_smart_routing_v2,
+        )
         .with_bootstrap_doh(settings.dns_bootstrap_doh.clone())
         .with_bootstrap_backup_doh(settings.dns_bootstrap_backup_doh.clone());
     let final_config = config_builder.build().unwrap_or_default();
@@ -1247,11 +1356,19 @@ pub async fn subscription_update_meta(
     let mut updated_sub = None;
 
     if let Some(s) = all_subs.iter_mut().find(|s| s.id == id) {
-        if let Some(n) = name { s.name = n; }
-        if let Some(u) = url { s.url = u; }
+        if let Some(n) = name {
+            s.name = n;
+        }
+        if let Some(u) = url {
+            s.url = u;
+        }
         // 仅在前端显式传值时更新，避免未携带字段被误置为 None（与 name/url 行为一致）
-        if let Some(ua) = user_agent { s.user_agent = Some(ua); }
-        if let Some(hours) = auto_update_interval_hours { s.auto_update_interval_hours = Some(hours); }
+        if let Some(ua) = user_agent {
+            s.user_agent = Some(ua);
+        }
+        if let Some(hours) = auto_update_interval_hours {
+            s.auto_update_interval_hours = Some(hours);
+        }
         if filter_rule.is_some() {
             s.filter_rule = filter_rule;
         }
@@ -1299,9 +1416,6 @@ pub async fn custom_groups_apply(
         Err(e) => ApiResponse::err(e, 500),
     }
 }
-
-
-
 
 /// 对节点列表应用过滤与重命名清洗规则
 pub fn apply_filter_rules(
@@ -1368,7 +1482,8 @@ pub fn start_auto_update_scheduler(app_handle: AppHandle) {
                             log::info!("[auto_updater] 订阅 {} 到达静默更新周期 ({} 小时)，开始后台更新...", sub.name, hours);
                             let app_clone = app_handle.clone();
                             let sub_id = sub.id.clone();
-                            if let Some(sidecar_mgr) = app_handle.try_state::<Arc<SidecarManager>>() {
+                            if let Some(sidecar_mgr) = app_handle.try_state::<Arc<SidecarManager>>()
+                            {
                                 let _ = subscription_refresh(app_clone, sub_id, sidecar_mgr).await;
                             }
                         }
