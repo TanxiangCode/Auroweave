@@ -52,7 +52,14 @@ fn parse_lines_to_outbounds(text: &str) -> Vec<ParsedOutbound> {
 pub fn flexible_base64_decode(input: &str) -> Option<String> {
     let sanitized: String = input
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '+' || *c == '/' || *c == '-' || *c == '_' || *c == '=')
+        .filter(|c| {
+            c.is_ascii_alphanumeric()
+                || *c == '+'
+                || *c == '/'
+                || *c == '-'
+                || *c == '_'
+                || *c == '='
+        })
         .collect();
     if sanitized.is_empty() {
         return None;
@@ -66,16 +73,24 @@ pub fn flexible_base64_decode(input: &str) -> Option<String> {
     }
 
     if let Ok(bytes) = STANDARD.decode(&padded) {
-        if let Ok(s) = String::from_utf8(bytes) { return Some(s); }
+        if let Ok(s) = String::from_utf8(bytes) {
+            return Some(s);
+        }
     }
     if let Ok(bytes) = URL_SAFE.decode(&padded) {
-        if let Ok(s) = String::from_utf8(bytes) { return Some(s); }
+        if let Ok(s) = String::from_utf8(bytes) {
+            return Some(s);
+        }
     }
     if let Ok(bytes) = STANDARD_NO_PAD.decode(&sanitized) {
-        if let Ok(s) = String::from_utf8(bytes) { return Some(s); }
+        if let Ok(s) = String::from_utf8(bytes) {
+            return Some(s);
+        }
     }
     if let Ok(bytes) = URL_SAFE_NO_PAD.decode(&sanitized) {
-        if let Ok(s) = String::from_utf8(bytes) { return Some(s); }
+        if let Ok(s) = String::from_utf8(bytes) {
+            return Some(s);
+        }
     }
 
     None
@@ -119,32 +134,37 @@ fn extract_tag(parsed_url: &Url, default_name: &str) -> String {
 fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
     let b64_str = uri.strip_prefix("vmess://")?;
     let decoded_bytes = flexible_base64_decode(b64_str).or_else(|| {
-        STANDARD.decode(b64_str).ok().and_then(|b| String::from_utf8(b).ok())
+        STANDARD
+            .decode(b64_str)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
     })?;
 
     let v: serde_json::Value = serde_json::from_str(&decoded_bytes).ok()?;
 
-    let name = v.get("ps")
+    let name = v
+        .get("ps")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .unwrap_or("VMess")
         .to_string();
 
-    let server = v.get("add")
+    let server = v
+        .get("add")
         .or_else(|| v.get("host"))
         .and_then(|s| s.as_str())?
         .to_string();
 
     // 兼容数字或字符串格式的 port（校验 1..=65535，拒绝超范围而非静默截断）
     let port = match v.get("port") {
-        Some(serde_json::Value::Number(n)) => n
-            .as_u64()
-            .and_then(|p| if (1..=65535).contains(&p) { Some(p as u16) } else { None }),
-        Some(serde_json::Value::String(s)) => s
-            .trim()
-            .parse::<u16>()
-            .ok()
-            .filter(|p| *p >= 1),
+        Some(serde_json::Value::Number(n)) => n.as_u64().and_then(|p| {
+            if (1..=65535).contains(&p) {
+                Some(p as u16)
+            } else {
+                None
+            }
+        }),
+        Some(serde_json::Value::String(s)) => s.trim().parse::<u16>().ok().filter(|p| *p >= 1),
         _ => None,
     }?;
 
@@ -154,13 +174,30 @@ fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
         Some(serde_json::Value::String(s)) => s.parse::<u64>().unwrap_or(0),
         _ => 0,
     };
-    let security_raw = v.get("scy").or_else(|| v.get("cipher")).and_then(|s| s.as_str()).unwrap_or("auto");
+    let security_raw = v
+        .get("scy")
+        .or_else(|| v.get("cipher"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("auto");
     // vmess security 白名单（sing-box outbound/vmess.md 全集）：
     // 非法值（aes-128-cfb、chacha20、rc4 等存量生态常见值）会被内核在出站初始化
     // 阶段拒载整份配置，而非仅该节点失败——统一回退 auto
-    const VMESS_SECURITY: &[&str] = &["auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305", "aes-128-ctr"];
-    let security = if VMESS_SECURITY.contains(&security_raw) { security_raw } else {
-        log::warn!("[parser] vmess 节点 [{}] 的非法加密方式 {} 回退为 auto", name, security_raw);
+    const VMESS_SECURITY: &[&str] = &[
+        "auto",
+        "none",
+        "zero",
+        "aes-128-gcm",
+        "chacha20-poly1305",
+        "aes-128-ctr",
+    ];
+    let security = if VMESS_SECURITY.contains(&security_raw) {
+        security_raw
+    } else {
+        log::warn!(
+            "[parser] vmess 节点 [{}] 的非法加密方式 {} 回退为 auto",
+            name,
+            security_raw
+        );
         "auto"
     };
 
@@ -175,8 +212,15 @@ fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
     });
 
     let net = v.get("net").and_then(|s| s.as_str()).unwrap_or("tcp");
-    let tls = v.get("tls").and_then(|s| s.as_str()).map(|s| s == "tls" || s == "1").unwrap_or(false);
-    let sni = v.get("sni").and_then(|s| s.as_str()).or_else(|| v.get("host").and_then(|s| s.as_str()));
+    let tls = v
+        .get("tls")
+        .and_then(|s| s.as_str())
+        .map(|s| s == "tls" || s == "1")
+        .unwrap_or(false);
+    let sni = v
+        .get("sni")
+        .and_then(|s| s.as_str())
+        .or_else(|| v.get("host").and_then(|s| s.as_str()));
 
     if tls {
         let mut tls_obj = json!({ "enabled": true });
@@ -230,7 +274,12 @@ fn parse_vmess_uri(uri: &str) -> Option<ParsedOutbound> {
 fn parse_ss_uri(uri: &str) -> Option<ParsedOutbound> {
     let raw_part = uri.strip_prefix("ss://")?;
     let (body, tag) = match raw_part.split_once('#') {
-        Some((b, t)) => (b, urlencoding::decode(t).unwrap_or_else(|_| t.into()).to_string()),
+        Some((b, t)) => (
+            b,
+            urlencoding::decode(t)
+                .unwrap_or_else(|_| t.into())
+                .to_string(),
+        ),
         None => (raw_part, "Shadowsocks".to_string()),
     };
 
@@ -314,7 +363,9 @@ fn extract_credentials(parsed_url: &Url) -> String {
         .map(|c| c.into_owned())
         .unwrap_or_else(|_| parsed_url.username().to_string());
     if let Some(p) = parsed_url.password() {
-        let decoded_p = urlencoding::decode(p).map(|c| c.into_owned()).unwrap_or_else(|_| p.to_string());
+        let decoded_p = urlencoding::decode(p)
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| p.to_string());
         cred.push(':');
         cred.push_str(&decoded_p);
     }
@@ -357,7 +408,14 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
             "serviceName" => service_name = Some(v.to_string()),
             "fp" | "fingerprint" => fp = Some(v.to_string()),
             "insecure" | "allowInsecure" => insecure = v == "1" || v == "true",
-            "alpn" => alpn = Some(v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
+            "alpn" => {
+                alpn = Some(
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                )
+            }
             _ => {}
         }
     }
@@ -371,10 +429,10 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
         "packet_encoding": "xudp"
     });
 
-    if let Some(f) = flow {
-        if !f.is_empty() {
-            raw_json["flow"] = json!(f);
-        }
+    // sing-box 1.14 仅支持 xtls-rprx-vision；旧 URI 的 flow 不能透传，
+    // 否则会让整份配置在 check/run 阶段被内核拒绝。
+    if flow.as_deref().map(str::trim) == Some("xtls-rprx-vision") {
+        raw_json["flow"] = json!("xtls-rprx-vision");
     }
 
     // 处理 TLS / Reality
@@ -393,9 +451,15 @@ fn parse_vless_uri(uri: &str) -> Option<ParsedOutbound> {
         if let Some(s) = sni {
             reality_obj["server_name"] = json!(s);
         }
-        if let Some(f) = fp {
-            reality_obj["utls"] = json!({ "enabled": true, "fingerprint": f });
-        }
+        let fingerprint = fp
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("chrome");
+        reality_obj["utls"] = json!({
+            "enabled": true,
+            "fingerprint": fingerprint
+        });
         raw_json["tls"] = reality_obj;
     } else if sec == "tls" || sni.is_some() {
         let mut tls_obj = json!({ "enabled": true });
@@ -478,7 +542,14 @@ fn parse_trojan_uri(uri: &str) -> Option<ParsedOutbound> {
             "path" => path = Some(v.to_string()),
             "fp" | "fingerprint" => fp = Some(v.to_string()),
             "insecure" | "allowInsecure" => insecure = v == "1" || v == "true",
-            "alpn" => alpn = Some(v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
+            "alpn" => {
+                alpn = Some(
+                    v.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                )
+            }
             _ => {}
         }
     }
@@ -554,7 +625,11 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
             "insecure" => insecure = v == "1" || v == "true",
             "obfs" => obfs_type = Some(v.to_string()),
             "mport" => {
-                let list: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                let list: Vec<String> = v
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 if !list.is_empty() {
                     mport = Some(list);
                 }
@@ -563,7 +638,9 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
             "hop-interval-max" | "hop_interval_max" => hop_interval_max = Some(v.to_string()),
             "bbr-profile" | "bbr_profile" => bbr_profile = Some(v.to_string()),
             // 兼容刚需：1.14 默认伪装 Chrome QUIC 握手，Ed25519 证书服务器握手会失败
-            "disable-chrome-parrot" | "disable_chrome_parrot" => disable_chrome_parrot = v == "1" || v == "true",
+            "disable-chrome-parrot" | "disable_chrome_parrot" => {
+                disable_chrome_parrot = v == "1" || v == "true"
+            }
             "obfs-password" => {
                 obfs_pass = Some(
                     urlencoding::decode(&v)
@@ -614,12 +691,16 @@ fn parse_hysteria2_uri(uri: &str) -> Option<ParsedOutbound> {
     // hy2 始终基于 TLS：无条件启用 tls 块，sni 缺省回退 server 地址
     let sni_name = sni.clone().unwrap_or_else(|| server.clone());
     let mut tls = json!({ "enabled": true, "server_name": sni_name });
-    if insecure { tls["insecure"] = json!(true); }
+    if insecure {
+        tls["insecure"] = json!(true);
+    }
     raw_json["tls"] = tls;
 
     if let Some(o_type) = obfs_type {
         let mut obfs = json!({ "type": o_type });
-        if let Some(p) = obfs_pass { obfs["password"] = json!(p); }
+        if let Some(p) = obfs_pass {
+            obfs["password"] = json!(p);
+        }
         raw_json["obfs"] = obfs;
     }
 
@@ -653,7 +734,11 @@ fn parse_anytls_uri(uri: &str) -> Option<ParsedOutbound> {
             "insecure" | "allowInsecure" | "skip-cert-verify" => insecure = v == "1" || v == "true",
             "fp" | "fingerprint" => fp = v.to_string(),
             "alpn" => {
-                let list: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                let list: Vec<String> = v
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 if !list.is_empty() {
                     alpn = list;
                 }
@@ -713,7 +798,11 @@ fn parse_tuic_uri(uri: &str) -> Option<ParsedOutbound> {
     }
     let password = parsed_url
         .password()
-        .map(|p| urlencoding::decode(p).map(|c| c.into_owned()).unwrap_or_else(|_| p.to_string()))
+        .map(|p| {
+            urlencoding::decode(p)
+                .map(|c| c.into_owned())
+                .unwrap_or_else(|_| p.to_string())
+        })
         .unwrap_or_default();
 
     let mut sni = None;
@@ -726,14 +815,20 @@ fn parse_tuic_uri(uri: &str) -> Option<ParsedOutbound> {
         match k.as_ref() {
             "sni" | "peer" | "serverName" => sni = Some(v.to_string()),
             "alpn" => {
-                let list: Vec<String> = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                let list: Vec<String> = v
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
                 if !list.is_empty() {
                     alpn = Some(list);
                 }
             }
             "congestion_control" => congestion_control = Some(v.to_string()),
             "udp_relay_mode" => udp_relay_mode = Some(v.to_string()),
-            "allow_insecure" | "allowInsecure" | "insecure" => allow_insecure = v == "1" || v == "true",
+            "allow_insecure" | "allowInsecure" | "insecure" => {
+                allow_insecure = v == "1" || v == "true"
+            }
             _ => {}
         }
     }
@@ -742,7 +837,11 @@ fn parse_tuic_uri(uri: &str) -> Option<ParsedOutbound> {
     const TUIC_CC: &[&str] = &["cubic", "new_reno", "bbr"];
     if let Some(cc) = congestion_control.as_deref() {
         if !TUIC_CC.contains(&cc) {
-            log::warn!("[parser] TUIC 节点 [{}] 的非法拥塞控制算法 {} 已丢弃", tag, cc);
+            log::warn!(
+                "[parser] TUIC 节点 [{}] 的非法拥塞控制算法 {} 已丢弃",
+                tag,
+                cc
+            );
             congestion_control = None;
         }
     }
@@ -819,7 +918,10 @@ mod tests {
     #[test]
     fn test_parse_ss_sip002() {
         let user_info = STANDARD.encode("aes-128-gcm:pass123");
-        let uri = format!("ss://{}@1.2.3.4:8388#%F0%9F%87%BA%F0%9F%87%B8%20%E7%BE%8E%E5%9B%BD", user_info);
+        let uri = format!(
+            "ss://{}@1.2.3.4:8388#%F0%9F%87%BA%F0%9F%87%B8%20%E7%BE%8E%E5%9B%BD",
+            user_info
+        );
         let parsed = parse_ss_uri(&uri);
         assert!(parsed.is_some());
         let p = parsed.unwrap();
@@ -835,16 +937,31 @@ mod tests {
         assert_eq!(parsed.tag, "🇸🇬 新加坡-002");
         assert_eq!(parsed.server_port, Some(1023));
         assert_eq!(parsed.r#type, "anytls");
-        assert_eq!(parsed.raw_json.get("type").and_then(|t| t.as_str()), Some("anytls"));
-        assert_eq!(parsed.raw_json.get("password").and_then(|p| p.as_str()), Some("bd9410fb-d829-4827-b3ad-70039f228b5f"));
+        assert_eq!(
+            parsed.raw_json.get("type").and_then(|t| t.as_str()),
+            Some("anytls")
+        );
+        assert_eq!(
+            parsed.raw_json.get("password").and_then(|p| p.as_str()),
+            Some("bd9410fb-d829-4827-b3ad-70039f228b5f")
+        );
 
         let tls = parsed.raw_json.get("tls").expect("应该包含 tls 配置");
-        assert_eq!(tls.get("server_name").and_then(|s| s.as_str()), Some("sg-sjy.9999231.xyz"));
+        assert_eq!(
+            tls.get("server_name").and_then(|s| s.as_str()),
+            Some("sg-sjy.9999231.xyz")
+        );
 
         let utls = tls.get("utls").expect("应该包含 utls 配置");
-        assert_eq!(utls.get("fingerprint").and_then(|s| s.as_str()), Some("chrome"));
+        assert_eq!(
+            utls.get("fingerprint").and_then(|s| s.as_str()),
+            Some("chrome")
+        );
 
-        let alpn = tls.get("alpn").and_then(|a| a.as_array()).expect("应该包含 alpn 配置");
+        let alpn = tls
+            .get("alpn")
+            .and_then(|a| a.as_array())
+            .expect("应该包含 alpn 配置");
         assert_eq!(alpn.len(), 2);
     }
 
@@ -863,7 +980,10 @@ mod tests {
         assert_eq!(parsed.tag, "🇸🇬 TUIC-001");
         assert_eq!(parsed.r#type, "tuic");
         assert_eq!(parsed.server_port, Some(443));
-        assert_eq!(parsed.raw_json["uuid"], "2DD61D93-75D8-4DA4-AC0E-6AECE7EAC365");
+        assert_eq!(
+            parsed.raw_json["uuid"],
+            "2DD61D93-75D8-4DA4-AC0E-6AECE7EAC365"
+        );
         assert_eq!(parsed.raw_json["password"], "hello");
         assert_eq!(parsed.raw_json["congestion_control"], "bbr");
         assert_eq!(parsed.raw_json["udp_relay_mode"], "native");
@@ -888,7 +1008,10 @@ mod tests {
         let parsed = parse_hysteria2_uri(uri).expect("hy2 应该解析成功");
         let raw = &parsed.raw_json;
         assert_eq!(raw["server_ports"][0], "2080:3000");
-        assert!(raw.get("server_port").is_none(), "server_port 与 server_ports 互斥必须移除");
+        assert!(
+            raw.get("server_port").is_none(),
+            "server_port 与 server_ports 互斥必须移除"
+        );
         assert_eq!(raw["hop_interval"], "30s");
         assert_eq!(raw["hop_interval_max"], "60s");
         assert_eq!(raw["bbr_profile"], "aggressive");
@@ -924,10 +1047,39 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_vless_flow_whitelist() {
+        let vision = "vless://uuid-x@v.example.com:443/?flow=xtls-rprx-vision#vision";
+        assert_eq!(
+            parse_vless_uri(vision).unwrap().raw_json["flow"],
+            "xtls-rprx-vision"
+        );
+
+        for flow in ["xtls-rprx-direct", "XTLS-RPRX-VISION", " unknown "] {
+            let uri = format!("vless://uuid-x@v.example.com:443/?flow={}#legacy", flow);
+            let parsed = parse_vless_uri(&uri).expect("URI 其它字段合法时应保留节点");
+            assert!(
+                parsed.raw_json.get("flow").is_none(),
+                "非法 flow 不得透传: {}",
+                flow
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_vless_reality_defaults_chrome_utls() {
+        let uri = "vless://uuid-x@v.example.com:443/?security=reality&pbk=public-key&sni=s.example.com#reality";
+        let parsed = parse_vless_uri(uri).expect("Reality 节点应解析");
+        assert_eq!(parsed.raw_json["tls"]["utls"]["fingerprint"], "chrome");
+    }
+
+    #[test]
     fn test_parse_vless_reality_missing_pbk_rejected() {
         // security=reality 但缺 pbk：生成必坏节点，必须拒绝解析（返回 None 跳过该行）
         let uri = "vless://uuid-x@v.example.com:443/?security=reality&sni=s.example.com#reality-%E8%8A%82%E7%82%B9";
-        assert!(parse_vless_uri(uri).is_none(), "缺 pbk 的 reality 节点应被拒绝");
+        assert!(
+            parse_vless_uri(uri).is_none(),
+            "缺 pbk 的 reality 节点应被拒绝"
+        );
     }
 
     #[test]
@@ -936,7 +1088,10 @@ mod tests {
         let uri = "vless://uuid-x@v.example.com:443/?type=ws&path=/ws&host=cdn.example.com#ws-%E8%8A%82%E7%82%B9";
         let parsed = parse_vless_uri(uri).expect("vless ws 应该解析成功");
         assert_eq!(parsed.raw_json["transport"]["type"], "ws");
-        assert_eq!(parsed.raw_json["transport"]["headers"]["Host"], "cdn.example.com");
+        assert_eq!(
+            parsed.raw_json["transport"]["headers"]["Host"],
+            "cdn.example.com"
+        );
     }
 
     #[test]
@@ -955,5 +1110,3 @@ mod tests {
         assert!(parse_vmess_uri(&uri).is_none(), "超范围端口应拒绝解析");
     }
 }
-
-
