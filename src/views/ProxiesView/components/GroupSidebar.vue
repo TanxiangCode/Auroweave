@@ -50,11 +50,11 @@ const filteredRegionGroups = computed(() => {
   return props.regionGroups.filter(g => g.tag.toLowerCase().includes(kw));
 });
 
-/** 自定义分组显示列表（tag 去前缀得到显示名） */
+/** 自定义分组显示列表（真实组 custom-、虚拟组 custom: 均去除内部前缀） */
 const customGroupItems = computed(() =>
   (props.customGroups ?? []).map((g) => ({
     group: g,
-    name: g.tag.startsWith("custom:") ? g.tag.slice("custom:".length) : g.tag,
+    name: g.tag.replace(/^custom[:-]/, ""),
   }))
 );
 
@@ -316,30 +316,48 @@ function getGroupTypeLabel(tag: string, type: string): string {
           class="group-item-wrapper"
         >
           <button
-            class="group-card-item custom"
-            :class="{ active: group.tag === selectedGroupTag }"
+            class="group-card-item"
+            :class="{
+              active: group.tag === selectedGroupTag,
+              'in-route': group.tag.startsWith('custom-') && routingGroupTags.has(group.tag)
+            }"
             @click="emit('select', group.tag)"
           >
             <div class="group-header-info">
               <div class="group-name-wrapper">
+                <BaseIcon name="GitFork" :size="14" class="group-type-icon" />
                 <span class="group-name" :title="name">{{ name }}</span>
+                <span
+                  v-if="group.tag.startsWith('custom-') && routingGroupTags.has(group.tag)"
+                  class="route-pulse-dot"
+                  title="当前活跃出口链路成员"
+                ></span>
               </div>
-              <!-- 真实策略组（custom- 前缀）显示内核类型；虚拟匹配组显示「本地」 -->
-              <span v-if="group.tag.includes('custom-')" class="group-type-badge custom-badge">
+              <!-- 与地区分组复用同一徽章视觉，仅保留类型文案差异 -->
+              <span v-if="group.tag.startsWith('custom-')" class="group-type-badge region">
                 {{ group.type === 'urltest' ? '优选' : group.type === 'selector' ? '选择' : group.type }}
               </span>
-              <span v-else class="group-type-badge custom-badge">本地</span>
+              <span v-else class="group-type-badge region">本地</span>
             </div>
             <div class="group-footer-info">
-              <span v-if="group.now" class="group-current-node muted">{{ group.now }}</span>
-              <span v-else-if="group.proxies.length > 0" class="group-current-node muted">
+              <span
+                v-if="group.now"
+                class="group-current-node"
+                :class="{
+                  'highlight-active': group.tag.startsWith('custom-') && routingGroupTags.has(group.tag)
+                }"
+                :title="group.tag.startsWith('custom-') ? `当前出口: ${group.now}` : group.now"
+              >
+                {{ group.now }}
+              </span>
+              <span v-else-if="group.proxies.length > 0" class="group-current-node">
                 {{ group.proxies.length }} 个节点
               </span>
               <span v-else class="group-current-node muted">空分组</span>
             </div>
           </button>
           <button
-            class="btn-edit-rule"
+            class="btn-group-config"
             title="编辑该分组规则"
             @click.stop="emit('edit-rule', group.tag)"
           >
@@ -561,18 +579,7 @@ function getGroupTypeLabel(tag: string, type: string): string {
   box-shadow: 0 0 12px var(--accent-cyan-glow);
 }
 
-/* 自定义虚拟分组徽章与时效提示 */
-.group-type-badge.custom-badge {
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: var(--radius-xs);
-  background: var(--layer-3);
-  color: var(--text-tertiary);
-  border: 1px solid var(--border-subtle);
-  font-family: var(--font-mono);
-  flex-shrink: 0;
-}
-
+/* 自定义分组时效提示 */
 .custom-group-hint {
   margin-top: var(--space-2);
   padding: var(--space-2) var(--space-3);
@@ -708,33 +715,6 @@ function getGroupTypeLabel(tag: string, type: string): string {
 }
 
 .btn-group-config:hover {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan);
-}
-
-/* 自定义分组卡片右侧的编辑入口（hover 显示） */
-.btn-edit-rule {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-left: 4px;
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xs);
-  color: var(--text-tertiary);
-  cursor: pointer;
-  opacity: 0;
-  transition: all var(--duration-fast) var(--ease-out);
-  flex-shrink: 0;
-}
-
-.group-item-wrapper:hover .btn-edit-rule {
-  opacity: 1;
-}
-
-.btn-edit-rule:hover {
   color: var(--accent-cyan);
   border-color: var(--accent-cyan);
 }
