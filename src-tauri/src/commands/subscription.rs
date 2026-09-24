@@ -1312,16 +1312,40 @@ pub async fn subscription_inspect(
 
     let settings = crate::commands::settings::settings_get_internal(&app_handle);
     let (mixed_port, clash_api_port) = crate::speedtest::get_configured_ports(&app_handle);
-    let config_builder = ConfigBuilder::new(filtered_outbounds.clone())
+    // 预览应尽量反映当前真正会生成配置的聚合节点，而不是孤立单订阅节点。
+    let preview_outbounds = crate::commands::subscription::collect_active_outbounds()
+        .unwrap_or_else(|_| filtered_outbounds.clone());
+    let unlock_state: std::collections::HashMap<String, serde_json::Value> =
+        crate::core::stats_db::get_latest_unlock_per_node()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|record| {
+                record
+                    .services
+                    .as_object()
+                    .map(|services| (record.node_tag, serde_json::Value::Object(services.clone())))
+            })
+            .collect();
+    let config_dir = crate::get_config_dir();
+    let geosite_path = config_dir.join("geosite-cn.srs");
+    let geoip_path = config_dir.join("geoip-cn.srs");
+    let config_builder = ConfigBuilder::new(preview_outbounds)
         .with_ports(mixed_port, clash_api_port)
         .with_allow_lan(settings.allow_lan)
+        .with_local_rule_sets(
+            geosite_path.exists().then(|| geosite_path.to_string_lossy().to_string()),
+            geoip_path.exists().then(|| geoip_path.to_string_lossy().to_string()),
+        )
         .with_group_configs(settings.group_configs.clone())
+        .with_custom_groups(settings.custom_group_rules.clone())
+        .with_unlock_state(unlock_state)
         .with_dns(
             settings.dns_remote_doh.clone(),
             settings.dns_timeout_secs,
             settings.dns_optimistic_cache,
             settings.dns_smart_routing_v2,
         )
+        .with_dns_mode(settings.dns_mode.clone())
         .with_bootstrap_doh(settings.dns_bootstrap_doh.clone())
         .with_bootstrap_backup_doh(settings.dns_bootstrap_backup_doh.clone());
     let final_config = config_builder.build().unwrap_or_default();
