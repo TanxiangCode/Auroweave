@@ -224,6 +224,9 @@ extern "C" {
     fn macos_set_tray_attributed_title(text: *const std::os::raw::c_char);
 }
 
+/// 状态栏双排标题中单个速率槽位的固定宽度：4 字符数值 + 1 字符单位。
+const TRAY_SPEED_SLOT_WIDTH: usize = 5;
+
 /// 刷新托盘网速显示核心逻辑
 pub fn update_tray_speed_display(app_handle: &AppHandle, up_bps: u64, down_bps: u64, is_active: bool) {
     // 使用 30s TTL 缓存读取（show_tray_speed, 端口），避免 1~2s 高频读盘
@@ -232,8 +235,9 @@ pub fn update_tray_speed_display(app_handle: &AppHandle, up_bps: u64, down_bps: 
         if show_tray_speed && is_active {
             #[cfg(target_os = "macos")]
             {
-                // 双排显示：第一行上行速度，第二行下行速度，右侧速度文本右对齐 (7.3pt 等宽数字)
-                let title_text = format_dual_line_speed(up_bps, down_bps);
+                // 双排固定槽位：第一行上行、第二行下行。每行等宽且总高度固定，
+                // 既节省菜单栏水平空间，也避免单位/位数变化造成宽度抖动。
+                let title_text = format_status_bar_speed(up_bps, down_bps);
                 let _ = tray.set_title(Some(&title_text));
                 let c_text = std::ffi::CString::new(title_text).unwrap_or_default();
                 unsafe {
@@ -241,14 +245,17 @@ pub fn update_tray_speed_display(app_handle: &AppHandle, up_bps: u64, down_bps: 
                 }
             }
 
-            let up_compact = format_speed_compact(up_bps);
-            let down_compact = format_speed_compact(down_bps);
-            let tooltip_text = format!("Auroweave\n↑ {}\n↓ {}", up_compact, down_compact);
+            let tooltip_text = format!(
+                "Auroweave · 实时网速\n↑ {}\n↓ {}",
+                format_speed_compact(up_bps),
+                format_speed_compact(down_bps)
+            );
             let _ = tray.set_tooltip(Some(tooltip_text));
         } else {
             #[cfg(target_os = "macos")]
             {
-                let _ = tray.set_title(None::<&str>);
+                // tray-icon 的 set_title(None) 不会主动清空 macOS 标题，
+                // 交给原生渲染函数同时清除普通标题和富文本标题。
                 let c_empty = std::ffi::CString::new("").unwrap_or_default();
                 unsafe {
                     macos_set_tray_attributed_title(c_empty.as_ptr());
@@ -259,41 +266,62 @@ pub fn update_tray_speed_display(app_handle: &AppHandle, up_bps: u64, down_bps: 
     }
 }
 
-
-/// 格式化双排网速（左侧箭头，右侧速度数值和单位右对齐）
-fn format_dual_line_speed(up_bps: u64, down_bps: u64) -> String {
-    let up_raw = format_speed_compact(up_bps);
-    let down_raw = format_speed_compact(down_bps);
-
-    // 对齐右侧字符串宽度
-    let max_len = up_raw.chars().count().max(down_raw.chars().count());
-    let up_aligned = format!("{:>width$}", up_raw, width = max_len);
-    let down_aligned = format!("{:>width$}", down_raw, width = max_len);
-
-    format!("↑ {}\n↓ {}", up_aligned, down_aligned)
+/// 格式化 macOS 状态栏双排标题。
+///
+/// 上行在第一行、下行在第二行；两行使用相同宽度的槽位。单位缩写为 B/K/M/G/T/P/E，
+/// 完整单位只在 tooltip 中展示。标题宽度和高度均固定，单位或位数切换不会抖动。
+fn format_status_bar_speed(up_bps: u64, down_bps: u64) -> String {
+    format!(
+        "↑ {}\n↓ {}",
+        format_speed_slot(up_bps),
+        format_speed_slot(down_bps)
+    )
 }
 
-/// 紧凑网速格式化（带统一单位与数字排版）
+/// 将速率格式化为固定 5 字符的状态栏槽位，例如 `  1.0K`、` 512B`、`12.3M`。
+fn format_speed_slot(bytes_per_sec: u64) -> String {
+    let mut value = bytes_per_sec as f64;
+    let mut unit = "B";
+    for next_unit in ["K", "M", "G", "T", "P", "E"] {
+        if value < 1024.0 {
+            break;
+        }
+        value /= 1024.0;
+        unit = next_unit;
+    }
+
+    // 100 以下保留一位小数，100 及以上使用整数；先按显示精度舍入，避免
+    // 99.99 被格式化成六字符的 "100.0M"。B 级速率始终使用整数。
+    let rounded_tenths = (value * 10.0).round() / 10.0;
+    let number = if unit != "B" && rounded_tenths > 0.0 && rounded_tenths < 100.0 {
+        format!("{rounded_tenths:.1}")
+    } else {
+        format!("{value:.0}")
+    };
+    format!("{number:>width$}{unit}", width = TRAY_SPEED_SLOT_WIDTH - 1)
+}
+
+/// Tooltip 使用的完整紧凑网速格式（带空格和 `/s`）。
 fn format_speed_compact(bytes_per_sec: u64) -> String {
     if bytes_per_sec < 1024 {
-        format!("{} B/s", bytes_per_sec)
+        format!("{bytes_per_sec} B/s")
     } else if bytes_per_sec < 1024 * 1024 {
         let kb = bytes_per_sec as f64 / 1024.0;
         if kb < 100.0 {
-            format!("{:.1} KB/s", kb)
+            format!("{kb:.1} KB/s")
         } else {
-            format!("{:.0} KB/s", kb)
+            format!("{kb:.0} KB/s")
         }
     } else if bytes_per_sec < 1024 * 1024 * 1024 {
         let mb = bytes_per_sec as f64 / (1024.0 * 1024.0);
         if mb < 100.0 {
-            format!("{:.1} MB/s", mb)
+            format!("{mb:.1} MB/s")
         } else {
-            format!("{:.0} MB/s", mb)
+            format!("{mb:.0} MB/s")
         }
     } else {
         let gb = bytes_per_sec as f64 / (1024.0 * 1024.0 * 1024.0);
-        format!("{:.2} GB/s", gb)
+        format!("{gb:.2} GB/s")
     }
 }
 
@@ -353,6 +381,60 @@ fn start_tray_traffic_ticker(app_handle: AppHandle) {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_speed_compact, format_speed_slot, format_status_bar_speed};
+
+    #[test]
+    fn status_bar_speed_uses_fixed_direction_order() {
+        assert_eq!(
+            format_status_bar_speed(512, 1536),
+            "↑  512B\n↓  1.5K"
+        );
+        assert_eq!(
+            format_status_bar_speed(0, 12 * 1024 * 1024),
+            "↑    0B\n↓ 12.0M"
+        );
+    }
+
+    #[test]
+    fn status_bar_speed_slots_switch_units_without_changing_width() {
+        let samples = [
+            0,
+            1,
+            1023,
+            1024,
+            10 * 1024,
+            1024 * 1024,
+            1024 * 1024 * 1024,
+            u64::MAX,
+        ];
+
+        for bytes_per_sec in samples {
+            assert_eq!(
+                format_speed_slot(bytes_per_sec).chars().count(),
+                5,
+                "unexpected slot width for {bytes_per_sec}"
+            );
+        }
+
+        assert_eq!(format_speed_slot(0), "   0B");
+        assert_eq!(format_speed_slot(1536), " 1.5K");
+        assert_eq!(format_speed_slot(5 * 1024 * 1024), " 5.0M");
+        assert_eq!(format_speed_slot(102_390), " 100K");
+        assert_eq!(format_speed_slot(100 * 1024), " 100K");
+        assert_eq!(format_speed_slot(3 * 1024 * 1024 * 1024), " 3.0G");
+        assert_eq!(format_speed_slot(u64::MAX), "16.0E");
+    }
+
+    #[test]
+    fn tooltip_speed_keeps_readable_units() {
+        assert_eq!(format_speed_compact(0), "0 B/s");
+        assert_eq!(format_speed_compact(1536), "1.5 KB/s");
+        assert_eq!(format_speed_compact(5 * 1024 * 1024), "5.0 MB/s");
+    }
 }
 
 

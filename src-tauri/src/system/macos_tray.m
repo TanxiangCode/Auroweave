@@ -1,62 +1,75 @@
 #import <Cocoa/Cocoa.h>
 
-/// 递归查找并设置所有 NSStatusBarButton 的 AttributedString
-static BOOL apply_attributed_title_to_view(NSView *view, NSAttributedString *attrString) {
-    if (!view) return NO;
-    BOOL found = NO;
-    if ([view isKindOfClass:[NSButton class]]) {
-        NSButton *btn = (NSButton *)view;
-        [btn setAttributedTitle:attrString];
-        found = YES;
+/// 判断视图是否为 Auroweave 自己的 Tauri 状态栏按钮。
+/// Tauri 会在 NSStatusBarButton 下挂载 TaoTrayTarget 点击层，以它作为可靠边界，
+/// 避免把同进程中的其他状态栏项目一起改写。
+static BOOL is_auroweave_tray_button(NSView *view) {
+    if (![view isKindOfClass:[NSButton class]]) return NO;
+
+    Class trayTargetClass = NSClassFromString(@"TaoTrayTarget");
+    if (!trayTargetClass) return NO;
+    for (NSView *subview in ((NSButton *)view).subviews) {
+        if ([subview isKindOfClass:trayTargetClass]) return YES;
     }
-    for (NSView *sub in view.subviews) {
-        if (apply_attributed_title_to_view(sub, attrString)) {
-            found = YES;
-        }
-    }
-    return found;
+    return NO;
 }
 
-/// 设置 macOS 状态栏托盘按钮的富文本标题（7.3pt 常规不加粗等宽数字，双排高度 16pt 与图标 1:1 绝对垂直居中对齐，右对齐）
+/// 在状态栏窗口树中只查找 Auroweave 自己的按钮。
+static NSButton *find_auroweave_tray_button(NSView *view) {
+    if (is_auroweave_tray_button(view)) {
+        return (NSButton *)view;
+    }
+    for (NSView *subview in view.subviews) {
+        NSButton *button = find_auroweave_tray_button(subview);
+        if (button) return button;
+    }
+    return nil;
+}
+
+/// 设置 macOS 状态栏网速为双排定宽布局。
+///
+/// 上、下行各自使用固定宽度槽位，并以 7.5pt 系统等宽字体和 8pt 固定行高呈现。
+/// 总高度 16pt，可与 18pt 托盘图标一起稳定地垂直居中，不依赖负基线偏移。
 void macos_set_tray_attributed_title(const char *text) {
-    NSString *capturedString = nil;
-    if (text && strlen(text) > 0) {
-        capturedString = [NSString stringWithUTF8String:text];
-    }
-    if (!capturedString) {
-        capturedString = @"";
-    }
+    // dispatch 会复制 Block 并保留 Objective-C 对象；使用 alloc/init 避免
+    // 跨线程调用时把自动释放对象交给无 pool 的 Rust 工作线程。
+    NSString *title = text && strlen(text) > 0
+        ? [[NSString alloc] initWithUTF8String:text]
+        : @"";
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        if ([capturedString length] == 0) {
-            NSAttributedString *emptyAttr = [[NSAttributedString alloc] initWithString:@""];
-            for (NSWindow *window in [NSApplication sharedApplication].windows) {
-                if ([window isKindOfClass:NSClassFromString(@"NSStatusBarWindow")]) {
-                    apply_attributed_title_to_view(window.contentView, emptyAttr);
-                }
+        @autoreleasepool {
+            NSAttributedString *attributedTitle = nil;
+            if ([title length] > 0) {
+                NSMutableParagraphStyle *paragraphStyle =
+                    [[[NSMutableParagraphStyle alloc] init] autorelease];
+                paragraphStyle.alignment = NSTextAlignmentLeft;
+                paragraphStyle.minimumLineHeight = 8.0;
+                paragraphStyle.maximumLineHeight = 8.0;
+                paragraphStyle.lineBreakMode = NSLineBreakByClipping;
+                paragraphStyle.lineSpacing = 0.0;
+                paragraphStyle.paragraphSpacing = 0.0;
+                paragraphStyle.hyphenationFactor = 0.0;
+
+                NSDictionary *attributes = @{
+                    NSFontAttributeName: [NSFont monospacedSystemFontOfSize:7.5
+                                                                    weight:NSFontWeightRegular],
+                    NSParagraphStyleAttributeName: paragraphStyle,
+                    NSKernAttributeName: @0.0,
+                };
+                attributedTitle = [[[NSAttributedString alloc] initWithString:title
+                                                                   attributes:attributes] autorelease];
             }
-            return;
-        }
 
-        NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
-        paragraphStyle.alignment = NSTextAlignmentRight;
-        paragraphStyle.maximumLineHeight = 8.0;
-        paragraphStyle.minimumLineHeight = 8.0;
-        paragraphStyle.lineSpacing = 0.0;
-        paragraphStyle.paragraphSpacing = 0.0;
+            for (NSWindow *window in [NSApplication sharedApplication].windows) {
+                if (![window isKindOfClass:NSClassFromString(@"NSStatusBarWindow")]) continue;
+                NSButton *button = find_auroweave_tray_button(window.contentView);
+                if (!button) continue;
 
-        // 使用 7.3pt 常规字重 (Regular) 等宽数字字体，配合 -2.1pt 基线负偏移，使双排文字与左侧图标绝对垂直居中
-        NSDictionary *attrs = @{
-            NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:7.3 weight:NSFontWeightRegular],
-            NSParagraphStyleAttributeName: paragraphStyle,
-            NSBaselineOffsetAttributeName: @(-2.1),
-        };
-
-        NSAttributedString *attrString = [[NSAttributedString alloc] initWithString:capturedString attributes:attrs];
-
-        for (NSWindow *window in [NSApplication sharedApplication].windows) {
-            if ([window isKindOfClass:NSClassFromString(@"NSStatusBarWindow")]) {
-                apply_attributed_title_to_view(window.contentView, attrString);
+                // Tauri 在 title=None 时不会主动清空 NSButton，这里显式清空普通标题，
+                // 防止旧文本在富文本样式变化或系统回退时重新出现。
+                [button setTitle:@""];
+                [button setAttributedTitle:attributedTitle];
             }
         }
     });

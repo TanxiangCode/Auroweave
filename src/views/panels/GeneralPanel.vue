@@ -101,7 +101,7 @@ async function save(field: keyof AppSettings) {
         <div class="setting-item">
           <div class="item-label">
             <span>任务栏 / 托盘实时显示网速</span>
-            <span class="sub-label">在系统顶部菜单栏或任务栏托盘中实时展示当前上下行吞吐速率 (↑ 0KB/s ↓ 0KB/s)</span>
+            <span class="sub-label">在系统顶部菜单栏中以双排定宽布局展示上下行速率（上行 ↑ 1.2M，下行 ↓ 12.3M）</span>
           </div>
           <input
             type="checkbox"
