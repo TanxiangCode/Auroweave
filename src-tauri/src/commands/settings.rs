@@ -1353,7 +1353,9 @@ pub async fn settings_restore_backup(app_handle: tauri::AppHandle) -> ApiRespons
     log::info!("[settings] 已成功还原 config.backup.json 至 config.json");
 
     // 重新应用设置覆写
-    let _ = rebuild_config_from_settings(&app_handle);
+    if let Err(e) = rebuild_config_from_settings(&app_handle) {
+        return ApiResponse::err(format!("备份已还原，但重建配置失败: {}", e), 500);
+    }
 
     // 重新拉起/重载内核
     if let Err(e) = crate::system::startup::apply_core_mode_with_fallback(&app_handle).await {
