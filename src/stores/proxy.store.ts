@@ -4,7 +4,7 @@
  */
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import type { ProxyGroup, ProxyNode, CustomGroupRule } from "@/types";
+import type { ApiResponse, ProxyGroup, ProxyNode, CustomGroupRule } from "@/types";
 import { getProxyGroups, getGroupNodes, selectGroupNode, setProxyMode, getProxyMode, updateGroupConfig as updateGroupConfigApi } from "@/api/ipc/proxy";
 import { RECENT_GROUPS_MAX } from "@/constants";
 import { useToast } from "@/composables/useToast";
@@ -187,7 +187,7 @@ export const useProxyStore = defineStore("proxy", () => {
     groups.value.find((g) => g.type === "selector")
   );
 
-  /** 递归物理工作节点追溯计算属性，解决负载均衡与自动组的显示盲区 */
+  /** 递归物理工作节点追溯计算属性，解决独立优选与自动组的显示盲区 */
   const workingNodeName = computed(() => {
     const mainGroup = groups.value.find((g) => g.tag === "proxy");
     if (!mainGroup) return "直连";
@@ -213,7 +213,7 @@ export const useProxyStore = defineStore("proxy", () => {
 
     if (path.length > 0) {
       const groupLabel = path[0] === "balance"
-        ? "负载均衡"
+        ? "独立优选"
         : path[0] === "auto"
         ? "自动选择"
         : path[0];
@@ -226,13 +226,37 @@ export const useProxyStore = defineStore("proxy", () => {
   });
 
   // ---- 动作 ----
-  async function syncProxyMode() {
-    const res = await getProxyMode();
-    if (res.success && res.data) {
-      proxyMode.value = res.data.toLowerCase() as any;
-    } else {
-      proxyMode.value = "direct";
+  type ProxyMode = "global" | "rule" | "direct";
+
+  function normalizeProxyMode(value: unknown): ProxyMode | null {
+    const mode = String(value ?? "").toLowerCase();
+    return mode === "global" || mode === "rule" || mode === "direct" ? mode : null;
+  }
+
+  /** proxyStore 与 settingsStore 共用同一份前端模式状态，避免后续 TUN 决策读取旧值。 */
+  function setProxyModeState(mode: ProxyMode) {
+    proxyMode.value = mode;
+    settingsStore.settings.proxy_mode = mode;
+  }
+
+  async function readAppliedProxyMode(fallback: ProxyMode): Promise<ProxyMode> {
+    try {
+      const res = await getProxyMode();
+      if (res.success) {
+        const applied = normalizeProxyMode(res.data);
+        if (applied) return applied;
+      }
+    } catch (error) {
+      console.error("回读代理模式失败:", error);
     }
+    return fallback;
+  }
+
+  async function syncProxyMode() {
+    const fallback = normalizeProxyMode(settingsStore.settings.proxy_mode)
+      ?? normalizeProxyMode(proxyMode.value)
+      ?? "rule";
+    setProxyModeState(await readAppliedProxyMode(fallback));
   }
 
   async function fetchGroups() {
@@ -378,14 +402,29 @@ export const useProxyStore = defineStore("proxy", () => {
     return res;
   }
 
-  async function changeProxyMode(mode: "global" | "rule" | "direct") {
-    const res = await setProxyMode(mode);
-    if (res.success) {
-      proxyMode.value = mode;
-    } else {
-      toast.error("切换代理模式失败", "请确认 Sing-box 核心是否在正常运行。");
+  async function changeProxyMode(mode: ProxyMode): Promise<ApiResponse<void>> {
+    // RouteModePanel 的 v-model 会在调用前先改 settingsStore.proxy_mode；
+    // proxyMode 才是本次操作前的稳定状态，必须优先用于回滚。
+    const previousMode = normalizeProxyMode(proxyMode.value)
+      ?? normalizeProxyMode(settingsStore.settings.proxy_mode)
+      ?? "rule";
+    try {
+      const res = await setProxyMode(mode);
+      if (res.success) {
+        setProxyModeState(mode);
+        return res;
+      }
+
+      // 后端可能已保存设置、但运行时 PATCH/启动失败；以 Clash API 实际值为准恢复 UI。
+      setProxyModeState(await readAppliedProxyMode(previousMode));
+      toast.error("切换代理模式失败", res.error ?? "请确认 Sing-box 核心是否在正常运行。");
+      return res;
+    } catch (error) {
+      setProxyModeState(await readAppliedProxyMode(previousMode));
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error("切换代理模式失败", message || "请确认 Sing-box 核心是否在正常运行。");
+      return { success: false, error: message, code: 500 };
     }
-    return res;
   }
 
   // === 分组配置持久化（P0 修复新增）===

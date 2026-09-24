@@ -9,6 +9,7 @@ import { useRoute } from "vue-router";
 import { useProxyStore } from "@/stores/proxy.store";
 import { storeToRefs } from "pinia";
 import type { ProxyGroup, ProxyNode } from "@/types";
+import { hasProxyGroupTag } from "../utils/proxy-page";
 
 /** 系统内置分组标签（主策略组） */
 const systemGroupTags = ["proxy", "auto", "balance"];
@@ -164,14 +165,15 @@ export function useProxyGroups() {
           // 预取失败不阻塞分组初始化（如 proxy 组尚未就绪），下次选中时自然加载
         }
       }
+      // customGroups 同时包含内核真实 custom-* 与仅前端存在的 custom:* 虚拟组。
+      // query 校验必须覆盖二者，否则 /proxies?group=custom:xxx 会错误回退到首个分组。
       const qGroup = route.query.group as string;
-      const qExists = qGroup && groups.value.some((g) => g.tag === qGroup);
-      const currentExists = selectedGroupTag.value &&
-        (isCustomGroup.value
-          ? customGroups.value.some((g) => g.tag === selectedGroupTag.value)
-          : selectedGroupTag.value.startsWith("custom-")
-            ? groups.value.some((g) => g.tag === selectedGroupTag.value)
-            : groups.value.some((g) => g.tag === selectedGroupTag.value));
+      const qExists = hasProxyGroupTag(groups.value, customGroups.value, qGroup);
+      const currentExists = hasProxyGroupTag(
+        groups.value,
+        customGroups.value,
+        selectedGroupTag.value
+      );
 
       if (qExists) {
         selectedGroupTag.value = qGroup;

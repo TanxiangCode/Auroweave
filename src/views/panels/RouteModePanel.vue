@@ -9,7 +9,7 @@
         </div>
         <select v-model="settingsStore.settings.proxy_mode" class="select-input" @change="saveMode">
           <option value="rule">规则模式 (Rule)</option>
-          <option value="global">全局代理 (Global)</option>
+          <option value="global">全局模式 (Global)</option>
           <option value="direct">直连模式 (Direct)</option>
         </select>
       </div>
@@ -161,8 +161,10 @@ async function save() {
 async function saveMode() {
   // proxyStore.changeProxyMode 内部已通过 proxy_set_mode 保存设置并重建配置
   // 这里不再调用 save()，避免重复保存导致不必要的内核重启
-  await proxyStore.changeProxyMode(settingsStore.settings.proxy_mode);
-  toast.success("代理模式已切换");
+  const res = await proxyStore.changeProxyMode(settingsStore.settings.proxy_mode);
+  if (res.success) {
+    toast.success("代理模式已切换");
+  }
 }
 </script>
 

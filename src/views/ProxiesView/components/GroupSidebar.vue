@@ -128,7 +128,7 @@ function getRegionBadge(tag: string): RegionBadgeInfo {
 function getGroupTypeLabel(tag: string, type: string): string {
   if (tag === "proxy") return "主选择器";
   if (tag === "auto") return "自动优选";
-  if (tag === "balance") return "负载均衡";
+  if (tag === "balance") return "独立优选";
   if (type === "urltest") return "URLTest";
   return type.toUpperCase();
 }

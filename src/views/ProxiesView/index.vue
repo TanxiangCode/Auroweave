@@ -128,7 +128,7 @@ async function saveGroupConfig() {
       url: cfg.url,
     });
     if (res.success) {
-      toast.success("分组配置已更新", "将在下次重建内核配置时生效");
+      toast.success("分组配置已更新", "配置已写入，重启内核后生效");
       showGroupEditModal.value = false;
     } else {
       toast.error("保存分组配置失败", res.error || "未知错误");

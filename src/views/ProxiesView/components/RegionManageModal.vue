@@ -80,7 +80,7 @@ const {
               <option value="virtual">仅本地匹配（不进内核）</option>
               <option value="selector">Selector 手动选择</option>
               <option value="urltest">URLTest 自动优选</option>
-              <option value="balance">Balance 负载均衡</option>
+              <option value="balance">Balance 独立自动优选</option>
             </select>
             <span v-if="editingRule.group_type && editingRule.group_type !== 'virtual'" class="form-hint">
               将生成真实策略组 custom-{{ editingRule.name || '…' }} 并重启内核，可在节点列表中直接切换

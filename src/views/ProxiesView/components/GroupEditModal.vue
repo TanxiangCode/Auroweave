@@ -36,7 +36,7 @@ const emit = defineEmits<{
           <div class="form-row" v-if="groupTag === 'balance'">
             <label>容差 (ms)</label>
             <input v-model.number="config.tolerance" type="number" class="form-input" min="0" max="500" />
-            <span class="form-hint">延迟差在此范围内的节点会被轮询</span>
+            <span class="form-hint">仅在容差范围内优先选择延迟更低的节点</span>
           </div>
           <div class="form-row">
             <label>测速 URL</label>

@@ -32,7 +32,7 @@
   --accent-green-glow: rgba(52, 211, 153, 0.2);
   --accent-red: #ef4444;                     /* 警告/错误 */
   --accent-red-glow: rgba(239, 68, 68, 0.2);
-  --accent-orange: #f97316;                  /* 负载均衡风险提示 */
+  --accent-orange: #f97316;                  /* 橙色风险提示 */
   --surface-deep: rgba(18, 22, 34, 0.95);    /* 深色浮层背景 */
   --status-success: #4ade80;                 /* 直连绿 */
   --status-warning: #fbbf24;                 /* 暂停黄 */

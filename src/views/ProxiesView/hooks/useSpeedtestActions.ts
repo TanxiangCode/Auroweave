@@ -10,6 +10,7 @@ import { useSpeedtestStore } from "@/stores/speedtest.store";
 import { useToast } from "@/composables/useToast";
 import { bytesToMB } from "@/utils/format";
 import type { ProxyNode } from "@/types";
+import { getLatencyTestNodeTags } from "../utils/proxy-page";
 
 interface UseSpeedtestActionsOptions {
   selectedGroupTag: Ref<string>;
@@ -51,10 +52,9 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
   async function handleRunLatency() {
     if (!selectedGroupTag.value) return;
     toast.info("正在并发测试延迟...");
-    const nodes = proxyStore.nodeMap.get(selectedGroupTag.value) ?? [];
-    const tags = nodes
-      .filter((n) => !["selector", "urltest", "fallback"].includes(n.type.toLowerCase()))
-      .map((n) => n.tag);
+    // rawNodes 对真实组来自 nodeMap，对 custom:* 虚拟组来自 proxy 主组节点池本地匹配。
+    // 虚拟组不会拥有 nodeMap[custom:*]，直接读 nodeMap 会把有节点的虚拟组误判为空。
+    const tags = getLatencyTestNodeTags(rawNodes.value);
 
     if (tags.length === 0) {
       toast.warning("该策略组内没有可供测试的真实节点");
@@ -63,11 +63,15 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
 
     await speedtestStore.testLatency(selectedGroupTag.value, tags);
     
-    // 刷新分组状态（同步内核 auto 策略组最新 now 字段与节点状态）
+    // 刷新真实策略组状态；虚拟 custom:* 不存在于内核，无需发无效 IPC。
     await proxyStore.refreshGroups();
-    await proxyStore.fetchGroupNodes(selectedGroupTag.value);
+    if (!selectedGroupTag.value.startsWith("custom:")) {
+      await proxyStore.fetchGroupNodes(selectedGroupTag.value);
+    }
 
-    const success = Object.values(speedtestStore.latencyMap).filter((v) => v > 0).length;
+    const success = tags.filter(
+      (tag) => (speedtestStore.latencyMap[tag] ?? 0) > 0
+    ).length;
     toast.success("延迟测试完成", `有效响应: ${success} / 总计: ${tags.length}`);
   }
 

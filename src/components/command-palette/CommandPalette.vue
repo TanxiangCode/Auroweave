@@ -104,8 +104,10 @@ const allCommands = computed<CommandItem[]>(() => {
       title: "切换到 规则模式 (Rule)",
       subtitle: "智能分流，常用国内流量直连",
       action: async () => {
-        await proxyStore.changeProxyMode("rule");
-        toast.success("代理模式已切换", "规则分流模式 (Rule)");
+        const res = await proxyStore.changeProxyMode("rule");
+        if (res.success) {
+          toast.success("代理模式已切换", "规则分流模式 (Rule)");
+        }
       },
     },
     {
@@ -113,10 +115,12 @@ const allCommands = computed<CommandItem[]>(() => {
       category: "代理模式",
       icon: "Globe",
       title: "切换到 全局模式 (Global)",
-      subtitle: "所有网络流量强制走代理",
+      subtitle: "未命中显式规则与私网直连的流量走代理",
       action: async () => {
-        await proxyStore.changeProxyMode("global");
-        toast.success("代理模式已切换", "全局代理模式 (Global)");
+        const res = await proxyStore.changeProxyMode("global");
+        if (res.success) {
+          toast.success("代理模式已切换", "全局模式 (Global)");
+        }
       },
     },
     {
@@ -126,8 +130,10 @@ const allCommands = computed<CommandItem[]>(() => {
       title: "切换到 直连模式 (Direct)",
       subtitle: "所有网络流量直连，不经过代理",
       action: async () => {
-        await proxyStore.changeProxyMode("direct");
-        toast.success("代理模式已切换", "直连模式 (Direct)");
+        const res = await proxyStore.changeProxyMode("direct");
+        if (res.success) {
+          toast.success("代理模式已切换", "直连模式 (Direct)");
+        }
       },
     },
 
