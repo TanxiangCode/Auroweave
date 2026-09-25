@@ -5,7 +5,11 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ApiResponse, ThroughputResult } from "@/types";
 import { invokeWithTimeout } from "./client";
-import { LATENCY_TEST_TIMEOUT_MS } from "@/constants";
+import {
+  IPC_TIMEOUT_MAX_MS,
+  LATENCY_BATCH_IPC_GRACE_MS,
+  LATENCY_BATCH_IPC_TIMEOUT_PER_NODE_MS,
+} from "@/constants";
 
 export interface BatchProgressPayload {
   current_index: number;
@@ -19,8 +23,12 @@ export async function runLatencyTest(
   groupTag: string,
   nodeTags: string[]
 ): Promise<ApiResponse<Record<string, number>>> {
-  // 根据受测节点规模自适应调宽超时时长，防止大批量并发测速时触发前端 invoke 超时报错
-  const timeoutMs = Math.max(LATENCY_TEST_TIMEOUT_MS, nodeTags.length * 200 + 5000);
+  // 前端不能只按节点数线性估时：后端受并发、单节点 timeout 和失败重试共同影响。
+  // 这里按 Rust 端允许的最坏情况预留预算，超大订阅也不会超过 setTimeout 安全上限。
+  const timeoutMs = Math.min(
+    IPC_TIMEOUT_MAX_MS,
+    nodeTags.length * LATENCY_BATCH_IPC_TIMEOUT_PER_NODE_MS + LATENCY_BATCH_IPC_GRACE_MS
+  );
   return await invokeWithTimeout("speedtest_run_latency", { groupTag, nodeTags }, timeoutMs);
 }
 

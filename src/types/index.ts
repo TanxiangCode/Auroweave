@@ -341,6 +341,10 @@ export interface AppSettings {
   latency_test_concurrency?: number;
   latency_test_timeout_ms?: number;
   latency_test_url?: string;
+  /** 手动延迟测试：预热持久连接后统计第二次请求 RTT（类似 Mihomo unified-delay） */
+  latency_unified_delay?: boolean;
+  /** 统一延迟是否复用预热连接；关闭后第二次探测使用冷连接，仅用于对照诊断 */
+  latency_persistent_reuse?: boolean;
   /** 置顶收藏的节点 tag 列表（排序时恒排最前） */
   pinned_nodes?: string[];
   /** 首页右翼统计胶囊显隐开关（设置-首页显示；缺省视为开启） */

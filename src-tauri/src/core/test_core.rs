@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Child;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use log::{info, warn};
 
 /// 单批次节点上限（同时占用的端口数）：批次越大进程重启越少，但单配置
 /// 出站数过多会拖慢 sing-box 启动（去重/校验随节点数线性）。32 为经验平衡值。
@@ -34,7 +34,7 @@ pub async fn acquire_global_lock() -> tokio::sync::MutexGuard<'static, ()> {
 }
 
 /// 单节点检测专用基址：批量走 test_core_port_base，单节点错开 500 端口段，
-/// 与并发的批量批次互不干扰（单节点不持全局锁——15s 级检测不值得排队）
+/// 与批量端口段错开；调用方仍必须持有 test-core 全局锁保护共享配置文件。
 pub fn single_node_port_base(port_base: u16) -> u16 {
     port_base.wrapping_add(500)
 }

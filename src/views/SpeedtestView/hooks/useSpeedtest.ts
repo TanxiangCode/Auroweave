@@ -76,8 +76,12 @@ export function useSpeedtest() {
     toast.info("开始节点吞吐量测试", `正在测试: ${nodeTag}`);
     const res = await speedtestStore.testSingleThroughput(nodeTag);
     if (res.success && res.data) {
-      const mbps = (res.data.download_bps / (1024 * 1024)).toFixed(1);
-      toast.success("单节点测速完成", `${nodeTag}: ${mbps} MB/s`);
+      if (res.data.download_bps > 0) {
+        const mbps = (res.data.download_bps / (1024 * 1024)).toFixed(1);
+        toast.success("单节点测速完成", `${nodeTag}: ${mbps} MB/s`);
+      } else {
+        toast.error("测速源不可用", `${nodeTag} 延迟可达，但所有下载测速源均未返回有效数据`);
+      }
     } else {
       toast.error("测速失败", res.error);
     }

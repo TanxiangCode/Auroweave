@@ -17,12 +17,19 @@ export const SINGBOX_API_PORT = 9090;
 // 测速服务器（默认列表，可在设置页覆盖）
 // ============================================================
 
-/** 默认测速 URL 列表，按优先级排序 */
-export const DEFAULT_SPEED_TEST_URLS: string[] = [
-  "https://speed.cloudflare.com/__down?bytes=10000000",
-  "https://fast.com",
-  "https://cachefly.cachefly.net/10mb.test",
-];
+/** 吞吐量测速预设：不同 CDN/服务商，避免单一测速源故障导致整批 0。 */
+export const SPEED_TEST_PRESETS = [
+  {
+    label: "GitHub Release · ripgrep 15.2.0",
+    url: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz",
+  },
+  { label: "Hetzner · Ashburn", url: "https://ash-speed.hetzner.com/100MB.bin" },
+  { label: "OVH · Proof", url: "https://proof.ovh.net/files/10Mb.dat" },
+  { label: "Cloudflare · Speed", url: "https://speed.cloudflare.com/__down?bytes=25000000" },
+] as const;
+
+export const DEFAULT_SPEED_TEST_URL = SPEED_TEST_PRESETS[0].url;
+export const DEFAULT_SPEED_TEST_URLS: string[] = SPEED_TEST_PRESETS.map((item) => item.url);
 
 /** 延迟测速 URL（urltest 出站使用） */
 export const DEFAULT_LATENCY_TEST_URL = "http://www.gstatic.com/generate_204";
@@ -54,7 +61,18 @@ export const THROUGHPUT_TEST_CHUNK_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export const IPC_TIMEOUT_MS = 10_000;        // 普通 IPC 命令超时
 export const SUBSCRIPTION_FETCH_TIMEOUT_MS = 30_000; // 订阅拉取超时
-export const LATENCY_TEST_TIMEOUT_MS = 5_000; // 单次延迟测试超时
+export const LATENCY_TEST_TIMEOUT_MS = 5_000; // 单次延迟测试默认超时
+
+/**
+ * 批量延迟 IPC 的每节点保守超时预算。
+ *
+ * Rust 端允许单节点 timeout 最大 30s，失败后还会等待 400ms 并重试一次；
+ * 显式按最坏情况预留 65s/节点，避免前端先超时、后端进度事件又把已清除的 Dock 复活。
+ * 最终再由后端终止事件负责状态收尾。
+ */
+export const LATENCY_BATCH_IPC_TIMEOUT_PER_NODE_MS = 65_000;
+export const LATENCY_BATCH_IPC_GRACE_MS = 15_000;
+export const IPC_TIMEOUT_MAX_MS = 2_000_000_000;
 
 // ============================================================
 // 累计流量持久化

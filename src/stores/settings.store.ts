@@ -8,7 +8,7 @@ import type { AppSettings } from "@/types";
 import { getSettings, saveSettings } from "@/api/ipc/settings";
 import { useToast } from "@/composables/useToast";
 
-import { DEFAULT_SPEED_TEST_URLS } from "@/constants";
+import { DEFAULT_SPEED_TEST_URL, DEFAULT_SPEED_TEST_URLS } from "@/constants";
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
@@ -34,12 +34,14 @@ const DEFAULT_SETTINGS: AppSettings = {
 
   mixed_port: 8890,
   clash_api_port: 9090,
-  speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000",
+  speed_test_url: DEFAULT_SPEED_TEST_URL,
   speed_test_timeout_secs: 5,
   connection_timeout_secs: 15,
   latency_test_concurrency: 20,
-  latency_test_timeout_ms: 3000,
+  latency_test_timeout_ms: 5000,
   latency_test_url: "http://www.gstatic.com/generate_204",
+  latency_unified_delay: false,
+  latency_persistent_reuse: true,
   pinned_nodes: [],
 
   // DNS / TUN 进阶（sing-box 1.14.0）

@@ -38,7 +38,7 @@ fn default_latency_test_concurrency() -> u32 {
     20
 }
 fn default_latency_test_timeout_ms() -> u64 {
-    3000
+    5000
 }
 fn default_latency_test_url() -> String {
     "http://www.gstatic.com/generate_204".to_string()
@@ -73,6 +73,24 @@ fn default_udp_nat_max() -> u64 {
 }
 fn default_unlock_test_concurrency() -> u32 {
     8
+}
+
+fn apply_settings_migrations(settings: &mut AppSettings) {
+    let legacy_primary = "https://speed.cloudflare.com/__down?bytes=25000000";
+    let legacy_fallback = "https://fast.com";
+    if settings.speed_test_url == legacy_primary
+        && settings.speed_test_urls.len() == 2
+        && settings.speed_test_urls[0] == legacy_primary
+        && settings.speed_test_urls[1] == legacy_fallback
+    {
+        settings.speed_test_url = "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz".to_string();
+        settings.speed_test_urls = vec![
+            "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz".to_string(),
+            "https://ash-speed.hetzner.com/100MB.bin".to_string(),
+            "https://proof.ovh.net/files/10Mb.dat".to_string(),
+            legacy_primary.to_string(),
+        ];
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -151,6 +169,12 @@ pub struct AppSettings {
     pub latency_test_timeout_ms: u64,
     #[serde(default = "default_latency_test_url")]
     pub latency_test_url: String,
+    /// 手动延迟测试使用独立 test-core：先预热持久连接，再统计第二次请求 RTT。
+    #[serde(default)]
+    pub latency_unified_delay: bool,
+
+    #[serde(default = "default_true")]
+    pub latency_persistent_reuse: bool,
 
     /// 置顶收藏的节点 tag 列表（节点卡片星标，排序时恒排最前）
     #[serde(default)]
@@ -233,15 +257,17 @@ impl Default for AppSettings {
             performance_mode: false,
             command_palette_hotkey: "CommandOrControl+Space".to_string(),
             speed_test_urls: vec![
+                "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz".to_string(),
+                "https://ash-speed.hetzner.com/100MB.bin".to_string(),
+                "https://proof.ovh.net/files/10Mb.dat".to_string(),
                 "https://speed.cloudflare.com/__down?bytes=25000000".to_string(),
-                "https://fast.com".to_string(),
             ],
             auto_group_on_import: true,
 
             // 默认端口与超时设定
             mixed_port: 8890,
             clash_api_port: 9090,
-            speed_test_url: "https://speed.cloudflare.com/__down?bytes=25000000".to_string(),
+            speed_test_url: "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz".to_string(),
             speed_test_timeout_secs: 5,
             connection_timeout_secs: 15,
             enable_app_traffic_tracking: true,
@@ -260,8 +286,10 @@ impl Default for AppSettings {
 
             // 延迟测试配置
             latency_test_concurrency: 20,
-            latency_test_timeout_ms: 3000,
+            latency_test_timeout_ms: 5000,
             latency_test_url: "http://www.gstatic.com/generate_204".to_string(),
+            latency_unified_delay: false,
+            latency_persistent_reuse: true,
 
             // 置顶收藏节点（默认空）
             pinned_nodes: Vec::new(),
@@ -321,7 +349,7 @@ pub fn settings_get_internal(_app_handle: &tauri::AppHandle) -> AppSettings {
         }
     }
 
-    let loaded = if path.exists() {
+    let mut loaded = if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
                 settings
@@ -335,6 +363,7 @@ pub fn settings_get_internal(_app_handle: &tauri::AppHandle) -> AppSettings {
         AppSettings::default()
     };
 
+    apply_settings_migrations(&mut loaded);
     *cache = Some((mtime, loaded.clone()));
     loaded
 }
@@ -1438,6 +1467,35 @@ pub async fn group_update_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_settings_default_unified_delay_to_disabled() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("latency_unified_delay");
+        object.remove("latency_persistent_reuse");
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert!(!settings.latency_unified_delay);
+        assert!(settings.latency_persistent_reuse);
+    }
+
+    #[test]
+    fn legacy_default_speed_source_migrates_to_github() {
+        let mut settings = AppSettings::default();
+        settings.speed_test_url = "https://speed.cloudflare.com/__down?bytes=25000000".to_string();
+        settings.speed_test_urls = vec![
+            "https://speed.cloudflare.com/__down?bytes=25000000".to_string(),
+            "https://fast.com".to_string(),
+        ];
+        apply_settings_migrations(&mut settings);
+        assert!(settings.speed_test_url.contains("github.com/BurntSushi/ripgrep"));
+        assert_eq!(settings.speed_test_urls.len(), 4);
+
+        let mut custom = AppSettings::default();
+        custom.speed_test_url = "https://example.com/custom.bin".to_string();
+        apply_settings_migrations(&mut custom);
+        assert_eq!(custom.speed_test_url, "https://example.com/custom.bin");
+    }
 
     #[test]
     fn test_outbound_reference_helpers_follow_actual_tags() {

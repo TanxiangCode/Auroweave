@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use log::{info, warn};
 
 /// 批量解锁检测进度事件（与 speedtest-progress 同形态：result=None 表示开始、
 /// Some 表示完成；终止事件 current_index == total 且 current_node 为空）
@@ -443,7 +443,9 @@ pub async fn unlock_check_single(
         .find(|n| n.tag == node_tag && crate::core::parser::is_valid_proxy_node(n))
     {
         let core = crate::core::test_core::TestCoreManager::new();
-        // 单节点错开 +500 端口段：与并发批量批次互不干扰（不持全局锁）
+        // 单节点也必须持有 test-core 全局锁：所有实例共享 config_test.json。
+        let _core_guard = crate::core::test_core::acquire_global_lock().await;
+        // 单节点错开 +500 端口段；全局锁负责配置/进程互斥。
         let result = match core
             .spawn(std::slice::from_ref(&node), crate::core::test_core::single_node_port_base(port_base))
             .await

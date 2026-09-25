@@ -7,16 +7,32 @@
  * 注意：本面板字段与 DNS 面板无交集——DNS 面板此前重复的
  *       「出站 urltest 延迟测试地址 / Concurrency / Timeout / Interval」已归并至此
  */
-import { ref, onMounted } from "vue";
+import { computed, ref, onMounted } from "vue";
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
-import { DEFAULT_LATENCY_TEST_INTERVAL_SEC, DEFAULT_LATENCY_TEST_TOLERANCE_MS } from "@/constants";
+import {
+  DEFAULT_LATENCY_TEST_INTERVAL_SEC,
+  DEFAULT_LATENCY_TEST_TOLERANCE_MS,
+  SPEED_TEST_PRESETS,
+} from "@/constants";
 
 const settingsStore = useSettingsStore();
 const toast = useToast();
 
 const highlightField = ref<string>("");
+const CUSTOM_SPEED_SOURCE = "__custom__";
+
+/** 预设与自定义输入双向同步：手工改成未知 URL 时自动切到“自定义地址”。 */
+const selectedSpeedSource = computed({
+  get: () =>
+    SPEED_TEST_PRESETS.some((item) => item.url === settingsStore.settings.speed_test_url)
+      ? settingsStore.settings.speed_test_url
+      : CUSTOM_SPEED_SOURCE,
+  set: (value: string) => {
+    if (value !== CUSTOM_SPEED_SOURCE) settingsStore.settings.speed_test_url = value;
+  },
+});
 
 onMounted(() => {
   // 拓扑跳转高亮支持（与其他面板一致）
@@ -54,8 +70,8 @@ async function save() {
             <span class="sub-label">节点延迟连通性测试与出站 urltest 健康检测的探测端点 (返回 HTTP 204)</span>
           </div>
           <input
-            type="text"
             v-model="settingsStore.settings.latency_test_url"
+            type="text"
             class="text-input"
             placeholder="http://www.gstatic.com/generate_204"
             @change="save"
@@ -68,8 +84,8 @@ async function save() {
             <span class="sub-label">一键全量测速时允许的最大并发请求通道数 (推荐: 20~50)</span>
           </div>
           <input
-            type="number"
             v-model.number="settingsStore.settings.latency_test_concurrency"
+            type="number"
             class="num-input"
             min="1"
             max="100"
@@ -80,15 +96,41 @@ async function save() {
         <div class="setting-item">
           <div class="item-label">
             <span>延迟测试超时 (Timeout)</span>
-            <span class="sub-label">单节点 TCP/TLS 握手与连通性超时阈值 (默认: 3000 ms)</span>
+            <span class="sub-label">单节点完整连接与请求超时阈值 (默认: 5000 ms；高延迟订阅可适当增大)</span>
           </div>
           <input
-            type="number"
             v-model.number="settingsStore.settings.latency_test_timeout_ms"
+            type="number"
             class="num-input"
             step="500"
             min="1000"
             max="10000"
+            @change="save"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="item-label">
+            <span>统一延迟统计</span>
+            <span class="sub-label">通过独立 test-core 预热持久连接，统计第二次请求 RTT；更接近 Mihomo unified-delay，不影响内核后台 URLTest</span>
+          </div>
+          <input
+            v-model="settingsStore.settings.latency_unified_delay"
+            type="checkbox"
+            class="switch"
+            @change="save"
+          />
+        </div>
+
+        <div class="setting-item">
+          <div class="item-label">
+            <span>统一模式复用预热连接</span>
+            <span class="sub-label">默认开启；关闭后第二次探测使用冷连接，仅用于对照连接复用带来的差异</span>
+          </div>
+          <input
+            v-model="settingsStore.settings.latency_persistent_reuse"
+            type="checkbox"
+            class="switch"
             @change="save"
           />
         </div>
@@ -106,13 +148,21 @@ async function save() {
             <span>吞吐量下载测速 URL</span>
             <span class="sub-label">节点速度测试时的流式下载数据源</span>
           </div>
-          <input
-            type="text"
-            v-model="settingsStore.settings.speed_test_url"
-            class="text-input"
-            placeholder="https://speed.cloudflare.com/__down?bytes=25000000"
-            @change="save"
-          />
+          <div class="speed-source-controls">
+            <select v-model="selectedSpeedSource" class="select-input" @change="save">
+              <option v-for="item in SPEED_TEST_PRESETS" :key="item.url" :value="item.url">
+                {{ item.label }}
+              </option>
+              <option :value="CUSTOM_SPEED_SOURCE">自定义地址</option>
+            </select>
+            <input
+              v-model="settingsStore.settings.speed_test_url"
+              type="text"
+              class="text-input speed-url-input"
+              placeholder="https://example.com/large-test-file.bin"
+              @change="save"
+            />
+          </div>
         </div>
 
         <div class="setting-item">
@@ -121,8 +171,8 @@ async function save() {
             <span class="sub-label">吞吐量下载速度测试的最大持续时间 (默认: 5 秒)</span>
           </div>
           <input
-            type="number"
             v-model.number="settingsStore.settings.speed_test_timeout_secs"
+            type="number"
             class="num-input"
             min="3"
             max="30"
@@ -136,8 +186,8 @@ async function save() {
             <span class="sub-label">远程拉取订阅节点与规则集的连接超时时长 (默认: 15 秒)</span>
           </div>
           <input
-            type="number"
             v-model.number="settingsStore.settings.connection_timeout_secs"
+            type="number"
             class="num-input"
             min="5"
             max="60"
@@ -164,8 +214,8 @@ async function save() {
             <span class="sub-label">gemini.google.com 页面正文包含此片段即判定可用（Google 混淆 ID，随版本轮换）</span>
           </div>
           <input
-            type="text"
             v-model="settingsStore.settings.unlock_gemini_marker"
+            type="text"
             class="text-input"
             placeholder="45631641,null,true"
             @change="save"
@@ -178,8 +228,8 @@ async function save() {
             <span class="sub-label">claude.ai 重定向落点包含此片段即判定地区封锁</span>
           </div>
           <input
-            type="text"
             v-model="settingsStore.settings.unlock_claude_block_marker"
+            type="text"
             class="text-input"
             placeholder="app-unavailable-in-region"
             @change="save"
@@ -192,8 +242,8 @@ async function save() {
             <span class="sub-label">api.openai.com 响应正文包含此片段即判定地区封锁</span>
           </div>
           <input
-            type="text"
             v-model="settingsStore.settings.unlock_chatgpt_block_marker"
+            type="text"
             class="text-input"
             placeholder="unsupported_country"
             @change="save"
@@ -210,96 +260,9 @@ async function save() {
 </template>
 
 <style scoped>
-.panel-container {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-h2 {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.panel-header-icon {
-  margin-right: 6px;
-  vertical-align: -3px;
-}
-
-.setting-card {
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  padding-bottom: 10px;
-}
-
-.card-icon {
-  font-size: 20px;
-}
-
-.card-title-group {
-  flex: 1;
-}
-
-.card-title-group h3 {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #fff;
-  margin: 0;
-}
-
-.card-title-group p {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  margin: 2px 0 0;
-}
-
-.card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.setting-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  transition: all 0.15s;
-}
-
-.setting-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.item-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.sub-label {
-  font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: normal;
-}
+/* 面板骨架（.panel-container / h2 / .panel-header-icon / .setting-card /
+   .card-* / .setting-item / .item-label / .sub-label）统一走 panel.css 全局定义，
+   此处只保留本面板独有的控件样式。 */
 
 .text-input {
   padding: 6px 10px;
@@ -323,6 +286,28 @@ h2 {
 .text-input:focus,
 .num-input:focus {
   border-color: var(--accent-cyan-vivid);
+}
+
+.speed-source-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 360px;
+}
+
+.speed-source-controls .select-input,
+.speed-url-input {
+  width: 100%;
+}
+
+.select-input {
+  padding: 6px 10px;
+  color: #fff;
+  background: #141824;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 12px;
+  outline: none;
 }
 
 .num-input {
