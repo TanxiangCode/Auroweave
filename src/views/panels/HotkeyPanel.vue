@@ -1,6 +1,6 @@
 <template>
   <div class="panel-container">
-    <h2><BaseIcon name="Command" :size="18" class="title-icon" /> 全局快捷键</h2>
+    <h2><BaseIcon name="Command" :size="20" class="panel-header-icon" /> 全局快捷键</h2>
     <div class="setting-group">
       <div class="setting-item">
         <div class="item-label">
@@ -62,24 +62,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.panel-container {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-h2 {
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-}
-
-.setting-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-/* setting-item / item-label / sub-label 统一走 panel.css 全局定义 */
+/* 面板骨架（.panel-container / h2 / .panel-header-icon / .setting-group）统一走 panel.css 全局定义，
+   此处只保留本面板独有的控件样式。 */
 
 .hotkey-kbd {
   padding: var(--space-1) var(--space-3);
