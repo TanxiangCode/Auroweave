@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use log::{info, warn};
 
 pub struct SpeedTestScheduler {
     cancel_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,

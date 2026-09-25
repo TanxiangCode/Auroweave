@@ -1,6 +1,7 @@
 /// 流量历史统计与应用追踪的本地数据库管理
 /// 作者: TanXiang
 use rusqlite::{Connection, Result};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use crate::get_data_root;
@@ -271,6 +272,40 @@ pub fn add_speedtest_records_batch(records: Vec<(String, u64, u64, Option<u64>)>
     }
 }
 
+/// 从已打开连接查询每个节点的最近吞吐结果（供真实 DB 与内存单测复用）。
+fn query_latest_speedtest_per_node(
+    conn: &Connection,
+) -> Result<HashMap<String, SpeedtestRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT node_tag, download_bps, upload_bps, delay_ms, tested_at
+         FROM speedtest_history
+         WHERE delay_ms IS NULL
+         ORDER BY tested_at ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(SpeedtestRecord {
+            node_tag: row.get(0)?,
+            download_bps: row.get::<_, i64>(1)? as u64,
+            upload_bps: row.get::<_, i64>(2)? as u64,
+            delay_ms: row.get::<_, Option<i64>>(3)?.map(|d| d as u64),
+            tested_at: row.get(4)?,
+        })
+    })?;
+
+    let mut latest = HashMap::new();
+    for row in rows {
+        let record = row?;
+        latest.insert(record.node_tag.clone(), record);
+    }
+    Ok(latest)
+}
+
+/// 每个节点取最近一次吞吐测速结果（应用启动时回填 store 用）。
+/// 仅选择 delay_ms IS NULL 的真实吞吐记录；按时间升序覆盖，后写入的即最新结果。
+pub fn get_latest_speedtest_per_node() -> Result<HashMap<String, SpeedtestRecord>> {
+    with_conn(query_latest_speedtest_per_node)
+}
+
 /// 查询指定节点最近 limit 条测速历史（时间倒序）
 ///
 /// 排除纯延迟测试写入的零吞吐记录（download_bps=0 AND upload_bps=0 AND delay_ms
@@ -459,6 +494,39 @@ mod tests {
             .query_row("SELECT node_tag FROM unlock_history", [], |r| r.get(0))
             .unwrap();
         assert_eq!(tag, "新节点");
+    }
+
+    #[test]
+    fn latest_speedtest_per_node_keeps_newest_throughput_record() {
+        let conn = test_conn();
+        conn.execute(
+            "INSERT INTO speedtest_history
+                (node_tag, download_bps, upload_bps, delay_ms, tested_at)
+             VALUES ('a', 100, 10, NULL, 100)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO speedtest_history
+                (node_tag, download_bps, upload_bps, delay_ms, tested_at)
+             VALUES ('a', 900, 90, NULL, 300)",
+            [],
+        )
+        .unwrap();
+        // 纯延迟记录不得污染吞吐结果视图。
+        conn.execute(
+            "INSERT INTO speedtest_history
+                (node_tag, download_bps, upload_bps, delay_ms, tested_at)
+             VALUES ('a', 0, 0, 25, 500)",
+            [],
+        )
+        .unwrap();
+
+        let latest = query_latest_speedtest_per_node(&conn).unwrap();
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest["a"].download_bps, 900);
+        assert_eq!(latest["a"].upload_bps, 90);
+        assert_eq!(latest["a"].tested_at, 300);
     }
 
     #[test]

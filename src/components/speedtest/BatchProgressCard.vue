@@ -1,8 +1,11 @@
 <template>
   <div v-if="visible" class="batch-progress-card glass-effect">
     <div class="progress-info">
-      <span>{{ actionLabel }}: <strong>{{ cancelling ? "取消中，等待当前节点结束…" : progress.current_node }}</strong></span>
-      <span>进度: {{ progress.current_index }} / {{ progress.total }}</span>
+      <span class="action-label">{{ actionLabel }}</span>
+      <strong :title="cancelling ? '取消中，等待当前节点结束' : progress.current_node">
+        {{ cancelling ? "取消中，等待当前节点结束…" : progress.current_node }}
+      </strong>
+      <span class="progress-count">{{ progress.current_index }} / {{ progress.total }}</span>
     </div>
     <div class="progress-bar-bg">
       <div
@@ -64,38 +67,49 @@ if (props.progress && props.progress.total === 0) {
 
 <style scoped>
 .batch-progress-card {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(32px, 72px) auto;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  gap: 8px;
+  padding: 6px 8px;
   border-radius: var(--radius-md);
-  flex: 1;
   min-width: 0;
+  overflow: hidden;
   box-sizing: border-box;
 }
 
 .progress-info {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--text-xs);
   color: var(--text-secondary);
   white-space: nowrap;
 }
 
+.action-label,
+.progress-count {
+  flex-shrink: 0;
+}
+
+.action-label {
+  color: var(--text-primary);
+}
+
 .progress-info strong {
-  color: var(--accent-cyan-vivid);
-  max-width: 120px;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  display: inline-block;
-  vertical-align: bottom;
+  color: var(--accent-cyan-vivid);
+  font-weight: var(--weight-medium);
 }
 
 .progress-bar-bg {
-  flex: 1;
+  width: 100%;
   min-width: 40px;
   height: 6px;
   background: var(--bg-surface-elevated, rgba(255, 255, 255, 0.08));
@@ -111,8 +125,8 @@ if (props.progress && props.progress.total === 0) {
 }
 
 .btn-cancel {
-  flex-shrink: 0;
-  padding: 3px 8px;
+  min-width: 32px;
+  padding: 3px 6px;
   font-size: 11px;
   font-weight: var(--weight-semibold);
   color: var(--status-danger);

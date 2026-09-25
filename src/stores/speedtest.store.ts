@@ -37,6 +37,8 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
   const isTestingLatency = ref(false);
   // 批量测延迟进度
   const latencyBatchProgress = ref<BatchProgressPayload | null>(null);
+  // 用户已请求取消，等待后端终止事件统一收尾
+  const latencyBatchCancelled = ref(false);
 
   // 批量吞吐量测速状态
   const isBatchTesting = ref(false);
@@ -54,6 +56,18 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
   // init() 幂等哨兵：并发调用共享同一 Promise，防止重复注册事件监听
   let initPromise: Promise<void> | null = null;
+
+  /** 从后端重新同步持久化/内存测速结果；当前会话已收到的数据优先保留。 */
+  async function syncThroughputResults() {
+    try {
+      const res = await getSpeedTestResults();
+      if (res.success && res.data) {
+        throughputMap.value = { ...res.data, ...throughputMap.value };
+      }
+    } catch {
+      // 结果事件已实时写入；同步失败不应影响任务完成状态。
+    }
+  }
 
   async function init() {
     if (initPromise) return initPromise;
@@ -73,10 +87,11 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
             !payload.current_node;
 
           if (isTerminal) {
-            // 终止事件统一复位一切状态（正常完成或取消）
+            // 终止事件统一复位一切状态（正常完成或取消），并从持久层补齐可能错过的结果。
             isBatchTesting.value = false;
             batchCancelled.value = false;
             batchProgress.value = null;
+            void syncThroughputResults();
             return;
           }
 
@@ -99,17 +114,34 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
       if (!unlistenLatencyProgress) {
         unlistenLatencyProgress = await listenLatencyTestProgress((payload) => {
-          latencyBatchProgress.value = {
-            current_index: payload.current_index,
-            total: payload.total,
-            current_node: payload.current_node,
-          };
-          if (payload.delay > 0) {
+          const isTerminal =
+            payload.current_index === payload.total &&
+            payload.total > 0 &&
+            !payload.current_node;
+
+          if (isTerminal) {
+            latencyBatchProgress.value = null;
+            latencyBatchCancelled.value = false;
+            return;
+          }
+
+          // 单节点测试或已结束批次也会走同一事件流；没有活动批量进度时只回填结果，
+          // 绝不能让迟到事件重新创建底部 Dock。
+          if (payload.current_node && payload.delay >= 0 && !latencyBatchCancelled.value) {
             latencyMap.value = {
               ...latencyMap.value,
               [payload.current_node]: payload.delay,
             };
           }
+
+          const hasActiveBatch = latencyBatchProgress.value !== null;
+          if (!hasActiveBatch || latencyBatchCancelled.value) return;
+
+          latencyBatchProgress.value = {
+            current_index: payload.current_index,
+            total: payload.total,
+            current_node: payload.current_node,
+          };
         });
       }
     })().catch((e) => {
@@ -122,12 +154,17 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
   /** 延迟测试 (支持单个或多个节点，支持多批次并发) */
   async function testLatency(groupTag: string, nodeTags: string[]) {
+    // 监听必须先于 invoke 注册，避免页面刚激活便立即点击时漏掉整批结果事件。
+    // init 已完成时不额外让出微任务，保持“调用即出现 0/total 进度”的交互契约。
+    if (!initPromise) await init();
+
     // 记录本批次 tags 快照：并发场景下 finally 只删自己批次的节点，
     // 避免批次 A 结束时误删批次 B 仍在测试中的标记
     const batchTags = [...nodeTags];
 
     activeLatencyTests++;
     isTestingLatency.value = true;
+    latencyBatchCancelled.value = false;
     batchTags.forEach((tag) => testingLatencyNodes.value.add(tag));
     testingLatencyNodes.value = new Set(testingLatencyNodes.value);
 
@@ -174,14 +211,16 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
         activeLatencyTests = 0; // 容错：异常路径下防止负数
         isTestingLatency.value = false;
         latencyBatchProgress.value = null;
+        latencyBatchCancelled.value = false;
       }
     }
   }
 
   /** 取消批量延迟测试 */
   async function cancelLatencyBatch() {
-    latencyBatchProgress.value = null;
+    latencyBatchCancelled.value = true;
     const res = await cancelLatencyTest();
+    if (!res.success) latencyBatchCancelled.value = false;
     return res;
   }
 
@@ -207,6 +246,7 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
 
   /** 开始批量吞吐量测速 */
   async function startBatchTest(groupTag: string, nodeTags: string[]) {
+    if (!initPromise) await init();
     isBatchTesting.value = true;
     batchCancelled.value = false;
     // 立即铺一条 0/total 进度：批次首个节点结束前后端不发事件，
@@ -256,6 +296,7 @@ export const useSpeedtestStore = defineStore("speedtest", () => {
     testingLatencyNodes,
     isTestingLatency,
     latencyBatchProgress,
+    latencyBatchCancelled,
     isBatchTesting,
     batchProgress,
     batchCancelled,

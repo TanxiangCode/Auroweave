@@ -1,6 +1,6 @@
 <template>
   <div v-if="hasActiveTasks" class="batch-task-dock">
-    <div class="task-dock-grid">
+    <div class="task-dock-grid" :class="`tasks-${activeTaskCount}`">
       <!-- 1. 批量测延迟任务进度 -->
       <BatchProgressCard
         v-if="speedtestStore.latencyBatchProgress"
@@ -8,6 +8,7 @@
         :progress="speedtestStore.latencyBatchProgress"
         action-label="延迟测试"
         cancel-label="取消"
+        :cancelling="speedtestStore.latencyBatchCancelled"
         @cancel="speedtestStore.cancelLatencyBatch"
       />
 
@@ -43,7 +44,8 @@
  *
  * 聚合管理延迟测试、吞吐量测速、流媒体解锁检测 3 个批量异步任务：
  * - 当只有 1 个任务运行时，全宽平铺，界面舒展大方；
- * - 当有 2~3 个任务并发执行时，采用横向自适应网格 (CSS Grid) 并排平分展示；
+ * - 当有 2~3 个任务并发执行时，按真实任务数动态分成 2~3 个可收缩列；
+ * - 列宽使用 minmax(0, 1fr)，进度卡内部负责省略节点名，取消按钮不会被挤出卡片；
  * - 总体高度严格限制在单行紧凑高度（约 42px~46px），彻底根治 3 个卡片纵向堆叠占满视口的痛点；
  * - 无任务时零 DOM 占用，不影响上方节点列表区域。
  */
@@ -55,12 +57,14 @@ import BatchProgressCard from "./BatchProgressCard.vue";
 const speedtestStore = useSpeedtestStore();
 const unlockStore = useUnlockStore();
 
-const hasActiveTasks = computed(() => {
+const activeTaskCount = computed(() => {
   const hasLatency = !!speedtestStore.latencyBatchProgress;
   const hasSpeedtest = speedtestStore.isBatchTesting && !!speedtestStore.batchProgress;
   const hasUnlock = unlockStore.isBatchChecking && !!unlockStore.batchProgress;
-  return hasLatency || hasSpeedtest || hasUnlock;
+  return Number(hasLatency) + Number(hasSpeedtest) + Number(hasUnlock);
 });
+
+const hasActiveTasks = computed(() => activeTaskCount.value > 0);
 </script>
 
 <style scoped>
@@ -80,9 +84,20 @@ const hasActiveTasks = computed(() => {
 
 .task-dock-grid {
   display: grid;
-  /* 宽屏并排平分展示，空间不足自适应折行，单任务占满 */
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: var(--space-2);
-  align-items: center;
+  align-items: stretch;
+}
+
+/* 不设 260px 最小列宽：三任务并发时允许每列继续收缩，卡片内部消化长节点名。 */
+.task-dock-grid.tasks-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.task-dock-grid.tasks-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.task-dock-grid.tasks-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 </style>

@@ -40,10 +40,15 @@
           </span>
         </div>
 
-        <!-- 吞吐量带宽 -->
-        <div v-if="speedBps !== undefined && speedBps > 0" class="speed-box" title="历史下行测速结果">
+        <!-- 吞吐量带宽：0 同样是有效测速结论（失败），不能静默隐藏 -->
+        <div
+          v-if="speedBps !== undefined"
+          class="speed-box"
+          :class="{ failed: speedBps <= 0 }"
+          :title="speedBps > 0 ? `历史下行测速结果: ${formatThroughputCompact(speedBps)}` : '最近一次下行测速失败（0 B/s）'"
+        >
           <SvgIcon name="wifi" :size="10" />
-          <span>{{ formatThroughputCompact(speedBps) }}</span>
+          <span>{{ speedBps > 0 ? formatThroughputCompact(speedBps) : '失败' }}</span>
         </div>
 
         <!-- AI 服务解锁徽章（G=Gemini C=Claude O=ChatGPT；title 展示服务名+状态） -->
@@ -455,6 +460,11 @@ function getLatencyColor(ms?: number): string {
   background: color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
   padding: 1px 4px;
   border-radius: var(--radius-xs);
+}
+
+.speed-box.failed {
+  color: var(--accent-red);
+  background: var(--accent-red-glow);
 }
 
 /* AI 服务解锁徽章组（G/C/O 三胶囊，颜色按状态） */
