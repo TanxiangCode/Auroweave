@@ -3,7 +3,19 @@
  * 作者: TanXiang
  *
  * 适用范围：Settings 下各 Panel 组件的通用布局结构
- * 用法：在 panel 根元素上使用 .panel-container，内部用 .setting-group 分组
+ * 用法：<div class="panel-container">
+ *        <h2><BaseIcon class="panel-header-icon" />标题</h2>
+ *        <div class="setting-group"> … </div>   <!-- 裸分组：设置项自带描边 -->
+ *        <div class="setting-card glass-effect"> <!-- 卡片：设置项内嵌为扁平块 -->
+ *          <div class="card-header"> … </div>
+ *          <div class="card-body"> … </div>
+ *        </div>
+ *      </div>
+ *
+ * 约定：所有布局类必须定义在本文件（全局），不得写在面板的 <style scoped> 中。
+ * Vue 的 scoped 样式会被编译成 `.cls[data-v-xxx]` 选择器，只对本组件模板生效，
+ * 历史上 .setting-card / .card-* / .panel-header-icon 只存在于部分面板的 scoped 里，
+ * 导致复用这些类的面板（首页显示、订阅管理）拿不到任何内边距，卡片直接塌成一坨。
  */
 
 /* ============================================================
@@ -19,6 +31,15 @@
 .panel-container h2 {
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
+}
+
+/* 面板标题前置图标：统一图标与标题的间距与垂直对齐。
+   选择器需压过 BaseIcon 内部 scoped 的 `.base-icon[data-v-*]`
+   （后者特异度为 0,2,0），故这里用 0,2,1 的后代选择器。 */
+.panel-container h2 .panel-header-icon {
+  margin-right: var(--space-2);
+  vertical-align: -4px;
+  color: var(--accent-cyan-vivid);
 }
 
 /* ============================================================
@@ -59,6 +80,86 @@
   font-weight: var(--weight-regular);
   max-width: 280px;
   line-height: var(--leading-normal);
+}
+
+/* ============================================================
+   卡片容器（.setting-card）
+   卡片语境下的设置项改为「扁平内嵌块」：不再自带描边，
+   改由卡片统一提供 padding / 描边 / 分组间距。
+   ============================================================ */
+.setting-card {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* 卡片头部：图标 + 标题组（+ 可选右侧操作），底部细分隔线 */
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* 卡片头部图标 */
+.card-icon {
+  display: flex;
+  flex-shrink: 0;
+  font-size: var(--text-lg);
+  color: var(--accent-cyan-vivid);
+}
+
+/* 卡片标题组：占满剩余宽度，把头部右侧操作推到最右 */
+.card-title-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-title-group h3 {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.card-title-group p {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin: 2px 0 0;
+}
+
+/* 卡片主体：设置项纵向列表 */
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 卡片内的设置项：扁平内嵌块，hover 仅提亮底色 */
+.setting-card .setting-item {
+  padding: var(--space-2) 10px;
+  background: var(--surface-inset);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease-default);
+}
+
+.setting-card .setting-item:hover {
+  background: var(--surface-hover);
+}
+
+/* 卡片内的标签区：比裸分组更紧凑，与卡片内边距成比例 */
+.setting-card .item-label {
+  font-size: 12.5px;
+}
+
+.setting-card .sub-label {
+  max-width: none;
 }
 
 /* 分割线 */

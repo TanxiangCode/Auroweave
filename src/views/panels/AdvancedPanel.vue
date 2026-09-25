@@ -318,54 +318,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.panel-container {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.setting-card {
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
+/* 面板骨架（.panel-container / .setting-card / .card-* / .setting-item /
+   .item-label / .sub-label）统一走 panel.css 全局定义，
+   此处只保留本面板独有的卡片变体与控件样式。 */
 
 .setting-card.highlight-border {
   border-color: color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-cyan-vivid) 3%, transparent) 0%, rgba(255, 255, 255, 0.02) 100%);
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  padding-bottom: 10px;
-}
-
-.card-icon {
-  font-size: 20px;
-}
-
-.card-title-group {
-  flex: 1;
-}
-
-.card-title-group h3 {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #fff;
-  margin: 0;
-}
-
-.card-title-group p {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  margin: 2px 0 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-cyan-vivid) 3%, transparent) 0%, var(--surface-inset) 100%);
 }
 
 .btn-check-update {
@@ -395,12 +354,6 @@ onMounted(() => {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
-}
-
-.card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
 .kernel-status-row {
@@ -539,35 +492,6 @@ onMounted(() => {
   overflow-y: auto;
   white-space: pre-wrap;
   margin: 0;
-}
-
-.setting-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  transition: all 0.15s;
-}
-
-.setting-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.item-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.sub-label {
-  font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: normal;
 }
 
 .text-input {

@@ -171,82 +171,11 @@ async function save(field: keyof AppSettings) {
 </template>
 
 <style scoped>
+/* 面板骨架（.panel-container / .setting-card / .card-* / .setting-item /
+   .item-label / .sub-label / .panel-header-icon）统一走 panel.css 全局定义，
+   此处只保留本面板独有的控件样式。 */
 
-.panel-container {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.setting-card {
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  padding-bottom: 10px;
-}
-
-.card-icon {
-  font-size: 20px;
-}
-
-.card-title-group h3 {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #fff;
-  margin: 0;
-}
-
-.card-title-group p {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  margin: 2px 0 0;
-}
-
-.card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.setting-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  transition: all 0.15s;
-}
-
-.setting-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.item-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.sub-label {
-  font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: normal;
-}
+/* switch 统一走 App.vue 全局胶囊开关（36×20，勾选青色高亮） */
 
 .select-input {
   padding: 6px 12px;
@@ -262,6 +191,4 @@ async function save(field: keyof AppSettings) {
 .select-input:focus {
   border-color: var(--accent-cyan-vivid);
 }
-
-/* switch 统一走 App.vue 全局胶囊开关（36×20，勾选青色高亮） */
 </style>
