@@ -8,7 +8,7 @@ import { ref, computed } from "vue";
 import { useSpeedtestStore } from "@/stores/speedtest.store";
 import { useUnlockStore, unlockSortWeight } from "@/stores/unlock.store";
 import { useSettingsStore } from "@/stores/settings.store";
-import type { ProxyNode, NodeSortConfig, NodeSortKey, UnlockServiceId, UnlockStatus } from "@/types";
+import type { ProxyNode, NodeSortConfig, UnlockServiceId, UnlockStatus } from "@/types";
 
 /** 排序标签映射 */
 const sortLabels: Record<string, string> = {
@@ -19,8 +19,10 @@ const sortLabels: Record<string, string> = {
   unlock: "按解锁",
 };
 
-/** 排序键循环顺序 */
-const sortKeyCycle: Array<NodeSortKey> = ["default", "name", "latency", "protocol", "unlock"];
+/** 明确完成测试且结果 <= 0 才算超时；undefined 是未测试，不应被隐藏。 */
+export function isLatencyTimeout(latency?: number): boolean {
+  return latency !== undefined && latency <= 0;
+}
 
 /**
  * 节点搜索与排序 Hook
@@ -37,6 +39,8 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
 
   /** 服务筛选状态（"gemini:yes" 形态；空串=未筛选） */
   const unlockFilter = ref("");
+  /** 是否隐藏已经测出超时（0/-1）的节点；未测试节点仍保留 */
+  const hideTimedOut = ref(false);
 
   /** 收藏置顶集合（来自 settings.pinned_nodes，Set 加速查重） */
   const pinnedSet = computed<Set<string>>(() => new Set(settingsStore.settings.pinned_nodes || []));
@@ -63,6 +67,11 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
         (n) =>
           n.tag.toLowerCase().includes(kw) || n.type.toLowerCase().includes(kw)
       );
+    }
+
+    // 隐藏明确超时节点（0/-1）；undefined=未测，不隐藏。
+    if (hideTimedOut.value) {
+      nodes = nodes.filter((n) => !isLatencyTimeout(speedtestStore.latencyMap[n.tag]));
     }
 
     // 解锁服务筛选（"service:status" 形态；无结果的节点不显示）
@@ -133,19 +142,9 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
     return [...pinned].sort(sortFn).concat([...normal].sort(sortFn));
   });
 
-  /** 循环切换排序键 */
-  function cycleSortKey() {
-    const idx = sortKeyCycle.indexOf(sortConfig.value.key);
-    const nextKey = sortKeyCycle[(idx + 1) % sortKeyCycle.length];
-    sortConfig.value = { key: nextKey, order: "asc" };
-  }
-
-  /** 切换排序方向（升序/降序） */
-  function toggleSortOrder() {
-    sortConfig.value = {
-      ...sortConfig.value,
-      order: sortConfig.value.order === "asc" ? "desc" : "asc",
-    };
+  /** 设置排序字段与方向（由工具栏统一下拉选择） */
+  function setSortConfig(config: NodeSortConfig) {
+    sortConfig.value = config;
   }
 
   /** 清空搜索文本 */
@@ -159,12 +158,12 @@ export function useNodeFilter(rawNodes: { value: ProxyNode[] }) {
     sortConfig,
     sortLabels,
     unlockFilter,
+    hideTimedOut,
     // 计算属性
     displayNodes,
     pinnedSet,
     // 方法
-    cycleSortKey,
-    toggleSortOrder,
+    setSortConfig,
     clearSearch,
     togglePinned,
   };

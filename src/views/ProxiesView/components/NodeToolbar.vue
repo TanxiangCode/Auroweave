@@ -5,8 +5,9 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
  * 作者: TanXiang
  *
  * 第一行：分组标题 + 节点数（左） / 搜索框（右）
- * 第二行：排序、视图切换、解锁筛选、定位当前节点、测延迟、批量测速、解锁检测、刷新
+ * 第二行：排序/视图/筛选收纳为 3 个控件，主测速按钮置右，定位与刷新改图标按钮
  */
+import { ref } from "vue";
 import SvgIcon from "@/components/common/SvgIcon.vue";
 import type { NodeSortConfig } from "@/types";
 
@@ -36,6 +37,8 @@ withDefaults(
     isUnlockChecking?: boolean;
     /** 服务筛选状态（空串=未筛选） */
     unlockFilter?: string;
+    /** 是否隐藏已经测出超时的节点 */
+    hideTimedOut?: boolean;
     /** 当前分组内是否有选中节点（定位按钮可用性） */
     hasActiveNode?: boolean;
   }>(),
@@ -45,22 +48,37 @@ withDefaults(
     isBatchSpeedTesting: false,
     isUnlockChecking: false,
     unlockFilter: "",
+    hideTimedOut: false,
     hasActiveNode: false,
   }
 );
 
 const emit = defineEmits<{
   'update:searchText': [value: string];
-  'cycle-sort': [];
-  'toggle-sort-order': [];
+  'update-sort': [value: NodeSortConfig];
   'run-latency': [];
   'show-batch-modal': [];
   'show-unlock-modal': [];
   'toggle-view-mode': [mode: "grid" | "list"];
   refresh: [];
   'update:unlockFilter': [value: string];
+  'update:hideTimedOut': [value: boolean];
   'locate-active': [];
 }>();
+
+const filterMenu = ref<HTMLDetailsElement | null>(null);
+
+function onSortChange(event: Event) {
+  const [key, order] = (event.target as HTMLSelectElement).value.split(":");
+  emit("update-sort", {
+    key: key as NodeSortConfig["key"],
+    order: order as NodeSortConfig["order"],
+  });
+}
+
+function closeFilterMenu() {
+  filterMenu.value?.removeAttribute("open");
+}
 </script>
 
 <template>
@@ -82,129 +100,143 @@ const emit = defineEmits<{
       <SvgIcon name="search" :size="12" class="search-icon" />
       <input
         :value="searchText"
-        @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
+        class="search-input"
         type="text"
         placeholder="搜索节点名称/协议..."
-        class="search-input"
+        @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
       />
       <button v-if="searchText" class="search-clear" @click="emit('update:searchText', '')">×</button>
     </div>
   </div>
 
-  <!-- 第二行：过滤与操作工具链 -->
+  <!-- 第二行：次要工具收纳 + 主测试操作 -->
   <div class="toolbar-row-actions">
-    <!-- 排序切换按钮 -->
-    <div class="sort-button-group">
-      <button
-        class="btn-sort"
-        @click="emit('cycle-sort')"
-        :title="`当前按 ${sortLabels[sortConfig.key]} 排序，点击切换排序字段`"
-      >
-        <SvgIcon name="sort" :size="12" class="icon-gap" />
-        <span>{{ sortLabels[sortConfig.key] }}</span>
-      </button>
-      <button
-        class="btn-sort-dir"
-        @click.stop="emit('toggle-sort-order')"
-        :title="sortConfig.order === 'asc' ? '升序 (点击切换为降序)' : '降序 (点击切换为升序)'"
-      >
-        {{ sortConfig.order === 'asc' ? '↑' : '↓' }}
-      </button>
-    </div>
-
-    <!-- 视图模式切换 (Grid / List) -->
-    <div class="view-mode-group">
-      <button
-        class="view-btn"
-        :class="{ active: viewMode === 'grid' }"
-        @click="emit('toggle-view-mode', 'grid')"
-        title="网格卡片视图"
-      >
-        ▦
-      </button>
-      <button
-        class="view-btn"
-        :class="{ active: viewMode === 'list' }"
-        @click="emit('toggle-view-mode', 'list')"
-        title="紧凑列表视图"
-      >
-        <BaseIcon name="List" :size="14" />
-      </button>
-    </div>
-
-    <!-- 解锁服务筛选片（按检测结果过滤节点列表） -->
-    <div class="unlock-filter-group">
+    <!-- 排序字段与方向合并为单个下拉 -->
+    <div class="toolbar-select-wrap" title="节点排序">
+      <SvgIcon name="sort" :size="12" />
       <select
-        class="unlock-filter-select"
-        :value="unlockFilter"
-        title="按 AI 服务解锁状态筛选节点"
-        @change="emit('update:unlockFilter', ($event.target as HTMLSelectElement).value)"
+        class="toolbar-select"
+        :value="`${sortConfig.key}:${sortConfig.order}`"
+        @change="onSortChange"
       >
-        <option value="">全部节点</option>
-        <option value="gemini:yes">Gemini 可用</option>
-        <option value="claude:yes">Claude 可用</option>
-        <option value="chatgpt:yes">ChatGPT 可用</option>
-        <option value="gemini:no">Gemini 封锁</option>
-        <option value="claude:no">Claude 封锁</option>
+        <option
+          v-for="(label, key) in sortLabels"
+          :key="`${key}:asc`"
+          :value="`${key}:asc`"
+        >{{ label }} ↑</option>
+        <option
+          v-for="(label, key) in sortLabels"
+          :key="`${key}:desc`"
+          :value="`${key}:desc`"
+        >{{ label }} ↓</option>
       </select>
     </div>
 
-    <!-- 定位当前节点 -->
+    <!-- 网格/列表合并为一个切换按钮 -->
     <button
-      class="btn-action locate"
-      :disabled="!hasActiveNode"
-      @click="emit('locate-active')"
-      :title="hasActiveNode ? '滚动到当前选中节点' : '当前分组暂无选中节点'"
+      class="toolbar-icon-control"
+      :title="viewMode === 'grid' ? '切换为列表视图' : '切换为网格视图'"
+      @click="emit('toggle-view-mode', viewMode === 'grid' ? 'list' : 'grid')"
     >
-      <BaseIcon name="Crosshair" :size="12" class="icon-gap" />
-      <span>定位</span>
+      <BaseIcon :name="viewMode === 'grid' ? 'List' : 'LayoutGrid'" :size="13" />
+    </button>
+
+    <!-- 解锁状态与超时筛选收纳到同一菜单 -->
+    <details ref="filterMenu" class="filter-menu">
+      <summary
+        class="toolbar-filter-trigger"
+        :class="{ active: unlockFilter || hideTimedOut }"
+        title="节点筛选"
+      >
+        <BaseIcon name="SlidersHorizontal" :size="12" />
+        <span>筛选</span>
+        <span v-if="unlockFilter || hideTimedOut" class="filter-count">1</span>
+      </summary>
+      <div class="filter-popover" @click.stop>
+        <label class="filter-checkbox-row">
+          <input
+            type="checkbox"
+            :checked="hideTimedOut"
+            @change="emit('update:hideTimedOut', ($event.target as HTMLInputElement).checked)"
+          />
+          <span>隐藏超时节点</span>
+        </label>
+        <div class="filter-separator"></div>
+        <label class="filter-select-label" for="unlock-status-filter">解锁状态</label>
+        <select
+          id="unlock-status-filter"
+          class="filter-select"
+          :value="unlockFilter"
+          @change="emit('update:unlockFilter', ($event.target as HTMLSelectElement).value); closeFilterMenu()"
+        >
+          <option value="">全部节点</option>
+          <option value="gemini:yes">Gemini 可用</option>
+          <option value="claude:yes">Claude 可用</option>
+          <option value="chatgpt:yes">ChatGPT 可用</option>
+          <option value="gemini:no">Gemini 封锁</option>
+          <option value="claude:no">Claude 封锁</option>
+        </select>
+      </div>
+    </details>
+
+    <!-- 定位当前节点（次要工具改为图标） -->
+    <button
+      class="toolbar-icon-control locate"
+      :disabled="!hasActiveNode"
+      :title="hasActiveNode ? '滚动到当前选中节点' : '当前分组暂无选中节点'"
+      @click="emit('locate-active')"
+    >
+      <BaseIcon name="Crosshair" :size="13" />
     </button>
 
     <div class="divider-vertical"></div>
 
-    <!-- 操作按钮组 -->
+    <!-- 三个主测试操作保留文字，目标为当前筛选后的可见节点 -->
     <button
       class="btn-action ping"
       :class="{ loading: isTestingLatency }"
       :disabled="isTestingLatency"
+      title="测试当前筛选后的可见节点延迟"
       @click="emit('run-latency')"
-      title="并发测试全部节点延迟"
     >
       <span v-if="isTestingLatency" class="spinner-ring"></span>
       <SvgIcon v-else name="bolt" :size="12" class="icon-gap" />
-      <span>{{ isTestingLatency ? '测试中...' : '测延迟' }}</span>
+      <span>{{ isTestingLatency ? '测试中...' : '延迟' }}</span>
     </button>
 
     <button
       class="btn-action speed"
       :class="{ loading: isBatchSpeedTesting }"
       :disabled="isBatchSpeedTesting"
+      title="测试当前筛选后的可见节点速度"
       @click="emit('show-batch-modal')"
-      title="开启批量吞吐量下载测速"
     >
       <span v-if="isBatchSpeedTesting" class="spinner-ring speed"></span>
       <SvgIcon v-else name="wifi" :size="12" class="icon-gap" />
-      <span>{{ isBatchSpeedTesting ? '测速中...' : '批量测速' }}</span>
+      <span>{{ isBatchSpeedTesting ? '测速中...' : '测速' }}</span>
     </button>
 
     <button
       class="btn-action unlock"
       :class="{ loading: isUnlockChecking }"
       :disabled="isUnlockChecking"
+      title="检测当前筛选后的可见节点解锁状态"
       @click="emit('show-unlock-modal')"
-      title="批量检测 AI 服务解锁状态（Gemini/Claude/ChatGPT）"
     >
       <span v-if="isUnlockChecking" class="spinner-ring unlock"></span>
       <BaseIcon v-else name="Sparkles" :size="12" class="icon-gap" />
-      <span>{{ isUnlockChecking ? '检测中...' : '解锁检测' }}</span>
+      <span>{{ isUnlockChecking ? '检测中...' : '解锁' }}</span>
     </button>
 
+    <div class="toolbar-spacer"></div>
+
+    <!-- 刷新固定在最右侧 -->
     <button
-      class="btn-action refresh"
-      @click="emit('refresh')"
+      class="toolbar-icon-control refresh"
       title="刷新节点与策略组列表"
+      @click="emit('refresh')"
     >
-      <SvgIcon name="refresh" :size="12" />
+      <SvgIcon name="refresh" :size="13" />
     </button>
   </div>
   </div>
@@ -235,7 +267,8 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
   padding-top: var(--space-3);
 }
 
@@ -325,86 +358,167 @@ const emit = defineEmits<{
   color: var(--text-primary);
 }
 
-/* 排序按钮组 */
-.sort-button-group {
+/* 排序、视图与筛选：三个紧凑控件 */
+.toolbar-select-wrap {
   display: inline-flex;
   align-items: center;
+  height: 30px;
+  padding-left: 8px;
+  color: var(--text-tertiary);
   background: var(--layer-2);
   border: 1px solid var(--border-normal);
   border-radius: var(--radius-sm);
-  height: 30px;
-  overflow: hidden;
 }
 
-.btn-sort {
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  background: transparent;
-  border: none;
+.toolbar-select {
+  height: 28px;
+  max-width: 126px;
+  padding: 0 6px 0 4px;
   color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
   font-size: var(--text-xs);
   cursor: pointer;
-  transition: background var(--duration-fast);
 }
 
-.btn-sort:hover {
-  background: var(--border-subtle);
+.toolbar-select option,
+.filter-select option {
+  color: var(--text-primary);
+  background: var(--layer-1);
 }
 
-.btn-sort-dir {
-  display: flex;
+.toolbar-icon-control {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 100%;
-  background: var(--layer-3);
-  border: none;
-  border-left: 1px solid var(--border-subtle);
-  color: var(--accent-cyan);
-  font-weight: var(--weight-bold);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background var(--duration-fast);
-}
-
-.btn-sort-dir:hover {
-  background: var(--border-strong);
-}
-
-/* 视图模式切换 */
-.view-mode-group {
-  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-secondary);
   background: var(--layer-2);
   border: 1px solid var(--border-normal);
   border-radius: var(--radius-sm);
-  height: 30px;
-  overflow: hidden;
-}
-
-.view-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 100%;
-  background: transparent;
-  border: none;
-  color: var(--text-tertiary);
-  font-size: 13px;
   cursor: pointer;
   transition: all var(--duration-fast);
 }
 
-.view-btn:hover {
+.toolbar-icon-control:hover:not(:disabled) {
   color: var(--text-primary);
+  background: var(--border-strong);
+  border-color: var(--border-accent);
+}
+
+.toolbar-icon-control.locate:hover:not(:disabled) {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.toolbar-icon-control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filter-menu {
+  position: relative;
+}
+
+.filter-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.toolbar-filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text-primary);
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toolbar-filter-trigger:hover,
+.toolbar-filter-trigger.active,
+.filter-menu[open] .toolbar-filter-trigger {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+  background: var(--accent-cyan-glow);
+}
+
+.filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--text-on-accent);
+  background: var(--accent-cyan);
+  border-radius: var(--radius-full);
+  font-size: 9px;
+}
+
+.filter-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  width: 210px;
+  padding: 10px;
+  color: var(--text-primary);
+  background: var(--bg-surface-elevated, var(--layer-1));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+
+.filter-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.filter-checkbox-row input {
+  accent-color: var(--accent-cyan);
+}
+
+.filter-separator {
+  height: 1px;
+  margin: 8px 0;
   background: var(--border-subtle);
 }
 
-.view-btn.active {
-  background: var(--accent-cyan-glow);
-  color: var(--accent-cyan);
-  font-weight: var(--weight-bold);
+.filter-select-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.filter-select {
+  width: 100%;
+  height: 30px;
+  padding: 0 7px;
+  color: var(--text-primary);
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  outline: none;
+  cursor: pointer;
+}
+
+.toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 4px;
 }
 
 .divider-vertical {
@@ -476,34 +590,6 @@ const emit = defineEmits<{
   color: var(--accent-green);
   opacity: 0.9;
   cursor: wait;
-}
-
-/* 解锁服务筛选下拉 */
-.unlock-filter-group {
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
-}
-
-.unlock-filter-select {
-  height: 30px;
-  padding: 0 6px;
-  background: var(--layer-2);
-  border: 1px solid var(--border-normal);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  outline: none;
-  transition: all var(--duration-fast);
-}
-
-.unlock-filter-select:hover {
-  border-color: var(--border-accent);
-}
-
-.unlock-filter-select:focus {
-  border-color: var(--accent-cyan);
 }
 
 .btn-action:disabled:not(.loading) {

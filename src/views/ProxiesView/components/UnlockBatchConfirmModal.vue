@@ -25,7 +25,7 @@ const emit = defineEmits<{
     <div v-if="visible" class="modal-backdrop">
       <div class="modal-card glass-effect">
         <h3>批量解锁检测确认</h3>
-        <p>将对分组 <strong>「{{ groupTag }}」</strong> 的 {{ nodeCount }} 个节点依次检测 Gemini / Claude / ChatGPT 解锁状态与出口 IP 归属。</p>
+        <p>将对分组 <strong>「{{ groupTag }}」</strong> 当前筛选后可见的 {{ nodeCount }} 个节点检测 Gemini / Claude / ChatGPT 解锁状态与出口 IP 归属。</p>
         <div class="estimate-box">
           <div>预计总耗时: 约 {{ estimateMinutes }} 分钟（受控并发检测）</div>
           <div>检测服务: Gemini · Claude · ChatGPT + 出口 IP 归属地</div>

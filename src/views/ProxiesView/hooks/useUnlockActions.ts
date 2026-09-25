@@ -13,7 +13,8 @@ import type { ProxyNode } from "@/types";
 
 interface UseUnlockActionsOptions {
   selectedGroupTag: Ref<string>;
-  rawNodes: ComputedRef<ProxyNode[]>;
+  /** 当前筛选后实际可见的节点集合 */
+  targetNodes: ComputedRef<ProxyNode[]>;
 }
 
 /** 单节点检测时长上限（O-1 并行化后墙钟≈最慢一路：三服务并行 15s 上限 + ip 层 8s） */
@@ -27,7 +28,7 @@ export function useUnlockActions(options: UseUnlockActionsOptions) {
   const unlockStore = useUnlockStore();
   const toast = useToast();
 
-  const { selectedGroupTag, rawNodes } = options;
+  const { selectedGroupTag, targetNodes } = options;
 
   /** 批量解锁检测确认弹窗 */
   const showUnlockModal = ref(false);
@@ -58,7 +59,7 @@ export function useUnlockActions(options: UseUnlockActionsOptions) {
   async function confirmBatchUnlockCheck() {
     showUnlockModal.value = false;
     if (!selectedGroupTag.value) return;
-    const tags = rawNodes.value
+    const tags = targetNodes.value
       .filter((n) => !["selector", "urltest", "fallback", "loadbalance"].includes(n.type.toLowerCase()))
       .map((n) => n.tag);
     if (tags.length === 0) {
@@ -71,7 +72,7 @@ export function useUnlockActions(options: UseUnlockActionsOptions) {
 
   /** 批量检测预估信息（并发 8 路：单节点耗时 / 并发数） */
   const unlockBatchEstimate = computed(() => {
-    const count = rawNodes.value.length;
+    const count = targetNodes.value.length;
     const effectiveSeconds =
       Math.ceil(count / DEFAULT_CONCURRENCY) * BATCH_PER_NODE_SECONDS_AT_CONCURRENCY_1;
     return {

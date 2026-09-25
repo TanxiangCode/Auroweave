@@ -22,6 +22,8 @@ withDefaults(
     searchText: string;
     /** 当前解锁服务筛选（"gemini:yes" 形态；空串=未筛选） */
     unlockFilter?: string;
+    /** 是否隐藏已经测出超时的节点 */
+    hideTimedOut?: boolean;
     /** 是否为手动选择分组 */
     isSelectable: boolean;
     /** 布局模式 */
@@ -34,6 +36,7 @@ withDefaults(
   {
     layoutMode: "grid",
     unlockFilter: "",
+    hideTimedOut: false,
     fetchError: null,
     pinnedSet: () => new Set<string>(),
   }
@@ -83,10 +86,12 @@ const speedtestStore = useSpeedtestStore();
   <EmptyState
     v-else-if="nodes.length === 0"
     icon="Search"
-    :title="unlockFilter ? '当前筛选下无匹配节点' : '没有找到匹配的节点'"
+    :title="unlockFilter || hideTimedOut ? '当前筛选下无匹配节点' : '没有找到匹配的节点'"
     :description="unlockFilter
       ? '解锁筛选未命中任何节点——可能是尚未检测，试试清除筛选或先跑一轮解锁检测'
-      : `搜索「${searchText}」无结果，试试其他关键词`"
+      : hideTimedOut
+        ? '当前没有可显示的节点——已测节点可能全部超时，未测试节点仍会保留'
+        : `搜索「${searchText}」无结果，试试其他关键词`"
   />
 
   <!-- 节点列表 / 网格容器：data-node-tag 供"定位当前节点"滚动选择器使用 -->

@@ -46,8 +46,8 @@ const {
 } = useProxyGroups();
 
 const {
-  searchText, sortConfig, sortLabels, unlockFilter,
-  displayNodes, cycleSortKey, toggleSortOrder, clearSearch,
+  searchText, sortConfig, sortLabels, unlockFilter, hideTimedOut,
+  displayNodes, setSortConfig, clearSearch,
   pinnedSet, togglePinned,
 } = useNodeFilter(rawNodes);
 
@@ -58,7 +58,7 @@ const {
   confirmBatchSpeedTest,
 } = useSpeedtestActions({
   selectedGroupTag,
-  rawNodes,
+  targetNodes: displayNodes,
   isSelectorGroup,
 });
 
@@ -67,7 +67,7 @@ const {
   handleSingleUnlockCheck, confirmBatchUnlockCheck,
 } = useUnlockActions({
   selectedGroupTag,
-  rawNodes,
+  targetNodes: displayNodes,
 });
 
 const {
@@ -249,7 +249,7 @@ onDeactivated(() => {
           :group-tag="selectedGroupTag"
           :node-count="rawNodes.length"
           :filtered-count="displayNodes.length"
-          :is-filtering="!!searchText.trim() || !!unlockFilter"
+          :is-filtering="!!searchText.trim() || !!unlockFilter || hideTimedOut"
           :search-text="searchText"
           :sort-config="sortConfig"
           :sort-labels="sortLabels"
@@ -258,11 +258,12 @@ onDeactivated(() => {
           :is-batch-speed-testing="speedtestStore.isBatchTesting"
           :is-unlock-checking="unlockStore.isBatchChecking"
           :unlock-filter="unlockFilter"
+          :hide-timed-out="hideTimedOut"
           :has-active-node="hasActiveNode"
           @update:search-text="searchText = $event"
           @update:unlock-filter="unlockFilter = $event"
-          @cycle-sort="cycleSortKey"
-          @toggle-sort-order="toggleSortOrder"
+          @update:hide-timed-out="hideTimedOut = $event"
+          @update-sort="setSortConfig"
           @toggle-view-mode="handleToggleViewMode"
           @run-latency="handleRunLatency"
           @show-batch-modal="showConfirmModal = true"
@@ -278,6 +279,7 @@ onDeactivated(() => {
           :loading="loading"
           :search-text="searchText"
           :unlock-filter="unlockFilter"
+          :hide-timed-out="hideTimedOut"
           :is-selectable="isSelectorGroup"
           :layout-mode="viewMode"
           :fetch-error="proxyStore.error"

@@ -14,21 +14,23 @@ import { getLatencyTestNodeTags } from "../utils/proxy-page";
 
 interface UseSpeedtestActionsOptions {
   selectedGroupTag: Ref<string>;
-  rawNodes: ComputedRef<ProxyNode[]>;
+  /** 当前筛选/排序后实际可见的节点集合 */
+  targetNodes: ComputedRef<ProxyNode[]>;
+  /** 当前分组是否为可手动选择的策略组 */
   isSelectorGroup: ComputedRef<boolean>;
 }
 
 /**
  * 测速操作 Hook
  *
- * @param options - 依赖注入：分组标签、原始节点、是否可选择
+ * @param options - 依赖注入：分组标签、当前可见节点、是否可选择
  */
 export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
   const proxyStore = useProxyStore();
   const speedtestStore = useSpeedtestStore();
   const toast = useToast();
 
-  const { selectedGroupTag, rawNodes, isSelectorGroup } = options;
+  const { selectedGroupTag, targetNodes, isSelectorGroup } = options;
 
   /** 批量测速确认弹窗 */
   const showConfirmModal = ref(false);
@@ -52,9 +54,8 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
   async function handleRunLatency() {
     if (!selectedGroupTag.value) return;
     toast.info("正在并发测试延迟...");
-    // rawNodes 对真实组来自 nodeMap，对 custom:* 虚拟组来自 proxy 主组节点池本地匹配。
-    // 虚拟组不会拥有 nodeMap[custom:*]，直接读 nodeMap 会把有节点的虚拟组误判为空。
-    const tags = getLatencyTestNodeTags(rawNodes.value);
+    // 批量操作以当前筛选后的可见节点为目标；隐藏超时后不会再测试已隐藏节点。
+    const tags = getLatencyTestNodeTags(targetNodes.value);
 
     if (tags.length === 0) {
       toast.warning("该策略组内没有可供测试的真实节点");
@@ -87,8 +88,12 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
     toast.info("开始节点吞吐量测试", `正在测试: ${nodeTag}`);
     const res = await speedtestStore.testSingleThroughput(nodeTag);
     if (res.success && res.data) {
-      const mbps = bytesToMB(res.data.download_bps);
-      toast.success("单节点测速完成", `${nodeTag}: ${mbps} MB/s`);
+      if (res.data.download_bps > 0) {
+        const mbps = bytesToMB(res.data.download_bps);
+        toast.success("单节点测速完成", `${nodeTag}: ${mbps} MB/s`);
+      } else {
+        toast.error("测速源不可用", `${nodeTag} 延迟可达，但所有下载测速源均未返回有效数据`);
+      }
     } else {
       toast.error("测速失败", res.error);
     }
@@ -98,7 +103,7 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
   async function confirmBatchSpeedTest() {
     showConfirmModal.value = false;
     if (!selectedGroupTag.value) return;
-    const tags = rawNodes.value.map((n) => n.tag);
+    const tags = targetNodes.value.map((n) => n.tag);
     if (tags.length === 0) {
       toast.warning("该策略组内没有可测速的节点");
       return;
@@ -109,7 +114,7 @@ export function useSpeedtestActions(options: UseSpeedtestActionsOptions) {
 
   /** 批量测速预估信息 */
   const batchEstimate = computed(() => {
-    const count = rawNodes.value.length;
+    const count = targetNodes.value.length;
     const minutes = Math.ceil(
       (count * speedtestStore.THROUGHPUT_TEST_DURATION_SEC) / 60
     );
