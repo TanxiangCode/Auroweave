@@ -109,6 +109,12 @@ pub struct AppSettings {
     pub show_tray_speed: bool,
     #[serde(default = "default_false")]
     pub allow_lan: bool,
+    /// 用户原始系统代理配置快照（首次接管前自动记录，关闭时还原字段值）
+    ///
+    /// 由 sysproxy::set_system_proxy_with_backup 维护，不应手工编辑。
+    /// Option 而非具体类型：None = 从未接管过（无快照可还原）。
+    #[serde(default)]
+    pub sysproxy_backup: Option<crate::system::sysproxy::SysProxyBackup>,
     pub tun_enabled: bool,
     /// TUN 虚拟网卡名称，显示 in Windows 网络适配器列表中，默认 Auroweave
     pub tun_interface_name: String,
@@ -250,6 +256,8 @@ impl Default for AppSettings {
             hide_dock_on_close: false,
             show_tray_speed: true,
             allow_lan: false,
+            // 从未接管过系统代理，无原配置快照
+            sysproxy_backup: None,
             tun_enabled: false,
 
             tun_interface_name: "Auroweave".to_string(),

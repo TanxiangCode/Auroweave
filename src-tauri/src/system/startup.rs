@@ -216,13 +216,13 @@ pub async fn apply_core_mode_with_fallback(
                     if let Err(e) = crate::system::service_control::run_direct_tun_task(app_handle) {
                         error!("[app] 回退直接模式时静默拉起 TUN 失败: {}", e);
                         persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                        spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                     } else {
                         info!("[app] 回退直接模式 TUN 计划任务触发成功，等待进程启动...");
                         if !wait_for_singbox_running().await {
                             error!("[app] 本地运行模式下静默提权启动 TUN 失败: 进程未运行");
                             persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                            spawn_local_start(sm.clone(), path_str.clone(), port);
+                            spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                         }
                     }
                 }
@@ -232,7 +232,7 @@ pub async fn apply_core_mode_with_fallback(
                     if let Err(e) = sm.start(&path_str).await {
                         error!("[app] 回退模式启动 sing-box TUN 失败: {}", e);
                         persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                        spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                     }
                 }
                 #[cfg(target_os = "linux")]
@@ -241,14 +241,19 @@ pub async fn apply_core_mode_with_fallback(
                     if let Err(e) = sm.start(&path_str).await {
                         error!("[app] 回退模式启动 sing-box TUN 失败: {}", e);
                         persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                        spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                     }
                 }
             } else {
                 // local 模式无 TUN：直接启动子进程
                 let _ = sm.start(&path_str).await;
-                if let Err(e) = crate::system::sysproxy::set_system_proxy(true, port) {
-                    error!("[app] 回退模式设置系统代理失败（内核已起但流量未接管）: {}", e);
+                if let Err(e) =
+                    crate::system::sysproxy::set_system_proxy_with_backup(app_handle, true, port)
+                {
+                    error!(
+                        "[app] 回退模式设置系统代理失败（内核已起但流量未接管）: {}",
+                        e
+                    );
                 }
             }
             return Ok(());
@@ -263,7 +268,7 @@ pub async fn apply_core_mode_with_fallback(
             info!("[app] 服务模式下：系统处于直连且TUN关闭，通知服务停止内核");
             let _ = crate::core::ipc_client::send_ipc_request("SHUTDOWN_CORE", None).await;
             // 收尾同 local 路径：内核都要停了，系统代理必须回读校验为已关闭
-            return crate::system::sysproxy::ensure_system_proxy_disabled();
+            return crate::system::sysproxy::ensure_system_proxy_disabled(app_handle);
         }
 
         // ---- 步骤4a-3: 服务模式成功，设置系统代理 ----
@@ -272,12 +277,12 @@ pub async fn apply_core_mode_with_fallback(
         if final_settings.tun_enabled {
             // TUN 接管时无需系统代理（双开=流量双重接管+状态混乱）
             let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-        } else {
-            if let Err(e) =
-                crate::system::sysproxy::set_system_proxy(true, final_settings.mixed_port)
-            {
-                error!("[app] 服务模式设置系统代理失败: {}", e);
-            }
+        } else if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
+            app_handle,
+            true,
+            final_settings.mixed_port,
+        ) {
+            error!("[app] 服务模式设置系统代理失败: {}", e);
         }
     } else {
         // ---- 步骤4b: 本地直接运行模式分支 ----
@@ -287,7 +292,7 @@ pub async fn apply_core_mode_with_fallback(
         // 这是纯直连模式，不启动任何代理进程
         if settings.proxy_mode == "direct" && !settings.tun_enabled {
             info!("[app] 系统处于直连且TUN关闭，sing-box 保持停止");
-            return finalize_direct_release(&sm, &path_str, settings.mixed_port);
+            return finalize_direct_release(app_handle, &sm, &path_str, settings.mixed_port);
         }
 
         let port = settings.mixed_port;
@@ -300,7 +305,7 @@ pub async fn apply_core_mode_with_fallback(
                 if let Err(e) = crate::system::service_control::run_direct_tun_task(app_handle) {
                     error!("[app] 启动时直接模式下静默拉起 TUN 失败: {}", e);
                     persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                    spawn_local_start(sm.clone(), path_str.clone(), port);
+                    spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                     return Err(format!("静默提权任务启动失败，已回退为普通系统代理模式: {}", e));
                 } else {
                     info!("[app] 计划任务 TUN 触发成功，等待进程启动...");
@@ -309,7 +314,7 @@ pub async fn apply_core_mode_with_fallback(
                     } else {
                         error!("[app] 本地运行模式下静默提权启动 TUN 失败: 进程未运行");
                         persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                        spawn_local_start(sm.clone(), path_str.clone(), port);
+                        spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                         return Err("计划任务启动成功，但内核进程未见运行（可能配置错误或防病毒扫描延迟），已回退为系统代理".to_string());
                     }
                 }
@@ -320,7 +325,7 @@ pub async fn apply_core_mode_with_fallback(
                 if let Err(e) = sm.start(&path_str).await {
                     error!("[app] macOS 启动 sing-box TUN 失败: {}", e);
                     persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                    spawn_local_start(sm.clone(), path_str.clone(), port);
+                    spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                     return Err(format!("TUN 模式启动失败: {}", e));
                 }
             }
@@ -331,7 +336,7 @@ pub async fn apply_core_mode_with_fallback(
                 if let Err(e) = sm.start(&path_str).await {
                     error!("[app] 启动 sing-box TUN 失败: {}", e);
                     persist_settings_patch(app_handle, |s| { s.tun_enabled = false; });
-                    spawn_local_start(sm.clone(), path_str.clone(), port);
+                    spawn_local_start(app_handle, sm.clone(), path_str.clone(), port);
                     return Err(format!("TUN 启动失败（可能需要管理员权限），已回退为系统代理: {}", e));
                 }
             }
@@ -343,7 +348,9 @@ pub async fn apply_core_mode_with_fallback(
                 return Err(format!("启动内核进程失败: {}", e));
             } else {
                 info!("[app] sing-box 进程已拉起");
-                if let Err(e) = crate::system::sysproxy::set_system_proxy(true, port) {
+                if let Err(e) =
+                    crate::system::sysproxy::set_system_proxy_with_backup(app_handle, true, port)
+                {
                     error!("[app] 设置系统代理失败（内核已运行但流量未接管）: {}", e);
                 }
             }
@@ -360,11 +367,12 @@ pub async fn apply_core_mode_with_fallback(
 /// 系统代理本就指向本地 mixed 端口，内核在则网络照常可用，绝不留下
 /// "代理还开着、内核却没了"的静默断网状态，同时把失败原因上抛给调用方。
 fn finalize_direct_release(
+    app_handle: &tauri::AppHandle,
     sm: &Arc<crate::core::sidecar::SidecarManager>,
     config_path: &str,
     port: u16,
 ) -> Result<(), String> {
-    match crate::system::sysproxy::ensure_system_proxy_disabled() {
+    match crate::system::sysproxy::ensure_system_proxy_disabled(app_handle) {
         Ok(()) => Ok(()),
         Err(e) => {
             error!("[app] 系统代理未能关闭: {}（残留代理端口 {}）", e, port);
@@ -421,10 +429,17 @@ async fn wait_for_service_ipc_ready() -> bool {
 ///
 /// 用于 TUN 拉起失败后的回退场景：在后台 spawn 一个任务启动普通代理模式，
 /// 避免阻塞当前调用链。
-fn spawn_local_start(sm: Arc<crate::core::sidecar::SidecarManager>, path: String, port: u16) {
+fn spawn_local_start(
+    app_handle: &tauri::AppHandle,
+    sm: Arc<crate::core::sidecar::SidecarManager>,
+    path: String,
+    port: u16,
+) {
+    let handle = app_handle.clone();
     tokio::spawn(async move {
         let _ = sm.start(&path).await;
-        if let Err(e) = crate::system::sysproxy::set_system_proxy(true, port) {
+        // 走带快照的入口：TUN 回退同样是一次"接管"，必须先记录用户原配置
+        if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(&handle, true, port) {
             error!("[app] TUN 回退为系统代理时设置失败（用户以为已接管）: {}", e);
         }
     });

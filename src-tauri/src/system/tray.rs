@@ -125,12 +125,12 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     let target_enabled = !currently_enabled;
                     if target_enabled {
                         let (port, _) = crate::speedtest::get_configured_ports(app_handle);
-                        match crate::system::sysproxy::set_system_proxy(true, port) {
+                        match crate::system::sysproxy::set_system_proxy_with_backup(&app_handle, true, port) {
                             Ok(_) => info!("[tray] 系统代理已开启: port={}", port),
                             Err(e) => info!("[tray] 开启系统代理失败: {}", e),
                         }
                     } else {
-                        match crate::system::sysproxy::set_system_proxy(false, 0) {
+                        match crate::system::sysproxy::set_system_proxy_with_backup(&app_handle, false, 0) {
                             Ok(_) => info!("[tray] 系统代理已关闭"),
                             Err(e) => info!("[tray] 关闭系统代理失败: {}", e),
                         }

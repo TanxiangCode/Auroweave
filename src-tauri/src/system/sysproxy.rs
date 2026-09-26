@@ -117,6 +117,18 @@ mod win_registry {
             lpcbData: *mut u32,
         ) -> i32;
 
+        fn RegSetValueExW(
+            hKey: *mut std::ffi::c_void,
+            lpValueName: *const u16,
+            dwReserved: u32,
+            dwType: u32,
+            lpData: *const u8,
+            cbData: u32,
+        ) -> i32;
+
+        fn RegDeleteValueW(hKey: *mut std::ffi::c_void, lpValueName: *const u16) -> i32;
+
+        fn RegCloseKey(hKey: *mut std::ffi::c_void) -> i32;
     }
 
     const HKEY_CURRENT_USER: *mut std::ffi::c_void = 0x80000001 as *mut std::ffi::c_void;
@@ -147,6 +159,139 @@ mod win_registry {
             RegCloseKey(hkey);
             res == 0 && data == 1
         }
+    }
+
+    /// 读取注册表 Internet Settings 下的字符串值（REG_SZ）
+    ///
+    /// 两段式读取：先问字节长度再取内容；长度异常（>4KB）视为无值。
+    fn read_internet_settings_string(name: &str) -> Option<String> {
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+        let mut hkey: *mut std::ffi::c_void = ptr::null_mut();
+        unsafe {
+            if RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                KEY_QUERY_VALUE,
+                &mut hkey,
+            ) != 0
+            {
+                return None;
+            }
+            let value_name = to_wide(name);
+            let mut cb_data: u32 = 0;
+            let size_res = RegQueryValueExW(
+                hkey,
+                value_name.as_ptr(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut cb_data,
+            );
+            if size_res != 0 || cb_data == 0 || cb_data > 4096 {
+                RegCloseKey(hkey);
+                return None;
+            }
+            let mut buf = vec![0u16; (cb_data as usize) / 2];
+            let read_res = RegQueryValueExW(
+                hkey,
+                value_name.as_ptr(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                buf.as_mut_ptr() as *mut u8,
+                &mut cb_data,
+            );
+            RegCloseKey(hkey);
+            if read_res != 0 {
+                return None;
+            }
+            let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            let s = String::from_utf16_lossy(&buf[..end]);
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        }
+    }
+
+    /// 写入注册表 Internet Settings 下的字符串值（REG_SZ）
+    ///
+    /// 仅用于"还原用户原配置"——不触碰 ProxyEnable，因此还原后代理仍是关闭态。
+    pub fn write_internet_settings_string(name: &str, value: &str) -> Result<(), String> {
+        use std::os::windows::ffi::OsStrExt;
+
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+        let mut hkey: *mut std::ffi::c_void = ptr::null_mut();
+        unsafe {
+            if RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                KEY_SET_VALUE,
+                &mut hkey,
+            ) != 0
+            {
+                return Err("无法打开 Internet Settings 注册表键".to_string());
+            }
+            let value_name = to_wide(name);
+            let data: Vec<u16> = std::ffi::OsStr::new(value)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let bytes = std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 2);
+            let res = RegSetValueExW(
+                hkey,
+                value_name.as_ptr(),
+                0,
+                REG_SZ,
+                bytes.as_ptr(),
+                (data.len() * 2) as u32,
+            );
+            RegCloseKey(hkey);
+            if res != 0 {
+                return Err(format!("写入注册表 {} 失败，错误码 {}", name, res));
+            }
+        }
+        Ok(())
+    }
+
+    /// 删除注册表 Internet Settings 下的值
+    ///
+    /// 用于还原"用户原本就没有该值"的场景：写空串会让部分解析器困惑，
+    /// 删除才是"恢复从未配置"的确切语义。值不存在时视为成功。
+    pub fn delete_internet_settings_value(name: &str) -> Result<(), String> {
+        const ERROR_FILE_NOT_FOUND: i32 = 2;
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+        let mut hkey: *mut std::ffi::c_void = ptr::null_mut();
+        unsafe {
+            if RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                KEY_SET_VALUE,
+                &mut hkey,
+            ) != 0
+            {
+                return Err("无法打开 Internet Settings 注册表键".to_string());
+            }
+            let value_name = to_wide(name);
+            let res = RegDeleteValueW(hkey, value_name.as_ptr());
+            RegCloseKey(hkey);
+            if res != 0 && res != ERROR_FILE_NOT_FOUND {
+                return Err(format!("删除注册表 {} 失败，错误码 {}", name, res));
+            }
+        }
+        Ok(())
+    }
+
+    /// 读取注册表 ProxyServer 原始值（REG_SZ）
+    ///
+    /// 形如 "127.0.0.1:8890"，也可能是多协议分机格式
+    /// "http=127.0.0.1:8890;https=127.0.0.1:8890"（解析交由上层做）。
+    /// 只读不改，用于代理归属判定（见 crate 公共 API 的 is_own_proxy_endpoint）。
+    pub fn read_proxy_server() -> Option<String> {
+        read_internet_settings_string("ProxyServer")
     }
 
     pub fn set_proxy_registry(enabled: bool, server: &str) -> Result<(), String> {
@@ -226,6 +371,7 @@ mod win_registry {
 // ===========================================================================
 #[cfg(target_os = "macos")]
 mod mac_sysproxy {
+    use super::{ServiceProxyState, SysProxyBackup};
     use std::process::Command;
 
     /// 获取所有已启用的网络服务列表 (Wi-Fi, Ethernet, USB 10/100/1000 LAN 等)
@@ -322,6 +468,11 @@ mod mac_sysproxy {
             msg.push_str("无附加输出");
         }
         msg
+    }
+
+    /// 执行一批 networksetup 命令（供还原原配置等内部流程复用）
+    pub(super) fn run_commands(commands: &[String], allow_prompt: bool) -> Result<(), String> {
+        run_networksetup_batch(commands, allow_prompt)
     }
 
     /// 批量执行 networksetup 命令
@@ -507,6 +658,237 @@ mod mac_sysproxy {
             .map(|e| (e.server, e.port))
     }
 
+    /// 原配置快照查询的字段标记前缀
+    const BACKUP_MARKER: &str = "||AUROWEAVE_BACKUP||";
+
+    /// 自动代理(PAC)查询的输出标记前缀
+    const AUTOPROXY_MARKER: &str = "||AUROWEAVE_PAC||";
+
+    /// 生成"原配置快照"查询脚本：每个服务取三项代理 + 绕过列表
+    fn build_backup_query(services: &[String]) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        for (i, service) in services.iter().enumerate() {
+            let s = service.replace('\'', "'\\''");
+            for kind in ["web", "secureweb", "socksfirewall"] {
+                parts.push(format!(
+                    "echo '{}{}|{}' ; networksetup -get{}proxy '{}'",
+                    BACKUP_MARKER, i, kind, kind, s
+                ));
+            }
+            // 绕过列表：一行一个域名、行数不定，靠下一个标记收尾
+            parts.push(format!(
+                "echo '{}{}|bypass' ; networksetup -getproxybypassdomains '{}'",
+                BACKUP_MARKER, i, s
+            ));
+        }
+        parts.join(" ; ")
+    }
+
+    /// 解析快照查询输出
+    ///
+    /// 标记格式 `||AUROWEAVE_BACKUP||<服务序号>|<字段>`；标记之后的行归属该字段。
+    /// 绕过列表是"一行一个域名"，需整段收集后用空格拼回（写回时的格式）。
+    fn parse_backup_output(stdout: &str, services: &[String]) -> Vec<ServiceProxyState> {
+        let mut states: Vec<ServiceProxyState> = services
+            .iter()
+            .map(|s| ServiceProxyState {
+                service: s.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let mut current: Option<(usize, String)> = None;
+        let mut bypass_lines: Vec<String> = Vec::new();
+
+        for line in stdout.lines() {
+            let t = line.trim();
+            if let Some(rest) = t.strip_prefix(BACKUP_MARKER) {
+                // 收尾上一块：绕过列表要在整段收集完之后才写入
+                if let Some((idx, kind)) = current.take() {
+                    if kind == "bypass" {
+                        if let Some(state) = states.get_mut(idx) {
+                            let joined = bypass_lines
+                                .iter()
+                                // networksetup 的"未设置"提示行不是域名
+                                .filter(|l| !l.contains("aren't any bypass"))
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            state.bypass_domains = Some(joined);
+                        }
+                    }
+                }
+                bypass_lines.clear();
+                let mut it = rest.split('|');
+                let idx = it.next().and_then(|s| s.trim().parse::<usize>().ok());
+                let kind = it.next().unwrap_or("").trim().to_string();
+                current = match idx {
+                    Some(i) if i < states.len() => Some((i, kind)),
+                    _ => None,
+                };
+                continue;
+            }
+            let Some((idx, kind)) = current.as_ref() else {
+                continue;
+            };
+            let Some(state) = states.get_mut(*idx) else {
+                continue;
+            };
+            if kind == "bypass" {
+                if !t.is_empty() {
+                    bypass_lines.push(t.to_string());
+                }
+                continue;
+            }
+            let point = match kind.as_str() {
+                "secureweb" => &mut state.secure_web,
+                "socksfirewall" => &mut state.socks,
+                _ => &mut state.web,
+            };
+            if let Some(v) = t.strip_prefix("Server:") {
+                point.server = v.trim().to_string();
+                point.read = true;
+            } else if let Some(v) = t.strip_prefix("Port:") {
+                point.port = v.trim().parse().unwrap_or(0);
+            } else if let Some(v) = t.strip_prefix("Enabled:") {
+                point.enabled = v.trim().eq_ignore_ascii_case("yes");
+            } else if let Some(v) = t.strip_prefix("Authenticated Proxy Enabled:") {
+                point.auth = v.trim() == "1";
+            }
+        }
+        // 末块收尾
+        if let Some((idx, kind)) = current.take() {
+            if kind == "bypass" {
+                if let Some(state) = states.get_mut(idx) {
+                    state.bypass_domains = Some(bypass_lines.join(" "));
+                }
+            }
+        }
+        states
+    }
+
+    /// 读取当前全部网络服务的原始代理配置
+    pub(super) fn read_backup_state() -> Result<SysProxyBackup, String> {
+        let services = get_network_services();
+        if services.is_empty() {
+            return Err("未找到任何网络服务".to_string());
+        }
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(build_backup_query(&services))
+            .output()
+            .map_err(|e| format!("执行 networksetup 失败: {}", e))?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        // 一个标记都没有 = 查询整体失败，视为无快照（安全侧：宁可不还原）
+        if !stdout.contains(BACKUP_MARKER) {
+            return Err("快照查询无有效输出".to_string());
+        }
+        Ok(SysProxyBackup {
+            services: parse_backup_output(&stdout, &services),
+            ..Default::default()
+        })
+    }
+
+    /// 生成"还原原配置字段"的命令
+    ///
+    /// 关键：`-setwebproxy` 等 setter 会**隐式开启**代理，所以写回原值之后
+    /// 必须显式把三项状态置 off —— 还原的是"字段值"而非"开关状态"
+    /// （见 SysProxyBackup 的设计说明）。
+    pub(super) fn build_restore_commands(backup: &SysProxyBackup) -> Vec<String> {
+        let mut commands: Vec<String> = Vec::new();
+        for state in &backup.services {
+            let s = state.service.replace('\'', "'\\''");
+            let mut touched = false;
+            for (kind, point) in [
+                ("web", &state.web),
+                ("secureweb", &state.secure_web),
+                ("socksfirewall", &state.socks),
+            ] {
+                // 未读到该项：服务可能已消失，跳过（不拿"查询失败"当"原本为空"）
+                if !point.read {
+                    continue;
+                }
+                if point.server.is_empty() || point.port == 0 {
+                    // 原本就是空 → 显式清空。否则字段会永久残留 127.0.0.1，
+                    // 用户日后手动打开系统代理就会指向无人监听的端口
+                    commands.push(format!("networksetup -set{}proxy '{}' '' 0", kind, s));
+                } else {
+                    commands.push(format!(
+                        "networksetup -set{}proxy '{}' {} {}",
+                        kind, s, point.server, point.port
+                    ));
+                }
+                touched = true;
+            }
+            if let Some(bypass) = &state.bypass_domains {
+                // 空串 = 还原为"未设置绕过列表"（networksetup 支持空串清空）
+                commands.push(format!(
+                    "networksetup -setproxybypassdomains '{}' {}",
+                    s, bypass
+                ));
+                touched = true;
+            }
+            if touched {
+                commands.push(format!("networksetup -setwebproxystate '{}' off", s));
+                commands.push(format!("networksetup -setsecurewebproxystate '{}' off", s));
+                commands.push(format!(
+                    "networksetup -setsocksfirewallproxystate '{}' off",
+                    s
+                ));
+            }
+        }
+        commands
+    }
+
+    /// 查询系统自动代理(PAC)状态：任一服务启用即算启用
+    pub fn autoproxy_state() -> (bool, Option<String>) {
+        let services = get_network_services();
+        if services.is_empty() {
+            return (false, None);
+        }
+        let mut parts: Vec<String> = Vec::new();
+        for service in &services {
+            let s = service.replace('\'', "'\\''");
+            let marker = format!("{}{}", AUTOPROXY_MARKER, parts.len());
+            parts.push(format!(
+                "echo '{}' ; networksetup -getautoproxyurl '{}'",
+                marker, s
+            ));
+        }
+        let out = Command::new("sh").arg("-c").arg(parts.join(" ; ")).output();
+        let Ok(out) = out else {
+            return (false, None);
+        };
+        parse_autoproxy_state(&String::from_utf8_lossy(&out.stdout))
+    }
+
+    /// 解析 -getautoproxyurl 输出（"URL: ..." + "Enabled: Yes/No"）
+    fn parse_autoproxy_state(stdout: &str) -> (bool, Option<String>) {
+        let mut enabled = false;
+        let mut url: Option<String> = None;
+        let mut in_block = false;
+        for line in stdout.lines() {
+            let t = line.trim();
+            if t.starts_with(AUTOPROXY_MARKER) {
+                in_block = true;
+                continue;
+            }
+            if !in_block {
+                continue;
+            }
+            if let Some(v) = t.strip_prefix("URL:") {
+                let v = v.trim();
+                if !v.is_empty() && v != "(null)" {
+                    url = Some(v.to_string());
+                }
+            } else if let Some(v) = t.strip_prefix("Enabled:") {
+                if v.trim().eq_ignore_ascii_case("yes") {
+                    enabled = true;
+                }
+            }
+        }
+        (enabled, url)
+    }
+
     /// 设置系统代理 (macOS)
     ///
     /// 在所有已启用的网络服务上设置/取消 HTTP、HTTPS、SOCKS 代理。
@@ -573,9 +955,12 @@ mod mac_sysproxy {
     #[cfg(test)]
     mod tests {
         use super::{
-            build_batch_script, build_proxy_query, parse_proxy_entries, run_networksetup_batch,
-            summarize_batch_failure, BATCH_LOG, QUERY_MARKER,
+            build_backup_query, build_batch_script, build_proxy_query, parse_autoproxy_state,
+            parse_backup_output, parse_proxy_entries, run_networksetup_batch,
+            summarize_batch_failure, ServiceProxyState, SysProxyBackup, BACKUP_MARKER, BATCH_LOG,
+            QUERY_MARKER,
         };
+        use crate::system::sysproxy::ProxyPoint;
 
         #[test]
         fn batch_succeeds_when_all_commands_exit_zero() {
@@ -687,6 +1072,155 @@ mod mac_sysproxy {
             }
             // 每个服务三项 = 6 个分块标记，解析才切得开
             assert_eq!(script.matches(QUERY_MARKER).count(), 6, "{script}");
+        }
+
+        #[test]
+        fn parse_backup_output_reads_points_and_bypass_list() {
+            // 模拟一个服务：三项代理 + 多行绕过列表
+            let stdout = "||AUROWEAVE_BACKUP||0|web\nEnabled: No\nServer: proxy.corp.example.com\nPort: 8080\n\
+                          ||AUROWEAVE_BACKUP||0|secureweb\nEnabled: No\nServer: proxy.corp.example.com\nPort: 8080\nAuthenticated Proxy Enabled: 1\n\
+                          ||AUROWEAVE_BACKUP||0|socksfirewall\nEnabled: No\nServer: \nPort: 0\n\
+                          ||AUROWEAVE_BACKUP||0|bypass\n*.corp.example.com\n10.0.0.0/8\n";
+            let states = parse_backup_output(stdout, &["Wi-Fi".to_string()]);
+            assert_eq!(states.len(), 1);
+            let s = &states[0];
+            assert_eq!(s.service, "Wi-Fi");
+            assert_eq!(
+                (s.web.server.as_str(), s.web.port),
+                ("proxy.corp.example.com", 8080)
+            );
+            assert!(!s.web.enabled);
+            assert!(s.secure_web.auth);
+            // server 为空 / port 为 0 的项保持空值，还原时会跳过（不写空地址）
+            assert!(s.socks.server.is_empty() && s.socks.port == 0);
+            // 一行一个域名 → 空格分隔保存
+            assert_eq!(
+                s.bypass_domains.as_deref(),
+                Some("*.corp.example.com 10.0.0.0/8")
+            );
+        }
+
+        #[test]
+        fn parse_backup_output_handles_multi_service_blocks() {
+            let stdout = "||AUROWEAVE_BACKUP||0|web\nEnabled: Yes\nServer: 127.0.0.1\nPort: 8890\n\
+                          ||AUROWEAVE_BACKUP||0|bypass\n\
+                          ||AUROWEAVE_BACKUP||1|web\nEnabled: No\nServer: 10.1.1.1\nPort: 3128\n\
+                          ||AUROWEAVE_BACKUP||1|bypass\nlocalhost\n";
+            let services = vec!["Wi-Fi".to_string(), "Tailscale".to_string()];
+            let states = parse_backup_output(stdout, &services);
+            assert_eq!(states.len(), 2);
+            assert!(states[0].web.enabled);
+            assert_eq!(states[0].bypass_domains.as_deref(), Some(""));
+            assert_eq!(states[1].web.server, "10.1.1.1");
+            assert_eq!(states[1].bypass_domains.as_deref(), Some("localhost"));
+        }
+
+        #[test]
+        fn restore_commands_rewrite_values_then_force_state_off() {
+            // 关键性质：-setwebproxy 会隐式开启代理，所以写回原值后必须显式置 off，
+            // 还原的只是"字段值"，不是"开关状态"
+            let backup = SysProxyBackup {
+                services: vec![ServiceProxyState {
+                    service: "Wi-Fi".to_string(),
+                    web: ProxyPoint {
+                        server: "proxy.corp.example.com".to_string(),
+                        port: 8080,
+                        enabled: true,
+                        auth: false,
+                        read: true,
+                    },
+                    secure_web: ProxyPoint::default(),
+                    socks: ProxyPoint::default(),
+                    bypass_domains: Some("*.corp.example.com".to_string()),
+                }],
+                windows: None,
+            };
+            let cmds = super::build_restore_commands(&backup);
+            assert!(cmds
+                .iter()
+                .any(|c| c == "networksetup -setwebproxy 'Wi-Fi' proxy.corp.example.com 8080"));
+            assert!(cmds
+                .iter()
+                .any(|c| c == "networksetup -setproxybypassdomains 'Wi-Fi' *.corp.example.com"));
+            for state in [
+                "-setwebproxystate",
+                "-setsecurewebproxystate",
+                "-setsocksfirewallproxystate",
+            ] {
+                assert!(
+                    cmds.iter()
+                        .any(|c| c == &format!("networksetup {} 'Wi-Fi' off", state)),
+                    "缺少显式关闭: {state}\n{cmds:?}"
+                );
+            }
+            // server/port 缺失的项不得写出（避免把代理写成空地址）
+            assert!(!cmds
+                .iter()
+                .any(|c| c.contains("-setsecurewebproxy 'Wi-Fi'")));
+        }
+
+        #[test]
+        fn restore_commands_clear_field_when_original_was_empty() {
+            // 用户原本没配代理（server 为空、port 为 0，但**读到过**该项）：
+            // 必须显式清空，否则字段永久残留 127.0.0.1，用户日后手动开启系统
+            // 代理就会指向无人监听的端口
+            let backup = SysProxyBackup {
+                services: vec![ServiceProxyState {
+                    service: "Wi-Fi".to_string(),
+                    web: ProxyPoint {
+                        read: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }],
+                windows: None,
+            };
+            let cmds = super::build_restore_commands(&backup);
+            assert!(
+                cmds.iter()
+                    .any(|c| c == "networksetup -setwebproxy 'Wi-Fi' '' 0"),
+                "{cmds:?}"
+            );
+            // 未读到（查询失败）时必须跳过，不能把"读不到"当成"原本为空"
+            let unreadable = SysProxyBackup {
+                services: vec![ServiceProxyState {
+                    service: "Wi-Fi".to_string(),
+                    web: ProxyPoint::default(),
+                    ..Default::default()
+                }],
+                windows: None,
+            };
+            assert!(super::build_restore_commands(&unreadable).is_empty());
+        }
+
+        #[test]
+        fn restore_commands_skip_empty_snapshot() {
+            assert!(super::build_restore_commands(&SysProxyBackup::default()).is_empty());
+        }
+
+        #[test]
+        fn backup_query_script_has_marker_per_field() {
+            let services = vec!["Wi-Fi".to_string(), "Tailscale".to_string()];
+            let script = build_backup_query(&services);
+            // 每服务 4 个字段（web/secureweb/socksfirewall/bypass）
+            assert_eq!(script.matches(BACKUP_MARKER).count(), 8, "{script}");
+            assert!(script.contains("networksetup -getproxybypassdomains 'Tailscale'"));
+        }
+
+        #[test]
+        fn autoproxy_state_parses_url_and_enabled_flag() {
+            let on =
+                "||AUROWEAVE_PAC||0\nURL: http://pac.corp.example.com/proxy.pac\nEnabled: Yes\n";
+            assert_eq!(
+                super::parse_autoproxy_state(on),
+                (
+                    true,
+                    Some("http://pac.corp.example.com/proxy.pac".to_string())
+                )
+            );
+            let off = "||AUROWEAVE_PAC||0\nURL: (null)\nEnabled: No\n";
+            assert_eq!(super::parse_autoproxy_state(off), (false, None));
+            assert_eq!(super::parse_autoproxy_state(""), (false, None));
         }
 
         #[test]
@@ -823,6 +1357,110 @@ fn parse_proxy_server(raw: &str) -> Option<(String, u16)> {
     Some((host.to_string(), port))
 }
 
+// ===========================================================================
+// 快照 / 还原流程（跨平台分派）
+// ===========================================================================
+
+/// 当前平台是否支持"原配置快照/还原"
+/// - Windows / macOS：支持（HKCU 值 / networksetup 双向可读可写）
+/// - Linux 等：暂不支持（gsettings 键路径与权限差异大），此时快照与还原都退化为
+///   空操作——比"猜着还原"安全，代价是字段可能残留 127.0.0.1（同改动前行为）
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+const BACKUP_SUPPORTED: bool = true;
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+const BACKUP_SUPPORTED: bool = false;
+
+/// 读取当前平台的用户原配置快照
+fn read_backup_state() -> Result<SysProxyBackup, String> {
+    #[cfg(target_os = "macos")]
+    {
+        mac_sysproxy::read_backup_state()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Ok(SysProxyBackup {
+            windows: Some(WinProxyState {
+                proxy_server: win_registry::read_internet_settings_string("ProxyServer"),
+                proxy_override: win_registry::read_internet_settings_string("ProxyOverride"),
+            }),
+            ..Default::default()
+        })
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Err("当前平台暂不支持代理配置快照".to_string())
+    }
+}
+
+/// 把被本应用覆盖的字段还原为用户原值（**不改开关状态**）
+fn restore_backup_fields(backup: &SysProxyBackup, allow_prompt: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let commands = mac_sysproxy::build_restore_commands(backup);
+        if commands.is_empty() {
+            return Ok(());
+        }
+        // 还原走 networksetup 批量执行（allow_prompt=false 时纯静默）
+        mac_sysproxy::run_commands(&commands, allow_prompt)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let Some(win) = &backup.windows else {
+            return Ok(());
+        };
+        // 原本"有值"→写回；"无值"→删除该值（恢复"从未配置"，写空串会让部分
+        // 解析器困惑）。两种情况都不触碰 ProxyEnable / AutoConfigURL：
+        // 前者保证"代理确实是关的"，后者本应用从未修改，还原它反而会覆盖
+        // 用户的公司 PAC 设置
+        for (name, value) in [
+            ("ProxyServer", &win.proxy_server),
+            ("ProxyOverride", &win.proxy_override),
+        ] {
+            match value {
+                Some(v) => win_registry::write_internet_settings_string(name, v)?,
+                None => win_registry::delete_internet_settings_value(name)?,
+            }
+        }
+        win_sysproxy::refresh();
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = backup;
+        Ok(())
+    }
+}
+
+/// 快照并持久化用户原配置（仅在"即将接管且当前代理不是本应用写的"时调用）
+fn capture_backup(app: &tauri::AppHandle) {
+    if !BACKUP_SUPPORTED {
+        // 平台不支持：不是错误，不该每次开启都刷告警
+        log::debug!("[sysproxy] 当前平台不支持原配置快照，跳过");
+        return;
+    }
+    match read_backup_state() {
+        Ok(backup) => {
+            let value = match serde_json::to_value(&backup) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::error!("[sysproxy] 序列化原配置快照失败: {}", e);
+                    return;
+                }
+            };
+            let patch = serde_json::json!({ "sysproxy_backup": value });
+            if let Err(e) = crate::commands::settings::update_settings_internal(app, patch) {
+                log::error!("[sysproxy] 持久化原配置快照失败: {}", e);
+            } else {
+                log::info!("[sysproxy] 已快照用户原系统代理配置");
+            }
+        }
+        Err(e) => log::warn!(
+            "[sysproxy] 读取原系统代理配置失败（关闭时将不还原字段）: {}",
+            e
+        ),
+    }
+}
+
 /// 查询当前开启的系统代理指向的端点（host, port）；未开启返回 None
 pub fn get_system_proxy_endpoint() -> Option<(String, u16)> {
     #[cfg(target_os = "windows")]
@@ -940,7 +1578,140 @@ pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
     // 期望态按"写入是否发起成功"更新：即便回读校验失败，用户的意图仍然成立
     // （开=期望开；关=期望关，守护不该再把残留代理拉起来）
     crate::system::proxy_guard::set_desired(enabled);
-    verify_system_proxy_state(enabled, port)
+    let verified = verify_system_proxy_state(enabled, port);
+    if enabled && verified.is_ok() {
+        // PAC 优先于手动代理，必要时如实告知（不改用户的 PAC）
+        warn_if_autoproxy_active();
+    }
+    verified
+}
+
+/// 开启成功后检查 PAC 是否仍在生效，并给出明确提示
+///
+/// PAC（自动代理 URL）优先于手动代理：用户若开着公司 PAC，即使 Auroweave
+/// 把手动代理配好了，流量仍会走 PAC，表现为"代理没生效"。这里不改 PAC
+/// （那是用户/企业的配置），只如实告知。
+pub fn warn_if_autoproxy_active() {
+    if !get_system_proxy_status() {
+        return;
+    }
+    let (enabled, url) = get_autoproxy_state();
+    if enabled {
+        log::warn!(
+            "[sysproxy] 系统自动代理(PAC)仍处于开启状态（{}），macOS/Windows 下 PAC 优先于手动代理，流量可能不会走 Auroweave；请在系统设置中关闭 PAC 或改用 TUN 模式",
+            url.unwrap_or_else(|| "未提供 URL".to_string())
+        );
+    }
+}
+
+/// 带"原配置快照/还原"的系统代理写入口
+///
+/// 与 `set_system_proxy` 的差别只有两点，其余语义（回读校验、期望态钩子）完全一致：
+/// - **开启前**：若当前系统代理不是本应用写的（`is_own_proxy_endpoint` 为假），
+///   先把用户原配置（服务器地址 / 绕过列表）快照进 settings
+/// - **关闭后**：若关闭前系统代理确实是本应用写的，把这些**字段值**还原回去
+///
+/// 两条安全约束：
+/// 1. 还原只在"关闭确实成功"后执行——若关闭失败（代理还指着本应用的
+///    127.0.0.1），此时把字段改回用户原值会让流量指向无人监听的地址，比不还原更糟
+/// 2. 归属判定同时是防误改闸门：若关闭前系统代理已被用户/其他应用改成别的地址，
+///    那不是我们留下的，不还原、不覆盖
+pub fn set_system_proxy_with_backup(
+    app: &tauri::AppHandle,
+    enabled: bool,
+    port: u16,
+) -> Result<(), String> {
+    // 以 settings 的 mixed_port 作为"本应用写入端口"的判据：
+    // 关闭路径的 port 参数恒为 0，不能用于归属判定
+    let managed = crate::commands::settings::settings_get_internal(app).mixed_port;
+    let ours_before = is_own_proxy_endpoint(managed);
+
+    if enabled && !ours_before {
+        capture_backup(app);
+    }
+
+    let result = set_system_proxy(enabled, port);
+
+    if !enabled && ours_before && result.is_ok() {
+        let backup = crate::commands::settings::settings_get_internal(app).sysproxy_backup;
+        match backup {
+            Some(b) => match restore_backup_fields(&b, true) {
+                Ok(()) => log::info!("[sysproxy] 已还原用户原代理配置字段（开关仍为关闭）"),
+                Err(e) => log::error!("[sysproxy] 还原用户原代理配置失败: {}", e),
+            },
+            None => log::info!("[sysproxy] 无原配置快照可还原"),
+        }
+    }
+
+    result
+}
+
+/// 查询系统自动代理(PAC)状态：返回 (是否启用, URL)
+///
+/// 单独读取而不并入 `is_proxy_enabled`：PAC 是**用户/企业自有**的配置，
+/// Auroweave 从不写它，也不该在"关闭代理"时把它清掉。把 PAC 计入手动代理
+/// 会导致两个误判——一是 `ensure_system_proxy_disabled` 误以为系统还有残留
+/// 代理而反复重试，二是守护可能去动用户的公司配置。
+///
+/// 它的意义在于**告知**：PAC 开启时流量仍按 PAC 走，Auroweave 的手动代理
+/// 可能不生效（macOS 上 PAC 优先于手动代理），必须在开启时明确提示。
+pub fn get_autoproxy_state() -> (bool, Option<String>) {
+    #[cfg(target_os = "windows")]
+    {
+        let url = win_registry::read_internet_settings_string("AutoConfigURL");
+        (url.is_some(), url)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        mac_sysproxy::autoproxy_state()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        (false, None)
+    }
+}
+
+/// 退出清理：静默关闭系统代理 + 静默还原原配置字段
+///
+/// 退出路径绝不能弹提权框（会阻塞退出流程）。实测 macOS 上"关闭代理"与
+/// "写回代理字段"均无需提权，Windows 注册表写入同样无需提权，因此静默
+/// 关闭 + 静默还原都可行。
+///
+/// 与用户主动关闭的差别：这里不做回读失败重试、不提示，只留日志——进程
+/// 即将退出，能做的都做，做不到的（例如个别环境确实需要提权）留 error 日志。
+/// 注意还原失败时的残留是**用户的原配置字段**（无害），而不是 127.0.0.1
+/// （那才会导致断网）——因为还原只写字段、不开开关。
+pub fn cleanup_system_proxy_on_exit(app: &tauri::AppHandle) {
+    let managed = crate::commands::settings::settings_get_internal(app).mixed_port;
+    let ours_before = is_own_proxy_endpoint(managed);
+    if !get_system_proxy_status() && !ours_before {
+        return;
+    }
+
+    if let Err(e) = set_system_proxy_silent(false, 0) {
+        log::error!("[app] 退出清理系统代理失败（可能残留代理导致断网）: {}", e);
+        return;
+    }
+    // 回读确认：仍开启就不还原字段——代理还指着 127.0.0.1 时把字段改回原值，
+    // 会让流量指向一个无人监听的地址，比不还原更糟
+    if get_system_proxy_status() {
+        log::error!("[app] 退出清理后回读仍为开启，跳过原配置还原");
+        return;
+    }
+
+    if !ours_before {
+        return;
+    }
+    match crate::commands::settings::settings_get_internal(app).sysproxy_backup {
+        Some(b) => {
+            if let Err(e) = restore_backup_fields(&b, false) {
+                log::error!("[app] 退出时静默还原原代理配置失败: {}", e);
+            } else {
+                log::info!("[app] 退出时已静默还原原代理配置字段");
+            }
+        }
+        None => log::info!("[app] 退出时无原配置快照可还原"),
+    }
 }
 
 /// 静默设置系统代理 (不弹出提权密码框)
@@ -963,27 +1734,25 @@ pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
 /// 只要"关闭"没真正落到所有网络服务上，用户就彻底失去网络且毫无提示，
 /// 因此这里的返回值必须代表"回读确认已关闭"，而不是"写入命令发起过"：
 /// - 回读已关闭 → 直接返回，零开销零提权（绝大多数情况）
-/// - 回读仍开启 → 带提权重试（用户显式点了关闭，允许弹一次密码框）
+/// - 回读仍开启 → 关闭并还原原配置字段（用户显式关闭，允许弹提权框）
 /// - 仍关不掉 → 返回 Err，由上层兜底（拉起内核）并向用户报错
 ///
 /// 期望态无论成败都先置 false：用户的意图是"关"，守护不应再把它打开
 /// （否则下次 30s 拍的漂移恢复会把刚残留的代理又拉起来）。
-pub fn ensure_system_proxy_disabled() -> Result<(), String> {
+///
+/// 走 `set_system_proxy_with_backup` 而非裸写：用户点「关闭代理」走的就是
+/// 这条路（direct 快速路径 / TUN 不变式），若不在这里还原字段，"代理服务器"
+/// 就会永久残留 127.0.0.1 —— 那是本函数最初要解决的那类环境污染。
+pub fn ensure_system_proxy_disabled(app: &tauri::AppHandle) -> Result<(), String> {
     crate::system::proxy_guard::set_desired(false);
 
     if !get_system_proxy_status() {
         return Ok(());
     }
 
-    log::info!("[sysproxy] 回读发现系统代理仍处于开启态，执行关闭（含提权重试）");
-    // 直接用 impl 而非 set_system_proxy：期望态已在上面显式置 false，
-    // 避免"写入失败但钩子按成功处理"的语义混淆
-    set_system_proxy_impl(false, 0)?;
-
-    if get_system_proxy_status() {
-        return Err("系统代理仍处于开启状态（部分网络服务拒绝关闭），整机可能断网，请检查 系统设置 → 网络 → 详细信息 → 代理".to_string());
-    }
-    Ok(())
+    log::info!("[sysproxy] 回读发现系统代理仍处于开启态，执行关闭（含原配置还原）");
+    // 内含回读校验：Ok 即代表"确实已关闭"
+    set_system_proxy_with_backup(app, false, 0)
 }
 
 #[cfg(target_os = "windows")]

@@ -660,10 +660,16 @@ async fn build_and_apply_config(
     // 同步系统代理状态
     let settings = crate::commands::settings::settings_get_internal(app_handle);
     if settings.proxy_mode != "direct" {
-        if let Err(e) = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port) {
+        if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
+            app_handle,
+            true,
+            settings.mixed_port,
+        ) {
             warn!("[subscription] 同步系统代理（开启）失败: {}", e);
         }
-    } else if let Err(e) = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port) {
+    } else if let Err(e) =
+        crate::system::sysproxy::set_system_proxy_with_backup(app_handle, false, 0)
+    {
         // 直连态下关不掉 = 残留 127.0.0.1 代理；proxy_guard 会在 30s 内静默重试
         warn!("[subscription] 同步系统代理（关闭）失败: {}", e);
     }

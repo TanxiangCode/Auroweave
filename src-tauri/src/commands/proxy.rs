@@ -190,7 +190,9 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
             }
         } else {
             crate::system::proxy_guard::set_desired(true);
-            if let Err(e) = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port) {
+            if let Err(e) =
+                crate::system::sysproxy::set_system_proxy_with_backup(&app_handle, true, settings.mixed_port)
+            {
                 log::error!("[proxy] 设置系统代理失败: {}", e);
             }
         }
@@ -224,8 +226,11 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
             let config_path_str = config_path.to_string_lossy().to_string();
             match sm.start(&config_path_str).await {
                 Ok(_) => {
-                    if let Err(e) = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port)
-                    {
+                    if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
+                        &app_handle,
+                        true,
+                        settings.mixed_port,
+                    ) {
                         log::error!("[proxy] direct 模式设置系统代理失败: {}", e);
                     }
                     log::info!("[proxy] direct 模式 sing-box 已启动，系统代理已设置");
@@ -238,12 +243,21 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
 }
 
 /// 强制设置系统代理开启或注销 (自救/外部调用入口)
+///
+/// 走带快照的写入口：这也是一次"接管"，必须先记录用户原配置，
+/// 关闭时再把字段还原回去。期望态由 set_system_proxy 内部统一维护。
 #[tauri::command]
-pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
-    log::info!("[proxy] 强制设置系统代理状态: enabled={}, port={}", enabled, port);
-    // 同步守护期望状态：用户显式操作即期望真相源
-    crate::system::proxy_guard::set_desired(enabled);
-    match crate::system::sysproxy::set_system_proxy(enabled, port) {
+pub async fn sysproxy_set(
+    app_handle: tauri::AppHandle,
+    enabled: bool,
+    port: u16,
+) -> ApiResponse<()> {
+    log::info!(
+        "[proxy] 强制设置系统代理状态: enabled={}, port={}",
+        enabled,
+        port
+    );
+    match crate::system::sysproxy::set_system_proxy_with_backup(&app_handle, enabled, port) {
         Ok(_) => ApiResponse::ok(()),
         Err(e) => {
             log::error!("[proxy] 设置系统代理失败: enabled={}, port={}, 原因: {}", enabled, port, e);
