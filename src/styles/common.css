@@ -104,7 +104,7 @@
 }
 
 .btn:hover {
-  background: var(--border-subtle);
+  background: var(--surface-raised);
 }
 
 .btn:disabled {
@@ -131,7 +131,7 @@
 }
 
 .btn.text:hover {
-  background: var(--border-subtle);
+  background: var(--surface-raised);
   color: var(--text-primary);
 }
 
@@ -144,6 +144,58 @@
 
 .btn.danger:hover {
   background: var(--accent-red-glow);
+}
+
+/* ============================================================
+   表单控件 (.text-input / .num-input / .select-input)
+   设置页各面板的输入框共用同一套视觉，收口在此避免各面板重复硬编码。
+
+   注意：历史实现里这些控件用的是硬编码深色 #141824 + #fff，
+   在浅色主题下会变成"深底白字"错配。现统一走 design tokens。
+   ============================================================ */
+.text-input,
+.num-input,
+.select-input {
+  padding: 6px 10px;
+  background: var(--layer-2);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--duration-fast);
+}
+
+.text-input:focus,
+.num-input:focus,
+.select-input:focus {
+  border-color: var(--accent-cyan-vivid);
+}
+
+/* 数字输入框：固定宽度 + 右对齐，便于纵向扫读数值 */
+.num-input {
+  width: 90px;
+  text-align: right;
+}
+
+/* URL / 路径类输入框：等宽字体 */
+.text-input {
+  font-family: var(--font-mono);
+}
+
+/* select 保留原生下拉箭头可点击区 */
+.select-input {
+  cursor: pointer;
+}
+
+/* 只读态：明显弱化，让用户明确知道该值当前不可编辑 */
+.text-input.readonly,
+.num-input.readonly,
+.select-input.readonly {
+  opacity: 0.65;
+  cursor: not-allowed;
+  border-style: dashed;
+  filter: grayscale(0.3);
 }
 
 /* ============================================================

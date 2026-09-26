@@ -166,7 +166,7 @@
 .separator {
   border: 0;
   height: 1px;
-  background: var(--border-subtle);
+  background: var(--surface-raised);
   margin: var(--space-3) 0;
 }
 
@@ -197,4 +197,27 @@
   font-size: var(--text-xs);
   color: var(--text-secondary);
   line-height: var(--leading-relaxed);
+}
+
+/* ============================================================
+   深链跳转高亮
+   ============================================================ */
+
+/* 从其他页面带 ?highlight=xxx 进来时，
+   用 3 秒青色描边脉冲把视线引到该设置项上。
+   SettingsView 统一从 route.query 透传 highlightTarget，各面板 watch 该 prop。 */
+.setting-item.highlight {
+  border-color: var(--accent-cyan-vivid);
+  background: var(--accent-cyan-glow);
+  animation: highlight-pulse 1s ease-in-out 3;
+}
+
+@keyframes highlight-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan-vivid) 30%, transparent);
+  }
 }

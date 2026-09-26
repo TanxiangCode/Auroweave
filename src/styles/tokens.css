@@ -38,11 +38,26 @@
   --status-warning: #fbbf24;                 /* 暂停黄 */
   --status-danger: #f87171;                  /* 危险红 */
 
-  /* --- 文字 --- */
+  /* --- 文字 ---
+     层级透明度按 WCAG AA 正文对比度校准：tertiary 原为 0.3（约 2.7:1），
+     在深色底上做小号说明文字明显发飘，提升到 0.42 后约 4.6:1。 */
   --text-primary: rgba(255, 255, 255, 0.92); /* 主要文字 */
-  --text-secondary: rgba(255, 255, 255, 0.55);/* 次要文字、标签 */
-  --text-tertiary: rgba(255, 255, 255, 0.3); /* 占位符、禁用态 */
+  --text-secondary: rgba(255, 255, 255, 0.66);/* 次要文字、标签 */
+  --text-tertiary: rgba(255, 255, 255, 0.42); /* 占位符、禁用态 */
   --text-on-accent: #ffffff;                 /* 强调色按钮上的文字 */
+  /* 亮青渐变按钮（--accent-cyan-vivid 85% → #4facfe 85%）上的文字：
+     深色主题下渐变本身很亮，用近黑才有足够对比；浅色主题下渐变整体压暗，改用白 */
+  --text-on-cyan-grad: #06222a;
+
+  /* --- 协议/类型徽章（淡彩底上的文字） ---
+     粉/蓝/红等淡彩在浅色底上仅约 2.1:1（等于看不清），
+     浅色主题改用同色相的深色变体，深色主题保留原淡彩。 */
+  --badge-pink: #f472b6;
+  --badge-blue: #60a5fa;
+  --badge-red: #fb7185;
+  --badge-pink-tint: rgba(244, 114, 182, 0.12);
+  --badge-blue-tint: rgba(96, 165, 250, 0.1);
+  --badge-red-tint: rgba(251, 113, 133, 0.1);
 
   /* --- 边框与分割线 --- */
   --border-subtle: rgba(255, 255, 255, 0.06);
@@ -85,29 +100,44 @@
   --layer-2: rgba(244, 244, 245, 0.8);
   --layer-3: rgba(228, 228, 231, 0.9);
 
-  /* --- 强调色（与深色保持品牌一致，但去掉 glow 效果） --- */
-  --accent-blue: #0071e3;
-  --accent-blue-glow: rgba(0, 113, 227, 0.15);
-  --accent-cyan: #0891b2;
-  --accent-cyan-glow: rgba(8, 145, 178, 0.1);
-  --accent-cyan-vivid: #0891b2;
-  --accent-purple: #8b5cf6;
-  --accent-purple-glow: rgba(139, 92, 246, 0.12);
-  --accent-green: #059669;
-  --accent-green-glow: rgba(5, 150, 105, 0.1);
-  --accent-red: #dc2626;
-  --accent-red-glow: rgba(220, 38, 38, 0.1);
-  --accent-orange: #ea580c;
+  /* --- 强调色 ---
+     与深色保持品牌色相，但按 WCAG AA 正文对比度（>=4.5:1 @ #f4f4f5）整体压暗。
+     原值（如 --accent-cyan #0891b2 仅 3.35:1）在浅底上做小号文字时明显发飘。 */
+  --accent-blue: #006cd9;
+  --accent-blue-glow: rgba(0, 108, 217, 0.15);
+  --accent-cyan: #067995;
+  --accent-cyan-glow: rgba(6, 121, 149, 0.1);
+  --accent-cyan-vivid: #067995;
+  --accent-purple: #7d52dd;
+  --accent-purple-glow: rgba(125, 82, 221, 0.12);
+  --accent-green: #04805a;
+  --accent-green-glow: rgba(4, 128, 90, 0.1);
+  --accent-red: #d72525;
+  --accent-red-glow: rgba(215, 37, 37, 0.1);
+  --accent-orange: #bf4809;
   --surface-deep: rgba(255, 255, 255, 0.95);
-  --status-success: #16a34a;
-  --status-warning: #d97706;
-  --status-danger: #dc2626;
+  --status-success: #117f39;
+  --status-warning: #a95c04;
+  --status-danger: #d72525;
 
   /* --- 文字 --- */
   --text-primary: rgba(0, 0, 0, 0.88);
-  --text-secondary: rgba(0, 0, 0, 0.5);
-  --text-tertiary: rgba(0, 0, 0, 0.28);
+  --text-secondary: rgba(0, 0, 0, 0.72);
+  --text-tertiary: rgba(0, 0, 0, 0.58);
   --text-on-accent: #ffffff;
+  /* 浅色主题下 --accent-cyan-vivid 已压暗到 #067995，渐变按钮底色随之变深，
+     文字必须改白，否则近黑字会糊在深青底上 */
+  --text-on-cyan-grad: #ffffff;
+
+  /* --- 协议/类型徽章（淡彩底上的文字） ---
+     粉/蓝/红等淡彩在浅色底上仅约 2.1:1（等于看不清），
+     浅色主题改用同色相的深色变体，深色主题保留原淡彩。 */
+  --badge-pink: #be185d;
+  --badge-blue: #1d4ed8;
+  --badge-red: #be123c;
+  --badge-pink-tint: rgba(190, 24, 93, 0.08);
+  --badge-blue-tint: rgba(29, 78, 216, 0.08);
+  --badge-red-tint: rgba(190, 18, 60, 0.08);
 
   /* --- 边框与分割线 --- */
   --border-subtle: rgba(0, 0, 0, 0.04);
