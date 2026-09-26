@@ -77,12 +77,20 @@ pub fn start_guard(app_handle: tauri::AppHandle) {
                     continue;
                 }
                 let port = crate::commands::settings::settings_get_internal(&app_handle).mixed_port;
-                log::warn!(
-                    "[proxy_guard] 检测到系统代理被外部关闭，内核仍在运行，自动恢复 (port {})",
-                    port
-                );
+                // 恢复可能长期失败（如需提权被拒），告警去重避免 30s 一拍刷屏
+                let first_hit = !RESIDUAL_WARNED.swap(true, Ordering::AcqRel);
+                if first_hit {
+                    log::warn!(
+                        "[proxy_guard] 检测到系统代理被外部关闭，内核仍在运行，自动恢复 (port {})",
+                        port
+                    );
+                }
                 if let Err(e) = crate::system::sysproxy::set_system_proxy_silent(true, port) {
-                    log::error!("[proxy_guard] 恢复系统代理失败（下轮重试）: {}", e);
+                    if first_hit {
+                        log::error!("[proxy_guard] 恢复系统代理失败（下轮重试）: {}", e);
+                    } else {
+                        log::debug!("[proxy_guard] 恢复系统代理仍失败（下轮重试）: {}", e);
+                    }
                 }
             } else if proxy_on && !(desired && running) {
                 // 实际开 + 非"期望开且内核活着"：疑似残留，静默关闭

@@ -50,7 +50,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     // 系统代理与 TUN 切换
-    let sysproxy_item = MenuItemBuilder::with_id("toggle_sysproxy", "开启系统代理 (System Proxy)").build(app)?;
+    // 菜单项是"翻转"语义（开→关→开），文案不能写死"开启"，否则与实际行为不符
+    let sysproxy_item = MenuItemBuilder::with_id("toggle_sysproxy", "切换系统代理 (System Proxy)").build(app)?;
     let restart_item = MenuItemBuilder::with_id("restart_kernel", "重启内核服务 (Restart Core)").build(app)?;
 
     let quit_item = MenuItemBuilder::with_id("quit_app", "退出 Auroweave (Quit)").build(app)?;

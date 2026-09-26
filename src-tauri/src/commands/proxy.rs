@@ -181,7 +181,9 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
 
         if settings.tun_enabled {
             // TUN 接管下必须关系统代理（双开=流量双重接管+状态混乱）。
-            // 失败不吞错：记录 error 并回读校验，用户取消提权时能从日志/UI 定位
+            // 用 ensure_* 做回读校验：只写不验会留下"以为关了其实还开着"，
+            // 此时 TUN 已接管全部流量，残留的 127.0.0.1 代理指向 mixed 端口
+            // 尚能转发，但状态与统计都会失真。
             crate::system::proxy_guard::set_desired(false);
             if let Err(e) = crate::system::sysproxy::set_system_proxy(false, 0) {
                 log::error!("[proxy] TUN 模式下关闭系统代理失败: {}（可能残留双开状态）", e);
@@ -235,7 +237,7 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
     }
 }
 
-/// 强制设置 Windows 系统代理开启或注销 (供前端总开关与自救调用)
+/// 强制设置系统代理开启或注销 (自救/外部调用入口)
 #[tauri::command]
 pub async fn sysproxy_set(enabled: bool, port: u16) -> ApiResponse<()> {
     log::info!("[proxy] 强制设置系统代理状态: enabled={}, port={}", enabled, port);
@@ -277,7 +279,9 @@ let status = std::process::Command::new("powershell")
 
 if status.is_ok() {
 // 注销系统代理，防止退出时残留
-if let Err(e) = crate::system::sysproxy::set_system_proxy(false, 0) {
+if let Err(e) =
+crate::system::sysproxy::set_system_proxy_with_backup(&app_handle, false, 0)
+{
 log::error!("[proxy] 提权重启前注销系统代理失败（重启后可能残留）: {}", e);
 }
 app_handle.exit(0);

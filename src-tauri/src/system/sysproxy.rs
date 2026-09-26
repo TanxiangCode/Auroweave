@@ -3,6 +3,70 @@
 /// - macOS: 使用 networksetup 命令 (通过 osascript 提权)
 /// - Linux: 暂未实现
 /// 作者: TanXiang
+use serde::{Deserialize, Serialize};
+
+// ===========================================================================
+// 用户原配置快照（"只还原字段，不改开关状态"的环境自洁）
+// ===========================================================================
+
+/// 单个代理项的原始值
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ProxyPoint {
+    pub server: String,
+    pub port: u16,
+    /// 接管前该项是否处于开启态（仅用于日志诊断，还原时不据此改开关）
+    #[serde(default)]
+    pub enabled: bool,
+    /// 认证代理开关（macOS -getsecurewebproxy 的 "Authenticated Proxy Enabled"）
+    #[serde(default)]
+    pub auth: bool,
+    /// 是否成功读到过该项（区分"原本就是空"与"查询失败"）
+    ///
+    /// 两者都会表现为 server="" + port=0，但语义完全相反：前者要**清空**字段，
+    /// 后者必须跳过——把查询失败当成"原本为空"会把用户的配置抹掉。
+    #[serde(default)]
+    pub read: bool,
+}
+
+/// 单个 macOS 网络服务的原始代理配置
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ServiceProxyState {
+    pub service: String,
+    #[serde(default)]
+    pub web: ProxyPoint,
+    #[serde(default)]
+    pub secure_web: ProxyPoint,
+    #[serde(default)]
+    pub socks: ProxyPoint,
+    /// 原始绕过列表（一行一个域名，保存为空格分隔；Some("") 表示"原本未设置"）
+    #[serde(default)]
+    pub bypass_domains: Option<String>,
+}
+
+/// Windows Internet Settings 的原始值
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WinProxyState {
+    pub proxy_server: Option<String>,
+    pub proxy_override: Option<String>,
+}
+
+/// 用户原始系统代理配置快照
+///
+/// 用途：本应用开启代理时会把用户的 ProxyServer / 绕过列表**覆盖**为
+/// `127.0.0.1:<mixed_port>`，若不还原，用户日后手动打开系统代理会指向一个
+/// 无人监听的端口（与"残留代理导致断网"同源的环境自洁缺失）。
+///
+/// 还原策略是"**只还原字段值，不改开关状态**"：
+/// - 用户点「关闭代理」后代理确实是关的——不会把他原有的公司代理又打开
+///   （那种行为既反直觉又危险）
+/// - 但系统里"代理服务器 / 绕过列表"字段回到用户自己的值，不再永久残留
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SysProxyBackup {
+    #[serde(default)]
+    pub services: Vec<ServiceProxyState>,
+    #[serde(default)]
+    pub windows: Option<WinProxyState>,
+}
 
 #[cfg(target_os = "windows")]
 mod win_sysproxy {
@@ -53,7 +117,6 @@ mod win_registry {
             lpcbData: *mut u32,
         ) -> i32;
 
-        fn RegCloseKey(hKey: *mut std::ffi::c_void) -> i32;
     }
 
     const HKEY_CURRENT_USER: *mut std::ffi::c_void = 0x80000001 as *mut std::ffi::c_void;
@@ -85,53 +148,6 @@ mod win_registry {
             res == 0 && data == 1
         }
     }
-
-    /// 读取注册表 ProxyServer 原始值（REG_SZ）
-    ///
-    /// 形如 "127.0.0.1:8890"，也可能是多协议分机格式
-    /// "http=127.0.0.1:8890;https=127.0.0.1:8890"（解析交由上层做）。
-    /// 只读不改，用于代理归属判定（见 crate 公共 API 的 is_own_proxy_endpoint）。
-    pub fn read_proxy_server() -> Option<String> {
-        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
-        let mut hkey: *mut std::ffi::c_void = ptr::null_mut();
-        unsafe {
-            if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey) != 0 {
-                return None;
-            }
-            let name = to_wide("ProxyServer");
-            // 两段式读取：先问长度再取内容（REG_SZ 以 UTF-16 存储）
-            let mut cb_data: u32 = 0;
-            let size_res = RegQueryValueExW(
-                hkey,
-                name.as_ptr(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-                &mut cb_data,
-            );
-            if size_res != 0 || cb_data == 0 || cb_data > 4096 {
-                RegCloseKey(hkey);
-                return None;
-            }
-            let mut buf = vec![0u16; (cb_data as usize) / 2];
-            let read_res = RegQueryValueExW(
-                hkey,
-                name.as_ptr(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-                buf.as_mut_ptr() as *mut u8,
-                &mut cb_data,
-            );
-            RegCloseKey(hkey);
-            if read_res != 0 {
-                return None;
-            }
-            let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-            let s = String::from_utf16_lossy(&buf[..end]);
-            if s.is_empty() { None } else { Some(s) }
-        }
-    }
-
 
     pub fn set_proxy_registry(enabled: bool, server: &str) -> Result<(), String> {
         let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
@@ -874,17 +890,57 @@ pub fn get_system_proxy_status() -> bool {
     }
 }
 
+/// 纯判据：回读到的端点是否满足"已按请求开启为 127.0.0.1:<port>"
+fn endpoint_satisfies(actual: Option<&(String, u16)>, port: u16) -> bool {
+    match actual {
+        Some((host, p)) => *p == port && is_loopback_host(host),
+        None => false,
+    }
+}
+
+/// 回读校验：确认系统代理的真实状态与请求一致
+///
+/// 为什么放在 `set_system_proxy` 内部统一执行：全仓有 17 处写入口，若只在
+/// 个别路径校验，其余路径仍会"写入未生效却报告成功"——用户在 UI 上看到的是
+/// "已接管"，实际流量没走代理，且日志里什么都没有（假成功比失败更难查）。
+/// 放进统一入口后，`Ok(())` 的语义收紧为"系统代理状态确实与请求一致"。
+fn verify_system_proxy_state(enabled: bool, port: u16) -> Result<(), String> {
+    if enabled {
+        let actual = get_system_proxy_endpoint();
+        if endpoint_satisfies(actual.as_ref(), port) {
+            return Ok(());
+        }
+        return Err(match actual {
+            Some((host, p)) => format!(
+                "系统代理已写入但回读校验未通过（当前指向 {}:{}，期望 127.0.0.1:{}），流量可能未被接管",
+                host, p, port
+            ),
+            None => "系统代理已写入但回读校验未通过（未发现开启的手动代理），流量可能未被接管"
+                .to_string(),
+        });
+    }
+
+    // 关闭：必须回读确认确实关掉了——系统代理停在 127.0.0.1 而内核已停 = 整机断网
+    if get_system_proxy_status() {
+        return Err("系统代理仍处于开启状态（部分网络服务拒绝关闭），整机可能断网，请检查 系统设置 → 网络 → 详细信息 → 代理".to_string());
+    }
+    Ok(())
+}
+
 /// 设置系统代理（各平台统一入口）
 ///
 /// 期望状态钩子：成功设置后同步 proxy_guard 期望态——应用内任何路径
 /// （托盘/模式切换/自愈）开代理即视为"用户期望开启"，守护开始校验漂移；
 /// 关代理即期望关闭，守护立即停手。失败时不更新期望态（守护按旧期望继续）。
+///
+/// 返回 `Ok` 的语义 = **回读校验通过**：系统代理的真实状态与请求一致。
+/// 写入成功但回读不一致时返回 Err（如实上报"假成功"）。
 pub fn set_system_proxy(enabled: bool, port: u16) -> Result<(), String> {
-    let result = set_system_proxy_impl(enabled, port);
-    if result.is_ok() {
-        crate::system::proxy_guard::set_desired(enabled);
-    }
-    result
+    set_system_proxy_impl(enabled, port)?;
+    // 期望态按"写入是否发起成功"更新：即便回读校验失败，用户的意图仍然成立
+    // （开=期望开；关=期望关，守护不该再把残留代理拉起来）
+    crate::system::proxy_guard::set_desired(enabled);
+    verify_system_proxy_state(enabled, port)
 }
 
 /// 静默设置系统代理 (不弹出提权密码框)
@@ -1004,7 +1060,26 @@ pub fn flush_system_dns_cache() {
 /// 代理归属判定的跨平台单测（不依赖具体平台的系统调用）
 #[cfg(test)]
 mod attribution_tests {
-    use super::{is_loopback_host, parse_proxy_server};
+    use super::{endpoint_satisfies, is_loopback_host, parse_proxy_server};
+
+    #[test]
+    fn endpoint_verify_accepts_only_our_loopback_endpoint() {
+        // 写入后回读必须是"环回 + 我们写的端口"，否则视为写入未生效
+        assert!(endpoint_satisfies(
+            Some(&("127.0.0.1".to_string(), 8890)),
+            8890
+        ));
+        assert!(endpoint_satisfies(
+            Some(&("localhost".to_string(), 8890)),
+            8890
+        ));
+        // 端口不符：上一次的残留 / 写入落到了别处
+        assert!(!endpoint_satisfies(Some(&("127.0.0.1".to_string(), 7890)), 8890));
+        // 非环回：他人的代理抢占了开关
+        assert!(!endpoint_satisfies(Some(&("10.0.0.1".to_string(), 8890)), 8890));
+        // 没有任何开启项
+        assert!(!endpoint_satisfies(None, 8890));
+    }
 
     #[test]
     fn loopback_detection_covers_all_local_forms() {

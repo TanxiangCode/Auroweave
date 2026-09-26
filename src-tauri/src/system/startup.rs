@@ -270,16 +270,14 @@ pub async fn apply_core_mode_with_fallback(
         info!("[app] 配置已成功同步至系统服务");
         let final_settings = crate::commands::settings::settings_get_internal(app_handle);
         if final_settings.tun_enabled {
-            // TUN 模式下系统代理不需要开启（流量已被 TUN 接管），且必须关干净：
-            // 双开 = 流量被双重接管 + 状态混乱。用 ensure_* 做回读校验，
-            // 而不是"发起即算成功"（否则残留 127.0.0.1 = 整机断网）
-            if let Err(e) = crate::system::sysproxy::ensure_system_proxy_disabled() {
-                error!("[app] 服务模式 TUN 接管时关闭系统代理失败: {}", e);
+            // TUN 接管时无需系统代理（双开=流量双重接管+状态混乱）
+            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+        } else {
+            if let Err(e) =
+                crate::system::sysproxy::set_system_proxy(true, final_settings.mixed_port)
+            {
+                error!("[app] 服务模式设置系统代理失败: {}", e);
             }
-        } else if let Err(e) =
-            crate::system::sysproxy::set_system_proxy(true, final_settings.mixed_port)
-        {
-            error!("[app] 服务模式设置系统代理失败: {}", e);
         }
     } else {
         // ---- 步骤4b: 本地直接运行模式分支 ----
@@ -337,6 +335,7 @@ pub async fn apply_core_mode_with_fallback(
                     return Err(format!("TUN 启动失败（可能需要管理员权限），已回退为系统代理: {}", e));
                 }
             }
+
         } else {
             // local 模式无 TUN：直接启动 sing-box 子进程
             if let Err(e) = sm.start(&path_str).await {
