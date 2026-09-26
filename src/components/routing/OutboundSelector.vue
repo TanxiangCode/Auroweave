@@ -234,8 +234,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   cursor: pointer;
   font-size: 11.5px;
@@ -244,8 +244,8 @@ onUnmounted(() => {
 }
 
 .selector-trigger:hover, .selector-trigger.open {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.22);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .selector-trigger.direct {
@@ -261,15 +261,15 @@ onUnmounted(() => {
 }
 
 .selector-trigger.block {
-  color: #f87171;
-  border-color: rgba(248, 113, 113, 0.3);
-  background: rgba(248, 113, 113, 0.08);
+  color: var(--status-danger);
+  border-color: color-mix(in srgb, var(--status-danger) 30%, transparent);
+  background: color-mix(in srgb, var(--status-danger) 8%, transparent);
 }
 
 .selector-trigger.node {
-  color: #a78bfa;
-  border-color: rgba(167, 139, 250, 0.3);
-  background: rgba(167, 139, 250, 0.08);
+  color: var(--accent-purple);
+  border-color: color-mix(in srgb, var(--accent-purple) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-purple) 8%, transparent);
 }
 
 .trigger-icon {
@@ -298,9 +298,9 @@ onUnmounted(() => {
    此处只保留尺寸上限与视觉 */
 .dropdown-menu {
   max-height: 280px;
-  background: rgba(18, 20, 28, 0.98);
+  background: var(--surface-deep);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-normal);
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
   padding: 6px;
@@ -312,7 +312,7 @@ onUnmounted(() => {
 
 .group-title {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
   padding: 4px 8px 2px;
   font-weight: 600;
 }
@@ -332,14 +332,14 @@ onUnmounted(() => {
   padding: 6px 8px;
   border-radius: 6px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .menu-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .menu-item.active {
@@ -361,7 +361,7 @@ onUnmounted(() => {
 
 .node-delay {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -372,7 +372,7 @@ onUnmounted(() => {
 
 .text-green { color: var(--accent-green) !important; }
 .text-cyan { color: var(--accent-cyan-vivid) !important; }
-.text-red { color: #f87171 !important; }
+.text-red { color: var(--status-danger) !important; }
 
 /* 动画 */
 .dropdown-enter-active, .dropdown-leave-active {

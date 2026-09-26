@@ -330,15 +330,17 @@ onMounted(() => {
   padding: 10px 14px;
   font-size: 12px;
   line-height: 1.5;
-  color: #f5a623;
-  background: rgba(245, 166, 35, 0.08);
-  border: 1px solid rgba(245, 166, 35, 0.25);
+  /* 警示条走 --accent-orange / --status-warning 令牌，
+     硬编码 #f5a623 在浅色主题下与浅橙底几乎同色（对比度 1.33），完全读不出来 */
+  color: var(--accent-orange);
+  background: color-mix(in srgb, var(--accent-orange) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-orange) 25%, transparent);
   border-radius: 10px;
   flex-shrink: 0;
 }
 
 .mode-hint-banner strong {
-  color: #ffc94d;
+  color: var(--status-warning);
 }
 
 .search-box {
@@ -348,14 +350,14 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   transition: all 0.2s ease;
 }
 
 .search-box:focus-within {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
 }
@@ -370,18 +372,18 @@ onMounted(() => {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 12px;
 }
 
 .search-box input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .btn-clear {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   cursor: pointer;
   font-size: 10px;
 }
@@ -396,9 +398,9 @@ onMounted(() => {
 .capsule {
   padding: 4px 10px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.65);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -406,14 +408,14 @@ onMounted(() => {
 }
 
 .capsule:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .capsule.active {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: #fff;
+  background: var(--surface-hover);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
 }
 
 .capsule.active-rules.active {
@@ -427,12 +429,12 @@ onMounted(() => {
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
   padding: 4px 9px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 7px;
 }
 
@@ -447,18 +449,18 @@ onMounted(() => {
   align-items: center;
   gap: 5px;
   padding: 5px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
   font-size: 11.5px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .btn-refresh:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.09);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .spinning {
@@ -494,8 +496,8 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   gap: 14px;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -503,8 +505,8 @@ onMounted(() => {
 }
 
 .process-card:hover {
-  background: rgba(255, 255, 255, 0.055);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
   transform: translateY(-1px);
 }
 
@@ -525,8 +527,8 @@ onMounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -561,27 +563,27 @@ onMounted(() => {
 .display-name {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
 }
 
 .raw-name {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-family: monospace;
 }
 
 .pid-badge {
   font-size: 9.5px;
   padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--text-tertiary);
   font-family: monospace;
 }
 
 .path-row {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
   font-family: monospace;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -593,7 +595,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--text-tertiary);
   font-size: 11px;
   flex-shrink: 0;
 }
@@ -601,7 +603,7 @@ onMounted(() => {
 .arrow-line {
   width: 24px;
   height: 1px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
 }
 
 .card-right {
@@ -615,10 +617,10 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-size: 13px;
   border-radius: 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border: 1px dashed var(--border-normal);
 }
 
 .spinner {

@@ -174,8 +174,8 @@ async function runCheck() {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #6b7280;
-  box-shadow: 0 0 6px #6b7280;
+  background: var(--text-tertiary);
+  box-shadow: 0 0 6px var(--text-tertiary);
 }
 
 .pulse-dot.ok {
@@ -217,7 +217,7 @@ async function runCheck() {
 
 .btn-run:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .btn-run:disabled {
@@ -282,8 +282,8 @@ async function runCheck() {
 }
 
 .path-status.fail {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.1);
+  color: var(--status-danger);
+  background: color-mix(in srgb, var(--status-danger) 10%, transparent);
 }
 
 .ip-line {
@@ -331,8 +331,8 @@ async function runCheck() {
 }
 
 .verdict.warn {
-  background: rgba(245, 166, 35, 0.06);
-  border-color: rgba(245, 166, 35, 0.3);
+  background: color-mix(in srgb, var(--accent-orange) 6%, transparent);
+  border-color: color-mix(in srgb, var(--accent-orange) 30%, transparent);
 }
 
 .verdict.info {
@@ -348,7 +348,7 @@ async function runCheck() {
 }
 
 .verdict.ok .v-icon { color: var(--accent-green); }
-.verdict.warn .v-icon { color: #f5a623; }
+.verdict.warn .v-icon { color: var(--accent-orange); }
 .verdict.info .v-icon { color: var(--accent-cyan-vivid); }
 
 .v-title {

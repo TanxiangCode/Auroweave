@@ -117,7 +117,7 @@ onUnmounted(() => {
 
 .confirm-icon.danger {
   color: var(--status-danger);
-  background: rgba(248, 113, 113, 0.1);
+  background: color-mix(in srgb, var(--status-danger) 10%, transparent);
   border: 1px solid rgba(248, 113, 113, 0.25);
 }
 
@@ -166,11 +166,11 @@ onUnmounted(() => {
 
 .btn.text:hover {
   color: var(--text-primary);
-  background: var(--layer-3, rgba(255, 255, 255, 0.06));
+  background: var(--layer-3, var(--border-subtle));
 }
 
 .btn.primary {
-  color: #fff;
+  color: var(--text-primary);
   background: var(--accent-blue);
   border-color: var(--accent-blue);
 }
@@ -181,7 +181,7 @@ onUnmounted(() => {
 
 /* 危险确认：红色实底（与危险语义唯一对应的确认按钮形态） */
 .btn.danger-solid {
-  color: #fff;
+  color: var(--text-primary);
   background: var(--accent-red);
   border-color: var(--accent-red);
 }

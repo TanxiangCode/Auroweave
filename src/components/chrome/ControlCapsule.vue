@@ -229,7 +229,7 @@ function handleSettingsClick() {
 .capsule-divider {
   width: 1px;
   height: 12px;
-  background: var(--border-subtle);
+  background: var(--surface-raised);
   margin: 0 4px;
 }
 
@@ -258,7 +258,7 @@ function handleSettingsClick() {
 }
 
 .capsule-btn:hover {
-  background: var(--border-strong);
+  background: var(--surface-hover);
   color: var(--text-primary);
   transform: scale(1.05);
 }

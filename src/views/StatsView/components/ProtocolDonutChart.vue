@@ -157,7 +157,7 @@ const protocols = computed(() => {
 
 .donut-segment {
   transition: stroke-dashoffset 0.6s var(--ease-out);
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.05));
+  filter: drop-shadow(0 0 2px var(--border-subtle));
 }
 
 .donut-segment:hover {

@@ -253,7 +253,7 @@ const emit = defineEmits<{
   color: var(--text-primary);
 }
 .control-btn.secondary:hover:not(:disabled) {
-  background: var(--border-strong);
+  background: var(--surface-hover);
 }
 
 .control-btn.outline-danger {

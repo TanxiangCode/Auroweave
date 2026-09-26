@@ -51,40 +51,42 @@ const { toasts, remove } = useToast();
   min-width: 280px;
   max-width: 400px;
   border-radius: var(--radius-lg, 12px);
-  background: rgba(18, 22, 34, 0.85);
+  /* 浮层底色走 --surface-deep 令牌：浅色主题下自动变白底深字，
+     避免硬编码深色 rgba(18,22,34,.85) 造成"白字白底" */
+  background: var(--surface-deep);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-normal);
+  box-shadow: var(--shadow-lg);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .toast-item.success {
-  border-color: rgba(74, 222, 128, 0.3);
+  border-color: color-mix(in srgb, var(--status-success) 30%, transparent);
 }
 .toast-item.success .toast-icon {
-  color: #4ade80;
+  color: var(--status-success);
 }
 
 .toast-item.error {
-  border-color: rgba(248, 113, 113, 0.3);
+  border-color: color-mix(in srgb, var(--status-danger) 30%, transparent);
 }
 .toast-item.error .toast-icon {
-  color: #f87171;
+  color: var(--status-danger);
 }
 
 .toast-item.warning {
-  border-color: rgba(251, 191, 36, 0.3);
+  border-color: color-mix(in srgb, var(--status-warning) 30%, transparent);
 }
 .toast-item.warning .toast-icon {
-  color: #fbbf24;
+  color: var(--status-warning);
 }
 
 .toast-item.info {
-  border-color: rgba(56, 189, 248, 0.3);
+  border-color: color-mix(in srgb, var(--accent-blue) 30%, transparent);
 }
 .toast-item.info .toast-icon {
-  color: #38bdf8;
+  color: var(--accent-blue);
 }
 
 .toast-icon {
@@ -101,12 +103,12 @@ const { toasts, remove } = useToast();
 .toast-title {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
 }
 
 .toast-message {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   margin-top: 2px;
   line-height: 1.4;
   word-break: break-word;

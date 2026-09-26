@@ -472,8 +472,8 @@ async function handleDelete(sub: Subscription) {
   align-items: center;
   padding: 14px 18px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   flex-shrink: 0;
 }
 
@@ -496,18 +496,18 @@ async function handleDelete(sub: Subscription) {
   gap: 6px;
   padding: 4px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   font-size: 11px;
 }
 
 .badge-label {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .badge-value {
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .badge-value.cyan {
@@ -543,7 +543,7 @@ async function handleDelete(sub: Subscription) {
 
 .btn-action.primary {
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent-cyan-vivid) 85%, transparent) 0%, rgba(79, 172, 254, 0.85) 100%);
-  color: #000;
+  color: var(--text-on-cyan-grad);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
 }
 
@@ -553,14 +553,14 @@ async function handleDelete(sub: Subscription) {
 }
 
 .btn-action.secondary {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
+  background: var(--surface-raised);
+  border-color: var(--border-normal);
+  color: var(--text-primary);
 }
 
 .btn-action.secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .btn-action:disabled {
@@ -588,22 +588,30 @@ async function handleDelete(sub: Subscription) {
   gap: 12px;
   padding: 16px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
 
+/* hover 必须写在 .active 之后（或用同等特异度），
+   否则 .active 会因源码顺序靠后而覆盖掉 hover 反馈，激活卡悬浮时毫无反应 */
 .subscription-card:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
   transform: translateY(-2px);
 }
 
 .subscription-card.active {
   border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
-  background: radial-gradient(circle at top right, color-mix(in srgb, var(--accent-cyan-vivid) 6%, transparent) 0%, rgba(255, 255, 255, 0.02) 100%);
+  background: radial-gradient(circle at top right, color-mix(in srgb, var(--accent-cyan-vivid) 6%, transparent) 0%, var(--surface-inset) 100%);
   box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-cyan-vivid) 8%, transparent);
+}
+
+/* 激活卡的悬浮态：保留青色语义色，只加深描边并抬升 */
+.subscription-card.active:hover {
+  border-color: var(--accent-cyan-vivid);
+  transform: translateY(-2px);
 }
 
 .card-header {
@@ -622,7 +630,7 @@ async function handleDelete(sub: Subscription) {
 .sub-name {
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -636,8 +644,8 @@ async function handleDelete(sub: Subscription) {
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
   letter-spacing: 0.5px;
 }
 
@@ -674,7 +682,7 @@ async function handleDelete(sub: Subscription) {
 
 .standby-tag {
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 /* 流量进度条区域 */
@@ -684,8 +692,8 @@ async function handleDelete(sub: Subscription) {
   gap: 6px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
 }
 
 .traffic-header {
@@ -699,7 +707,7 @@ async function handleDelete(sub: Subscription) {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -711,23 +719,23 @@ async function handleDelete(sub: Subscription) {
 .progress-bar-track {
   height: 5px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   overflow: hidden;
 }
 
 .progress-bar-fill {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, var(--accent-cyan-vivid) 0%, #4facfe 100%);
+  background: linear-gradient(90deg, var(--accent-cyan-vivid) 0%, var(--accent-blue) 100%);
   transition: width 0.4s ease;
 }
 
 .progress-bar-fill.warning {
-  background: linear-gradient(90deg, #f6d365 0%, #fda085 100%);
+  background: linear-gradient(90deg, var(--status-warning) 0%, var(--accent-orange) 100%);
 }
 
 .progress-bar-fill.danger {
-  background: linear-gradient(90deg, #ff758c 0%, #ff7eb3 100%);
+  background: linear-gradient(90deg, var(--accent-orange) 0%, var(--status-danger) 100%);
 }
 
 .traffic-footer {
@@ -735,7 +743,7 @@ async function handleDelete(sub: Subscription) {
   justify-content: space-between;
   align-items: center;
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .expire-time {
@@ -749,7 +757,7 @@ async function handleDelete(sub: Subscription) {
   display: flex;
   gap: 16px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
 }
 
 .meta-item {
@@ -764,7 +772,7 @@ async function handleDelete(sub: Subscription) {
   justify-content: space-between;
   align-items: center;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .meta-brief {
@@ -772,12 +780,12 @@ async function handleDelete(sub: Subscription) {
   align-items: center;
   gap: 5px;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .sub-url-hint {
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-tertiary);
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -796,17 +804,17 @@ async function handleDelete(sub: Subscription) {
   gap: 4px;
   padding: 5px 9px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .btn-card-action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .btn-card-action.activate {
@@ -817,13 +825,13 @@ async function handleDelete(sub: Subscription) {
 
 .btn-card-action.activate:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
-  color: #fff;
+  color: var(--text-primary);
 }
 
 /* 移出聚合按钮：弱化的红调，区别于删除（红色实感） */
 .btn-card-action.deactivate {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
   color: var(--text-secondary);
 }
 
@@ -847,8 +855,8 @@ async function handleDelete(sub: Subscription) {
   justify-content: center;
   padding: 60px 20px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+  background: var(--surface-inset);
+  border: 1px dashed var(--border-normal);
   text-align: center;
 }
 
@@ -859,13 +867,13 @@ async function handleDelete(sub: Subscription) {
 .empty-state-card h3 {
   margin: 0 0 6px 0;
   font-size: 16px;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .empty-state-card p {
   margin: 0 0 20px 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .btn-import-empty {
@@ -875,7 +883,7 @@ async function handleDelete(sub: Subscription) {
   padding: 9px 18px;
   border-radius: 8px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent-cyan-vivid) 90%, transparent) 0%, rgba(79, 172, 254, 0.9) 100%);
-  color: #000;
+  color: var(--text-on-cyan-grad);
   font-size: 13px;
   font-weight: 600;
   border: none;

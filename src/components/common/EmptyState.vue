@@ -86,6 +86,6 @@ const emit = defineEmits<{ (e: "cta"): void }>();
 
 .state-cta:hover {
   background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
-  color: #fff;
+  color: var(--text-primary);
 }
 </style>

@@ -260,7 +260,7 @@ h3 {
 .rule-type {
   font-size: var(--text-xs);
   padding: 1px var(--space-2);
-  background: var(--border-subtle);
+  background: var(--surface-raised);
   border-radius: var(--radius-xs);
   color: var(--text-tertiary);
   font-family: var(--font-mono);

@@ -177,7 +177,7 @@ button, a {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  background: var(--surface-hover);
   border-radius: var(--radius-full);
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -191,8 +191,8 @@ input[type="checkbox"].switch {
   width: 36px;
   height: 20px;
   border-radius: var(--radius-full);
-  background: var(--layer-3, rgba(255, 255, 255, 0.08));
-  border: 1.5px solid var(--border-strong, rgba(255, 255, 255, 0.2));
+  background: var(--layer-3, var(--border-normal));
+  border: 1.5px solid var(--border-strong, var(--text-tertiary));
   position: relative;
   outline: none;
   cursor: pointer;
@@ -268,7 +268,7 @@ input[type="checkbox"].switch:checked::before {
   height: 28px;
   border-radius: 50%;
   border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-raised);
   color: var(--text-primary);
   font-size: 16px;
   cursor: pointer;
@@ -276,7 +276,7 @@ input[type="checkbox"].switch:checked::before {
 }
 
 .btn-back-nav:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   border-color: var(--accent-blue);
   color: var(--accent-blue);
   transform: scale(1.05);

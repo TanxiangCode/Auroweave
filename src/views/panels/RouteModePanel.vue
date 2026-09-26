@@ -193,6 +193,6 @@ h2 { font-size: var(--text-lg); font-weight: var(--weight-bold); }
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }
-.btn-update-ruleset:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent); color: #fff; }
+.btn-update-ruleset:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent); color: var(--text-primary); }
 .btn-update-ruleset:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

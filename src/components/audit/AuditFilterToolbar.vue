@@ -326,7 +326,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
 }
 
 .highlight-num {
@@ -336,7 +336,7 @@ onUnmounted(() => {
 
 .pause-state-pill {
   font-size: 10.5px;
-  color: #f59e0b;
+  color: var(--status-warning);
   padding: 1px 6px;
   background: rgba(245, 158, 11, 0.12);
   border-radius: 4px;
@@ -354,12 +354,12 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
   padding: 3px 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
 }
 
@@ -371,8 +371,8 @@ onUnmounted(() => {
 
 .view-mode-tabs {
   display: flex;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 7px;
   padding: 2px;
 }
@@ -413,14 +413,14 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   transition: all 0.2s ease;
 }
 
 .search-box:focus-within {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
 }
@@ -435,25 +435,25 @@ onUnmounted(() => {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 12px;
 }
 
 .search-box input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .btn-clear-search {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   cursor: pointer;
   font-size: 10px;
   padding: 2px 4px;
 }
 
 .btn-clear-search:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 /* 排序选择器：自绘触发按钮 */
@@ -467,10 +467,10 @@ onUnmounted(() => {
   gap: 5px;
   height: 26px;
   padding: 0 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-primary);
   font-size: 11.5px;
   cursor: pointer;
   transition: all 0.15s;
@@ -478,9 +478,9 @@ onUnmounted(() => {
 }
 
 .sort-trigger:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: var(--surface-hover);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
 }
 
 .sort-trigger-arrow {
@@ -499,26 +499,26 @@ onUnmounted(() => {
   justify-content: center;
   width: 26px;
   height: 26px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
 }
 
 .sort-order-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 /* 排序下拉弹层（Teleport 到 body；坐标/层级由内联 fixed 样式控制） */
 .sort-menu {
   padding: 5px;
-  background: rgba(18, 20, 28, 0.98);
+  background: var(--surface-deep);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-normal);
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
   display: flex;
@@ -535,7 +535,7 @@ onUnmounted(() => {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-secondary);
   font-size: 11.5px;
   cursor: pointer;
   text-align: left;
@@ -544,8 +544,8 @@ onUnmounted(() => {
 }
 
 .sort-menu-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .sort-menu-item.active {
@@ -573,20 +573,20 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
   padding: 4px 9px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 7px;
   white-space: nowrap;
   transition: all 0.15s;
 }
 
 .show-history-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .show-history-toggle input {
@@ -604,9 +604,9 @@ onUnmounted(() => {
 .capsule {
   padding: 4px 9px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.65);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -614,14 +614,14 @@ onUnmounted(() => {
 }
 
 .capsule:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .capsule.active {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #fff;
+  background: var(--surface-hover);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
 }
 
 .capsule.proxied.active {
@@ -637,15 +637,15 @@ onUnmounted(() => {
 }
 
 .capsule.blocked.active {
-  background: rgba(248, 113, 113, 0.15);
-  border-color: #f87171;
-  color: #f87171;
+  background: color-mix(in srgb, var(--status-danger) 15%, transparent);
+  border-color: var(--status-danger);
+  color: var(--status-danger);
 }
 
 .proto-selector {
   display: flex;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 7px;
   padding: 2px;
 }
@@ -656,13 +656,13 @@ onUnmounted(() => {
   border-radius: 5px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
   cursor: pointer;
 }
 
 .proto-btn.active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
   font-weight: 600;
 }
 </style>

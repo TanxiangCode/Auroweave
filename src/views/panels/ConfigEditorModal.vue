@@ -257,7 +257,7 @@ function sizeLabel(bytes: number): string {
   border-radius: var(--radius-sm);
   background: rgba(245, 158, 11, 0.08);
   border: 1px solid rgba(245, 158, 11, 0.25);
-  color: #fbbf24;
+  color: var(--status-warning);
   font-size: var(--text-xs);
   line-height: 1.5;
   margin-bottom: var(--space-2);
@@ -299,7 +299,7 @@ function sizeLabel(bytes: number): string {
 }
 
 .meta-size.large {
-  color: #fbbf24;
+  color: var(--status-warning);
 }
 
 .config-textarea {
@@ -331,7 +331,7 @@ function sizeLabel(bytes: number): string {
   gap: 6px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
-  background: rgba(239, 68, 68, 0.08);
+  background: color-mix(in srgb, var(--accent-red) 8%, transparent);
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
@@ -339,13 +339,13 @@ function sizeLabel(bytes: number): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #f87171;
+  color: var(--status-danger);
   font-size: var(--text-sm);
   font-weight: 600;
 }
 
 .error-message {
-  color: #fca5a5;
+  color: var(--badge-red);
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   word-break: break-all;
@@ -356,9 +356,9 @@ function sizeLabel(bytes: number): string {
   max-height: 90px;
   overflow-y: auto;
   padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-inset);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 10.5px;
   white-space: pre-wrap;
@@ -383,7 +383,7 @@ function sizeLabel(bytes: number): string {
   gap: 6px;
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #fbbf24;
+  color: var(--status-warning);
 }
 
 .btn.warning:hover:not(:disabled) {

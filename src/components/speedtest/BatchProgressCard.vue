@@ -112,14 +112,14 @@ if (props.progress && props.progress.total === 0) {
   width: 100%;
   min-width: 40px;
   height: 6px;
-  background: var(--bg-surface-elevated, rgba(255, 255, 255, 0.08));
+  background: var(--surface-raised);
   border-radius: var(--radius-full, 9999px);
   overflow: hidden;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-cyan-vivid), var(--accent-blue-vivid, #3b82f6));
+  background: linear-gradient(90deg, var(--accent-cyan-vivid), var(--accent-blue));
   border-radius: var(--radius-full, 9999px);
   transition: width 0.2s ease-out;
 }

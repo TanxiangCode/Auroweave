@@ -86,8 +86,8 @@ function getBadgeClass(badge: string): string {
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -100,8 +100,8 @@ function getBadgeClass(badge: string): string {
 }
 
 .semantic-rule-card:hover {
-  background: rgba(255, 255, 255, 0.055);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
   transform: translateY(-1px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
@@ -113,7 +113,7 @@ function getBadgeClass(badge: string): string {
   border-left: 3px solid var(--accent-green);
 }
 .semantic-rule-card.blocked {
-  border-left: 3px solid #f87171;
+  border-left: 3px solid var(--status-danger);
 }
 
 .card-left {
@@ -128,8 +128,8 @@ function getBadgeClass(badge: string): string {
   width: 36px;
   height: 36px;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -155,12 +155,12 @@ function getBadgeClass(badge: string): string {
 .app-name {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
 }
 
 .domain-name {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-secondary);
   font-family: monospace;
   max-width: 380px;
   overflow: hidden;
@@ -170,13 +170,13 @@ function getBadgeClass(badge: string): string {
 
 .port-tag {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
   font-family: monospace;
 }
 
 .semantic-desc {
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -195,9 +195,9 @@ function getBadgeClass(badge: string): string {
   font-size: 10px;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.6);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 .security-badge.safe {
@@ -213,9 +213,9 @@ function getBadgeClass(badge: string): string {
 }
 
 .security-badge.danger {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.08);
-  border-color: rgba(248, 113, 113, 0.2);
+  color: var(--status-danger);
+  background: color-mix(in srgb, var(--status-danger) 8%, transparent);
+  border-color: color-mix(in srgb, var(--status-danger) 20%, transparent);
 }
 
 .card-right {
@@ -234,8 +234,8 @@ function getBadgeClass(badge: string): string {
   border-radius: 5px;
   font-size: 11px;
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
 }
 
 .outbound-pill.proxied {
@@ -251,9 +251,9 @@ function getBadgeClass(badge: string): string {
 }
 
 .outbound-pill.blocked {
-  color: #f87171;
-  border-color: rgba(248, 113, 113, 0.25);
-  background: rgba(248, 113, 113, 0.08);
+  color: var(--status-danger);
+  border-color: color-mix(in srgb, var(--status-danger) 25%, transparent);
+  background: color-mix(in srgb, var(--status-danger) 8%, transparent);
 }
 
 .traffic-metrics {
@@ -265,10 +265,10 @@ function getBadgeClass(badge: string): string {
 }
 
 .traffic-text.down { color: var(--accent-cyan-vivid); }
-.traffic-text.up { color: #a78bfa; }
+.traffic-text.up { color: var(--accent-purple); }
 
 .time-stamp {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-tertiary);
 }
 </style>

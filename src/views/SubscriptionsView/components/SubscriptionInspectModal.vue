@@ -495,7 +495,7 @@ function getProtocolBadgeClass(type: string) {
   width: 30px;
   height: 30px;
   color: var(--text-tertiary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -504,12 +504,12 @@ function getProtocolBadgeClass(type: string) {
 
 .icon-btn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
 }
 
 .icon-btn.danger:hover {
   color: var(--status-danger);
-  background: rgba(248, 113, 113, 0.1);
+  background: color-mix(in srgb, var(--status-danger) 10%, transparent);
 }
 
 /* ---- 主体 ---- */
@@ -531,7 +531,7 @@ function getProtocolBadgeClass(type: string) {
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
-  background: rgba(10, 12, 18, 0.8);
+  background: var(--surface-inset);
   color: var(--text-tertiary);
   font-size: var(--text-xs);
 }
@@ -606,7 +606,7 @@ function getProtocolBadgeClass(type: string) {
   font-size: 11px;
   font-weight: var(--weight-semibold);
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -615,7 +615,7 @@ function getProtocolBadgeClass(type: string) {
 
 .btn-copy:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-hover);
 }
 
 .btn-copy.primary {
@@ -625,7 +625,7 @@ function getProtocolBadgeClass(type: string) {
 }
 
 .btn-copy.primary:hover {
-  color: #fff;
+  color: var(--text-primary);
   background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
 }
 
@@ -643,7 +643,7 @@ function getProtocolBadgeClass(type: string) {
   font-size: 11px;
   line-height: 1.7;
   color: var(--status-success);
-  background: rgba(10, 12, 16, 0.6);
+  background: var(--surface-inset);
   white-space: pre-wrap;
   word-break: break-all;
   user-select: text;
@@ -690,7 +690,7 @@ function getProtocolBadgeClass(type: string) {
 }
 
 .node-summary:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-inset);
 }
 
 .summary-left {
@@ -721,12 +721,12 @@ function getProtocolBadgeClass(type: string) {
   border: 1px solid;
 }
 
-.badge-vmess { color: #60a5fa; background: rgba(96, 165, 250, 0.1); border-color: rgba(96, 165, 250, 0.25); }
-.badge-vless { color: #a78bfa; background: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.25); }
-.badge-ss { color: #34d399; background: rgba(52, 211, 153, 0.1); border-color: rgba(52, 211, 153, 0.25); }
-.badge-trojan { color: #fbbf24; background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.25); }
-.badge-hy2 { color: #fb7185; background: rgba(251, 113, 133, 0.1); border-color: rgba(251, 113, 133, 0.25); }
-.badge-other { color: var(--text-tertiary); background: rgba(255, 255, 255, 0.06); border-color: var(--border-subtle); }
+.badge-vmess { color: var(--badge-blue); background: var(--badge-blue-tint); border-color: color-mix(in srgb, var(--badge-blue) 25%, transparent); }
+.badge-vless { color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 10%, transparent); border-color: color-mix(in srgb, var(--accent-purple) 25%, transparent); }
+.badge-ss { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 10%, transparent); border-color: color-mix(in srgb, var(--accent-green) 25%, transparent); }
+.badge-trojan { color: var(--status-warning); background: color-mix(in srgb, var(--status-warning) 10%, transparent); border-color: color-mix(in srgb, var(--status-warning) 25%, transparent); }
+.badge-hy2 { color: var(--badge-red); background: var(--badge-red-tint); border-color: color-mix(in srgb, var(--badge-red) 25%, transparent); }
+.badge-other { color: var(--text-tertiary); background: var(--surface-raised); border-color: var(--border-subtle); }
 
 .node-tag {
   font-size: var(--text-sm);
@@ -756,7 +756,7 @@ function getProtocolBadgeClass(type: string) {
 
 .node-detail {
   padding: 10px 14px;
-  background: rgba(10, 12, 16, 0.7);
+  background: var(--surface-inset);
   border-top: 1px solid var(--border-subtle);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -778,7 +778,7 @@ function getProtocolBadgeClass(type: string) {
   font-size: 10.5px;
   line-height: 1.6;
   color: var(--status-success);
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-inset);
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
   word-break: break-all;

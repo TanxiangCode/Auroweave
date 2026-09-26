@@ -306,8 +306,8 @@ async function handleSubmit() {
 .import-modal {
   width: 480px;
   border-radius: 16px;
-  background: rgba(18, 22, 30, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-deep);
+  border: 1px solid var(--border-normal);
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.7);
   display: flex;
   flex-direction: column;
@@ -319,7 +319,7 @@ async function handleSubmit() {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .modal-title {
@@ -332,27 +332,27 @@ async function handleSubmit() {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   cursor: pointer;
   padding: 4px;
 }
 
 .btn-close:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .mode-tabs {
   display: flex;
   padding: 8px 16px;
   gap: 6px;
-  background: rgba(0, 0, 0, 0.25);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .tab-btn {
@@ -365,7 +365,7 @@ async function handleSubmit() {
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
@@ -373,8 +373,8 @@ async function handleSubmit() {
 }
 
 .tab-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  background: var(--surface-raised);
 }
 
 .tab-btn.active {
@@ -399,7 +399,7 @@ async function handleSubmit() {
 .form-group label {
   font-size: 12px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-secondary);
 }
 
 .required {
@@ -431,9 +431,9 @@ async function handleSubmit() {
 .form-textarea {
   padding: 9px 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-primary);
   font-size: 12.5px;
   outline: none;
   transition: border-color 0.2s;
@@ -452,7 +452,7 @@ async function handleSubmit() {
 
 .field-hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .file-upload-box {
@@ -471,8 +471,8 @@ async function handleSubmit() {
   gap: 8px;
   padding: 24px 16px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(255, 255, 255, 0.15);
+  background: var(--surface-raised);
+  border: 1px dashed var(--border-strong);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -484,7 +484,7 @@ async function handleSubmit() {
 
 .upload-guide {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
 }
 
 .selected-filename {
@@ -502,7 +502,7 @@ async function handleSubmit() {
   align-items: center;
   gap: 8px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -511,16 +511,16 @@ async function handleSubmit() {
   justify-content: flex-end;
   gap: 10px;
   padding: 14px 20px;
-  background: rgba(0, 0, 0, 0.25);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .btn-cancel {
   padding: 7px 14px;
   border-radius: 8px;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
 }
@@ -532,7 +532,7 @@ async function handleSubmit() {
   padding: 7px 16px;
   border-radius: 8px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent-cyan-vivid) 90%, transparent) 0%, rgba(79, 172, 254, 0.9) 100%);
-  color: #000;
+  color: var(--text-on-cyan-grad);
   font-size: 12px;
   font-weight: 600;
   border: none;

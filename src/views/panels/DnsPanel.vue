@@ -353,7 +353,7 @@ h2 {
   padding: 1px 6px;
   border-radius: 999px;
   background: var(--accent-cyan);
-  color: #0b111e;
+  color: var(--text-on-cyan-grad);
   font-weight: 700;
   letter-spacing: 0.2px;
 }

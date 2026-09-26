@@ -228,8 +228,8 @@ function handleClose(id: string) {
   width: 520px;
   max-width: 90vw;
   height: 100%;
-  background: rgba(18, 20, 28, 0.98);
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-deep);
+  border-left: 1px solid var(--border-normal);
   display: flex;
   flex-direction: column;
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
@@ -251,7 +251,7 @@ function handleClose(id: string) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-normal);
 }
 
 .header-main {
@@ -277,7 +277,7 @@ function handleClose(id: string) {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -285,7 +285,7 @@ function handleClose(id: string) {
 
 .header-sub {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
   font-family: monospace;
   display: block;
   max-width: 100%;
@@ -318,21 +318,21 @@ function handleClose(id: string) {
 }
 
 .status-badge.closed {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.5);
+  background: var(--surface-hover);
+  color: var(--text-tertiary);
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-size: 16px;
   cursor: pointer;
   padding: 4px;
 }
 
 .btn-close:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .drawer-body {
@@ -347,8 +347,8 @@ function handleClose(id: string) {
 .semantic-box {
   padding: 14px 16px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
 }
 
 .semantic-box.proxied { border-left: 4px solid var(--accent-cyan-vivid); }
@@ -361,13 +361,13 @@ function handleClose(id: string) {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
   margin-bottom: 6px;
 }
 
 .box-desc {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-secondary);
   line-height: 1.5;
   margin: 0 0 10px 0;
 }
@@ -381,15 +381,15 @@ function handleClose(id: string) {
 .box-badges .badge {
   font-size: 10px;
   padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   border-radius: 4px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
 }
 
 .section-title {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--text-primary);
   margin-bottom: 10px;
 }
 
@@ -398,8 +398,8 @@ function handleClose(id: string) {
   align-items: center;
   gap: 8px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   overflow-x: auto;
 }
@@ -409,7 +409,7 @@ function handleClose(id: string) {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-raised);
   border-radius: 8px;
   font-size: 11px;
   white-space: nowrap;
@@ -422,7 +422,7 @@ function handleClose(id: string) {
 }
 
 .arrow-right {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-tertiary);
   font-size: 10px;
 }
 
@@ -437,8 +437,8 @@ function handleClose(id: string) {
   flex-direction: column;
   gap: 4px;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
 }
 
@@ -448,7 +448,7 @@ function handleClose(id: string) {
 
 .meta-label {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .meta-val-row {
@@ -460,7 +460,7 @@ function handleClose(id: string) {
 
 .meta-val {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
 }
 
 .meta-val.mono {
@@ -485,11 +485,11 @@ function handleClose(id: string) {
 }
 
 .text-cyan { color: var(--accent-cyan-vivid); }
-.text-purple { color: #a78bfa; }
+.text-purple { color: var(--accent-purple); }
 
 .drawer-footer {
   padding: 14px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-normal);
   display: flex;
   gap: 10px;
 }
@@ -513,17 +513,17 @@ function handleClose(id: string) {
 
 .btn-footer-action.primary:hover {
   background: var(--accent-cyan-vivid);
-  color: #000;
+  color: var(--text-on-cyan-grad);
 }
 
 .btn-footer-action.danger {
-  background: rgba(239, 68, 68, 0.18);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--accent-red) 18%, transparent);
+  color: var(--accent-red);
   border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
 .btn-footer-action.danger:hover {
-  background: #ef4444;
-  color: #fff;
+  background: var(--accent-red);
+  color: var(--text-primary);
 }
 </style>

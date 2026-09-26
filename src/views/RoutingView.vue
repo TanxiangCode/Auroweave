@@ -119,8 +119,8 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   gap: 12px;
   flex-shrink: 0;
@@ -145,7 +145,7 @@ onMounted(() => {
 }
 
 .chip-label {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
@@ -153,7 +153,7 @@ onMounted(() => {
   font-weight: 700;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
 }
 
 .text-cyan { color: var(--accent-cyan-vivid) !important; }
@@ -162,13 +162,13 @@ onMounted(() => {
 .divider {
   width: 1px;
   height: 14px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-hover);
 }
 
 .tab-capsules {
   display: flex;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   padding: 2px;
 }

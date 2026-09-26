@@ -107,8 +107,8 @@ defineEmits<{
   justify-content: space-between;
   align-items: center;
   padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   gap: 12px;
   flex-shrink: 0;
@@ -133,7 +133,7 @@ defineEmits<{
 }
 
 .metric-label {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
@@ -141,7 +141,7 @@ defineEmits<{
   font-weight: 700;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
 }
 
 .active-val {
@@ -150,12 +150,12 @@ defineEmits<{
 
 .text-cyan { color: var(--accent-cyan-vivid) !important; }
 .text-green { color: var(--accent-green) !important; }
-.text-red { color: #f87171 !important; }
+.text-red { color: var(--status-danger) !important; }
 
 .divider {
   width: 1px;
   height: 14px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-hover);
 }
 
 .throughput .speed-group {
@@ -168,7 +168,7 @@ defineEmits<{
 }
 
 .speed-down { color: var(--accent-cyan-vivid); }
-.speed-up { color: #a78bfa; }
+.speed-up { color: var(--accent-purple); }
 
 .badge-dot {
   width: 6px;
@@ -201,17 +201,17 @@ defineEmits<{
   font-size: 11px;
   font-weight: 500;
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-primary);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .btn-compact:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
 }
 
 .btn-compact:disabled {
@@ -221,13 +221,13 @@ defineEmits<{
 
 .btn-compact.pause.active {
   background: rgba(245, 158, 11, 0.15);
-  border-color: #f59e0b;
-  color: #f59e0b;
+  border-color: var(--status-warning);
+  color: var(--status-warning);
 }
 
 .btn-compact.danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.18);
-  border-color: #ef4444;
-  color: #ef4444;
+  background: color-mix(in srgb, var(--accent-red) 18%, transparent);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
 }
 </style>

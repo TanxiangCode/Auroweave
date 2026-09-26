@@ -147,8 +147,8 @@ function copyAllLogs() {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: rgba(14, 16, 22, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -158,8 +158,8 @@ function copyAllLogs() {
   justify-content: space-between;
   align-items: center;
   padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 12px;
   gap: 12px;
   flex-wrap: wrap;
@@ -173,12 +173,12 @@ function copyAllLogs() {
 
 .log-title {
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .log-count {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .toolbar-center {
@@ -188,11 +188,11 @@ function copyAllLogs() {
 }
 
 .log-filter-input {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 6px;
   padding: 4px 10px;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 11px;
   outline: none;
   width: 160px;
@@ -204,7 +204,7 @@ function copyAllLogs() {
 
 .level-pills {
   display: flex;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-raised);
   border-radius: 6px;
   padding: 2px;
 }
@@ -215,19 +215,19 @@ function copyAllLogs() {
   border-radius: 4px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
   cursor: pointer;
 }
 
 .level-btn.active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .level-btn.info.active { color: var(--accent-cyan-vivid); }
-.level-btn.warn.active { color: #fbbf24; }
-.level-btn.error.active { color: #f87171; }
+.level-btn.warn.active { color: var(--status-warning); }
+.level-btn.error.active { color: var(--status-danger); }
 
 .toolbar-right {
   display: flex;
@@ -240,29 +240,29 @@ function copyAllLogs() {
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   font-size: 11px;
 }
 
 .btn-tool {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-primary);
   padding: 3px 8px;
   font-size: 11px;
   cursor: pointer;
 }
 
 .btn-tool:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .btn-tool.danger:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
-  color: #ef4444;
+  background: color-mix(in srgb, var(--accent-red) 20%, transparent);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
 }
 
 .log-content {
@@ -278,7 +278,7 @@ function copyAllLogs() {
 }
 
 .empty-tip {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-tertiary);
   text-align: center;
   padding: 40px;
 }
@@ -290,7 +290,7 @@ function copyAllLogs() {
 }
 
 .line-num {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--text-tertiary);
   user-select: none;
   min-width: 32px;
   text-align: right;
@@ -301,8 +301,8 @@ function copyAllLogs() {
   flex: 1;
 }
 
-.log-line.error { color: #f87171; }
-.log-line.warn { color: #fbbf24; }
+.log-line.error { color: var(--status-danger); }
+.log-line.warn { color: var(--status-warning); }
 .log-line.info { color: var(--accent-cyan-vivid); }
-.log-line.default { color: rgba(255, 255, 255, 0.7); }
+.log-line.default { color: var(--text-secondary); }
 </style>

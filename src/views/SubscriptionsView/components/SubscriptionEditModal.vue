@@ -335,8 +335,8 @@ async function handleSave() {
 .edit-modal {
   width: 500px;
   border-radius: 16px;
-  background: rgba(18, 22, 30, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-deep);
+  border: 1px solid var(--border-normal);
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.7);
   display: flex;
   flex-direction: column;
@@ -348,7 +348,7 @@ async function handleSave() {
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .modal-title {
@@ -361,27 +361,27 @@ async function handleSave() {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   cursor: pointer;
   padding: 4px;
 }
 
 .btn-close:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .modal-tabs {
   display: flex;
   padding: 6px 16px;
   gap: 6px;
-  background: rgba(0, 0, 0, 0.25);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .tab-btn {
@@ -394,7 +394,7 @@ async function handleSave() {
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-secondary);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
@@ -402,8 +402,8 @@ async function handleSave() {
 }
 
 .tab-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  background: var(--surface-raised);
 }
 
 .tab-btn.active {
@@ -429,7 +429,7 @@ async function handleSave() {
 .form-group label {
   font-size: 12px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-secondary);
 }
 
 .label-with-hint {
@@ -453,20 +453,20 @@ async function handleSave() {
 
 .sub-hint {
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .field-hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .form-input {
   padding: 9px 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-primary);
   font-size: 12.5px;
   outline: none;
   transition: border-color 0.2s;
@@ -488,7 +488,7 @@ async function handleSave() {
 }
 
 .arrow-sep {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-size: 13px;
 }
 
@@ -502,17 +502,17 @@ async function handleSave() {
 .chip-btn {
   padding: 3px 8px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.6);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 10.5px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .chip-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  background: var(--surface-hover);
 }
 
 .chip-btn.active {
@@ -530,9 +530,9 @@ async function handleSave() {
   flex: 1;
   padding: 7px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.65);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
@@ -540,8 +540,8 @@ async function handleSave() {
 }
 
 .interval-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .interval-btn.active {
@@ -556,16 +556,16 @@ async function handleSave() {
   justify-content: flex-end;
   gap: 10px;
   padding: 14px 20px;
-  background: rgba(0, 0, 0, 0.25);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .btn-cancel {
   padding: 7px 14px;
   border-radius: 8px;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
 }
@@ -577,7 +577,7 @@ async function handleSave() {
   padding: 7px 16px;
   border-radius: 8px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent-cyan-vivid) 90%, transparent) 0%, rgba(79, 172, 254, 0.9) 100%);
-  color: #000;
+  color: var(--text-on-cyan-grad);
   font-size: 12px;
   font-weight: 600;
   border: none;

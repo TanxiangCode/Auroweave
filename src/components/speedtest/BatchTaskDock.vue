@@ -79,7 +79,7 @@ const hasActiveTasks = computed(() => activeTaskCount.value > 0);
   background: var(--bg-surface-glass, rgba(18, 18, 20, 0.85));
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--border-subtle, var(--border-normal));
 }
 
 .task-dock-grid {

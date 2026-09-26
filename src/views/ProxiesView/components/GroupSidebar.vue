@@ -122,7 +122,7 @@ function getRegionBadge(tag: string): RegionBadgeInfo {
   // 提取首字母
   const letters = tag.replace(/[^a-zA-Z]/g, "").toUpperCase();
   const code = letters.length >= 2 ? letters.slice(0, 2) : tag.slice(0, 2).toUpperCase();
-  return { code: code || "GL", bg: "rgba(255, 255, 255, 0.1)", color: "rgba(255, 255, 255, 0.85)" };
+  return { code: code || "GL", bg: "var(--border-normal)", color: "var(--text-primary)" };
 }
 
 function getGroupTypeLabel(tag: string, type: string): string {
@@ -570,7 +570,7 @@ function getGroupTypeLabel(tag: string, type: string): string {
 }
 
 .group-card-item.in-route {
-  border-color: rgba(52, 211, 153, 0.4);
+  border-color: color-mix(in srgb, var(--accent-green) 40%, transparent);
 }
 
 .group-card-item.in-route.active {

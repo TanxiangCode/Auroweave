@@ -219,8 +219,8 @@ function getDuration(startTime: number): string {
 .connection-table-container {
   height: 100%;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -268,7 +268,7 @@ function getDuration(startTime: number): string {
 thead {
   position: sticky;
   top: 0;
-  background: rgba(18, 20, 28, 0.95);
+  background: var(--surface-raised);
   backdrop-filter: blur(10px);
   z-index: 2;
 }
@@ -276,15 +276,15 @@ thead {
 th {
   padding: 10px 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.5);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-normal);
   white-space: nowrap;
 }
 
 td {
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
   vertical-align: middle;
 }
 
@@ -301,7 +301,7 @@ td {
 }
 
 .table-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-raised);
 }
 
 .status-dot {
@@ -317,7 +317,7 @@ td {
 }
 
 .status-dot.closed {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--text-tertiary);
 }
 
 .app-cell {
@@ -347,12 +347,12 @@ td {
 
 .app-name {
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .proc-name {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-family: monospace;
 }
 
@@ -365,7 +365,7 @@ td {
 .dest-host {
   font-family: monospace;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -377,13 +377,13 @@ td {
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
   font-family: monospace;
 }
 
 .proto-tag {
   padding: 1px 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   border-radius: 3px;
 }
 
@@ -402,11 +402,11 @@ td {
 
 .outbound-badge.proxied { color: var(--accent-cyan-vivid); background: color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent); }
 .outbound-badge.direct { color: var(--accent-green); background: rgba(16, 185, 129, 0.1); }
-.outbound-badge.blocked { color: #f87171; background: rgba(248, 113, 113, 0.1); }
+.outbound-badge.blocked { color: var(--status-danger); background: color-mix(in srgb, var(--status-danger) 10%, transparent); }
 
 .node-tag {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -415,9 +415,9 @@ td {
 
 .rule-name {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
   padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-raised);
   border-radius: 4px;
 }
 
@@ -432,11 +432,11 @@ td {
 }
 
 .traffic-down { color: var(--accent-cyan-vivid); }
-.traffic-up { color: #a78bfa; }
+.traffic-up { color: var(--accent-purple); }
 
 .duration-text {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--text-tertiary);
   white-space: nowrap;
 }
 
@@ -451,21 +451,21 @@ td {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 6px;
   padding: 4px 7px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
 }
 
 .btn-icon-action:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: #fff;
+  background: var(--surface-hover);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
 }
 
 .btn-icon-action.danger {
@@ -473,15 +473,15 @@ td {
 }
 
 .btn-icon-action.danger:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
-  color: #f87171;
+  background: color-mix(in srgb, var(--accent-red) 20%, transparent);
+  border-color: var(--accent-red);
+  color: var(--status-danger);
 }
 
 /* 已断开行：无切断按钮时占位，保持列视觉平衡 */
 .action-closed-tag {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--text-tertiary);
   padding: 4px 7px;
   white-space: nowrap;
 }

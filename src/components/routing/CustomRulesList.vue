@@ -444,14 +444,14 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   transition: all 0.2s;
 }
 
 .search-box:focus-within {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
   border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
 }
 
@@ -465,18 +465,18 @@ onMounted(() => {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 12px;
 }
 
 .search-box input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .btn-clear {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   cursor: pointer;
   font-size: 10px;
 }
@@ -491,23 +491,23 @@ onMounted(() => {
 .capsule {
   padding: 4px 9px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.65);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
+  color: var(--text-secondary);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .capsule:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .capsule.active {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: #fff;
+  background: var(--surface-hover);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
 }
 
 .btn-add-rule {
@@ -528,7 +528,7 @@ onMounted(() => {
 
 .btn-add-rule:hover {
   background: var(--accent-cyan-vivid);
-  color: #000;
+  color: var(--text-on-cyan-grad);
 }
 
 .rules-body {
@@ -555,8 +555,8 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   gap: 14px;
   transition: all 0.2s;
@@ -564,8 +564,8 @@ onMounted(() => {
 }
 
 .rule-card:hover {
-  background: rgba(255, 255, 255, 0.055);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
   transform: translateY(-1px);
 }
 
@@ -591,9 +591,9 @@ onMounted(() => {
 
 .type-badge.domain_suffix { color: var(--accent-green); background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); }
 .type-badge.domain { color: var(--accent-cyan-vivid); background: color-mix(in srgb, var(--accent-cyan-vivid) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent-cyan-vivid) 25%, transparent); }
-.type-badge.domain_keyword { color: #fbbf24; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.25); }
-.type-badge.ip_cidr { color: #f472b6; background: rgba(244, 114, 182, 0.12); border: 1px solid rgba(244, 114, 182, 0.25); }
-.type-badge.domain_regex { color: #a78bfa; background: rgba(167, 139, 250, 0.12); border: 1px solid rgba(167, 139, 250, 0.25); }
+.type-badge.domain_keyword { color: var(--status-warning); background: color-mix(in srgb, var(--status-warning) 12%, transparent); border: 1px solid rgba(251, 191, 36, 0.25); }
+.type-badge.ip_cidr { color: var(--badge-pink); background: var(--badge-pink-tint); border: 1px solid color-mix(in srgb, var(--badge-pink) 25%, transparent); }
+.type-badge.domain_regex { color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 12%, transparent); border: 1px solid rgba(167, 139, 250, 0.25); }
 
 .rule-details {
   display: flex;
@@ -607,7 +607,7 @@ onMounted(() => {
   font-size: 13px;
   font-family: monospace;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -615,14 +615,14 @@ onMounted(() => {
 
 .desc-text {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .rule-arrow {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--text-tertiary);
   font-size: 11px;
   flex-shrink: 0;
 }
@@ -630,7 +630,7 @@ onMounted(() => {
 .arrow-line {
   width: 24px;
   height: 1px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
 }
 
 .rule-right {
@@ -653,7 +653,7 @@ onMounted(() => {
   padding: 4px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
   cursor: pointer;
   opacity: 0.6;
   transition: opacity 0.15s, color 0.15s;
@@ -671,10 +671,10 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-size: 13px;
   border-radius: 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border: 1px dashed var(--border-normal);
 }
 
 .empty-icon {
@@ -696,8 +696,8 @@ onMounted(() => {
 
 .modal-card {
   width: 480px;
-  background: rgba(18, 20, 28, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-deep);
+  border: 1px solid var(--border-normal);
   border-radius: 14px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
   overflow: hidden;
@@ -714,26 +714,26 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-normal);
 }
 
 .modal-header h3 {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-size: 14px;
   cursor: pointer;
 }
 
 .btn-close:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .modal-body {
@@ -751,7 +751,7 @@ onMounted(() => {
 
 .form-label {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -766,8 +766,8 @@ onMounted(() => {
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s;
@@ -778,7 +778,7 @@ onMounted(() => {
 }
 
 .type-radio-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-raised);
 }
 
 .type-radio-btn.active {
@@ -789,20 +789,20 @@ onMounted(() => {
 .radio-title {
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .radio-sub {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .form-input {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   padding: 8px 12px;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 12.5px;
   outline: none;
 }
@@ -818,7 +818,7 @@ onMounted(() => {
 
 .modal-footer {
   padding: 14px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-normal);
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -826,10 +826,10 @@ onMounted(() => {
 
 .btn-modal-cancel {
   padding: 7px 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
 }
@@ -837,7 +837,7 @@ onMounted(() => {
 .btn-modal-submit {
   padding: 7px 16px;
   background: var(--accent-cyan-vivid);
-  color: #000;
+  color: var(--text-on-cyan-grad);
   border: none;
   border-radius: 8px;
   font-size: 12px;

@@ -109,7 +109,7 @@ const {
 }
 
 .btn-tool:hover {
-  background: var(--border-strong);
+  background: var(--surface-hover);
 }
 
 .btn-tool.danger {

@@ -55,6 +55,6 @@ const { handleExport } = useLogViewer();
 }
 
 .btn-action:hover {
-  background: var(--border-strong);
+  background: var(--surface-hover);
 }
 </style>

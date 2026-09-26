@@ -426,8 +426,8 @@ onMounted(async () => {
   position: relative;
   width: 100%;
   height: 100%;
-  background: radial-gradient(circle at 50% 50%, rgba(18, 24, 38, 0.9) 0%, rgba(10, 12, 18, 0.98) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(circle at 50% 50%, var(--surface-hover) 0%, var(--surface-raised) 100%);
+  border: 1px solid var(--border-normal);
   border-radius: 14px;
   overflow: hidden;
   user-select: none;
@@ -439,9 +439,9 @@ onMounted(async () => {
   left: 14px;
   right: 14px;
   padding: 8px 14px;
-  background: rgba(18, 20, 28, 0.85);
+  background: var(--surface-deep);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-normal);
   border-radius: 10px;
   display: flex;
   justify-content: space-between;
@@ -466,7 +466,7 @@ onMounted(async () => {
 .canvas-title {
   font-size: 12px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .active-badge {
@@ -486,18 +486,18 @@ onMounted(async () => {
 
 .btn-tool {
   padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-primary);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .btn-tool:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .btn-tool.active {
@@ -580,7 +580,7 @@ onMounted(async () => {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   padding: 0 4px;
 }
 
@@ -595,8 +595,8 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -605,8 +605,8 @@ onMounted(async () => {
 }
 
 .topo-node-card:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--surface-raised);
+  border-color: var(--text-tertiary);
   transform: translateY(-2px);
 }
 
@@ -632,7 +632,7 @@ onMounted(async () => {
 .node-title {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -640,7 +640,7 @@ onMounted(async () => {
 
 .node-sub {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-family: monospace;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -660,5 +660,5 @@ onMounted(async () => {
 
 .text-cyan { color: var(--accent-cyan-vivid) !important; }
 .text-green { color: var(--accent-green) !important; }
-.text-red { color: #f87171 !important; }
+.text-red { color: var(--status-danger) !important; }
 </style>

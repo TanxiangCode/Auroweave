@@ -322,7 +322,7 @@ function getLatencyColor(ms?: number): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--border-subtle);
   padding-top: 6px;
 }
 
@@ -396,7 +396,7 @@ function getLatencyColor(ms?: number): string {
 
 .node-card.non-selectable.active .protocol-badge {
   background: var(--accent-cyan);
-  color: #0d1117;
+  color: var(--text-on-cyan-grad);
   border-color: transparent;
 }
 
@@ -410,7 +410,7 @@ function getLatencyColor(ms?: number): string {
   width: 18px;
   height: 18px;
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--text-primary);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -526,14 +526,14 @@ function getLatencyColor(ms?: number): string {
 }
 
 .card-action-btn.pin-btn:hover:not(:disabled) {
-  color: #f5c518;
-  border-color: #f5c518;
+  color: var(--status-warning);
+  border-color: var(--status-warning);
 }
 
 .card-action-btn.pin-btn.pinned {
-  color: #f5c518;
-  border-color: rgba(245, 197, 24, 0.45);
-  background: rgba(245, 197, 24, 0.08);
+  color: var(--status-warning);
+  border-color: color-mix(in srgb, var(--status-warning) 45%, transparent);
+  background: color-mix(in srgb, var(--status-warning) 8%, transparent);
 }
 
 .card-action-btn.speed-btn:hover:not(:disabled) {

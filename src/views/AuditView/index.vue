@@ -278,9 +278,9 @@ function handleMouseLeave() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
   font-size: 13px;
   border-radius: 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border: 1px dashed var(--border-normal);
 }
 </style>

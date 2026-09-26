@@ -283,10 +283,11 @@ defineExpose({ open, close });
 .command-palette-modal {
   width: 600px;
   max-width: 90vw;
-  background: rgba(18, 22, 34, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* 浮层底色走令牌：浅色主题下自动变白底深字 */
+  background: var(--surface-deep);
+  border: 1px solid var(--border-normal);
   border-radius: var(--radius-xl, 18px);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -297,7 +298,7 @@ defineExpose({ open, close });
   align-items: center;
   gap: 12px;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-normal);
 }
 
 .search-icon {
@@ -310,21 +311,21 @@ defineExpose({ open, close });
   border: none;
   outline: none;
   font-size: 16px;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text-primary);
 }
 
 .hotkey-hint {
   font-size: 11px;
   padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
 }
 
 .close-x {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -333,7 +334,7 @@ defineExpose({ open, close });
 }
 
 .close-x:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .result-list {
@@ -346,7 +347,7 @@ defineExpose({ open, close });
   padding: 32px;
   text-align: center;
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .command-item {
@@ -379,12 +380,12 @@ defineExpose({ open, close });
 .cmd-title {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
 }
 
 .cmd-subtitle {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-tertiary);
   margin-top: 2px;
 }
 
@@ -392,8 +393,8 @@ defineExpose({ open, close });
   font-size: 11px;
   padding: 3px 8px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.6);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
 }
 
 .palette-footer {
@@ -401,14 +402,14 @@ defineExpose({ open, close });
   align-items: center;
   gap: 16px;
   padding: 10px 20px;
-  background: rgba(0, 0, 0, 0.2);
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--surface-inset);
+  border-top: 1px solid var(--border-subtle);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 kbd {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-hover);
   padding: 2px 5px;
   border-radius: 4px;
   font-family: monospace;

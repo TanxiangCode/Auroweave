@@ -405,7 +405,7 @@ function closeFilterMenu() {
 
 .toolbar-icon-control:hover:not(:disabled) {
   color: var(--text-primary);
-  background: var(--border-strong);
+  background: var(--surface-hover);
   border-color: var(--border-accent);
 }
 
@@ -493,7 +493,7 @@ function closeFilterMenu() {
 .filter-separator {
   height: 1px;
   margin: 8px 0;
-  background: var(--border-subtle);
+  background: var(--surface-raised);
 }
 
 .filter-select-label {
@@ -524,7 +524,7 @@ function closeFilterMenu() {
 .divider-vertical {
   width: 1px;
   height: 20px;
-  background: var(--border-normal);
+  background: var(--surface-hover);
   margin: 0 2px;
 }
 
@@ -544,7 +544,7 @@ function closeFilterMenu() {
 }
 
 .btn-action:hover:not(:disabled) {
-  background: var(--border-strong);
+  background: var(--surface-hover);
   border-color: var(--border-accent);
 }
 
@@ -609,7 +609,7 @@ function closeFilterMenu() {
 }
 
 .spinner-ring.speed {
-  border-color: rgba(34, 211, 238, 0.25);
+  border-color: color-mix(in srgb, var(--accent-cyan) 25%, transparent);
   border-top-color: var(--accent-cyan);
 }
 
