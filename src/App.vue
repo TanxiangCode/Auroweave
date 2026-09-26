@@ -5,6 +5,7 @@
  */
 import { onMounted, ref, computed } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
+import { useCoreUpdateStore } from "@/stores/coreUpdate.store";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import ControlCapsule from "@/components/chrome/ControlCapsule.vue";
 import TrafficLights from "@/components/chrome/TrafficLights.vue";
@@ -17,6 +18,7 @@ import { useGlobalHotkey } from "@/composables/useGlobalHotkey";
 import { useConfirm } from "@/composables/useConfirm";
 
 const settingsStore = useSettingsStore();
+const coreUpdateStore = useCoreUpdateStore();
 const route = useRoute();
 const router = useRouter();
 const isMac = ref(false);
@@ -60,6 +62,10 @@ const confirm = useConfirm();
 
 onMounted(async () => {
   isMac.value = navigator.userAgent.toLowerCase().includes("mac");
+  // 内核升级进度监听必须常驻：设置页高级面板由 v-else-if 按需挂载，
+  // 若等面板挂载才监听，用户在别处触发的升级事件会被整段丢弃。
+  // 同时回查后端进度，覆盖"升级中整页重载"的场景。
+  void coreUpdateStore.init();
   await settingsStore.fetchSettings();
 
   try {
@@ -77,7 +83,7 @@ onMounted(async () => {
     <!-- 全局顶栏 (Tauri 拖拽区域) -->
     <header class="app-topbar" :class="{ 'is-mac': isMac }" data-tauri-drag-region>
       <div class="topbar-left">
-        <button v-if="showBack" class="btn-back-nav" @click="goBack" title="返回">
+        <button v-if="showBack" class="btn-back-nav" title="返回" @click="goBack">
           <SvgIcon name="back" :size="14" />
         </button>
         <span class="topbar-title">{{ routeTitle }}</span>

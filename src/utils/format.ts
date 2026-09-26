@@ -97,3 +97,25 @@ export function bytesToMB(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0.0";
   return (bytes / (1024 * 1024)).toFixed(1);
 }
+
+/**
+ * 是否运行在 macOS 上
+ *
+ * 不要用 `userAgent.includes("mac")`：真实 UA 里是 `Macintosh` / `darwin`，
+ * 部分环境（测试用 happy-dom、部分精简 WebView UA）根本不出现 "mac" 子串，
+ * 会把 macOS 误判成非 mac —— 表现为 macOS 专属 UI/提示静默消失。
+ * 这里同时匹配 UA 的三种常见写法与 navigator.platform。
+ *
+ * @returns 是否为 macOS；无 navigator 环境（SSR / 纯 Node）返回 false
+ *
+ * @example
+ * isMacOS()  // macOS: true，Windows/Linux: false
+ */
+export function isMacOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  // Macintosh（macOS 桌面 Safari）、darwin（多数 WebView/精简 UA）、Mac OS
+  if (/macintosh|darwin|mac os/i.test(ua)) return true;
+  const platform = (navigator as { platform?: string }).platform || "";
+  return /mac/i.test(platform);
+}

@@ -5,6 +5,7 @@
  */
 import { ref, computed, watch } from "vue";
 import { useRoute } from "vue-router";
+import { useCoreUpdateStore } from "@/stores/coreUpdate.store";
 import GeneralPanel from "./panels/GeneralPanel.vue";
 import DashboardPanel from "./panels/DashboardPanel.vue";
 import SubscriptionPanel from "./panels/SubscriptionPanel.vue";
@@ -18,6 +19,7 @@ import PrivacyPanel from "./panels/PrivacyPanel/index.vue";
 import AdvancedPanel from "./panels/AdvancedPanel.vue";
 
 const route = useRoute();
+const coreUpdateStore = useCoreUpdateStore();
 
 type PanelKey =
   | "general"
@@ -119,6 +121,15 @@ watch(
             <BaseIcon :name="item.icon" :size="16" />
           </span>
           <span class="nav-label">{{ item.label }}</span>
+          <!-- 内核升级进行中角标：用户切到别的设置 tab 时，
+               高级面板已被卸载，此处是唯一能看到"仍在升级"的入口 -->
+          <span
+            v-if="item.key === 'advanced' && coreUpdateStore.isUpgrading"
+            class="nav-updating-badge"
+            :title="coreUpdateStore.progressDetail"
+          >
+            {{ coreUpdateStore.progress.percent }}%
+          </span>
         </button>
 
 
@@ -261,6 +272,24 @@ watch(
 
 .nav-label {
   flex: 1;
+}
+
+/* 内核升级进行中角标 */
+.nav-updating-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 18%, transparent);
+  color: var(--accent-cyan-vivid);
+  font-family: monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  animation: nav-badge-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes nav-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 .no-nav-match {

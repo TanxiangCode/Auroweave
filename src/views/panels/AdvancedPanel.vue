@@ -8,9 +8,13 @@
           <h3>Sing-box 内核版本管理</h3>
           <p>检测官方 GitHub Release 最新内核版本并提供一键在线升级与热重启</p>
         </div>
-        <button class="btn-check-update" @click="handleCheckUpdate" :disabled="checkingUpdate || upgrading">
-          <span :class="{ spinning: checkingUpdate }"></span>
-          <span>{{ checkingUpdate ? '正在检查...' : '检查更新' }}</span>
+        <button
+          class="btn-check-update"
+          :disabled="coreStore.checking || coreStore.isUpgrading"
+          @click="handleCheckUpdate"
+        >
+          <span :class="{ spinning: coreStore.checking }"></span>
+          <span>{{ coreStore.checking ? '正在检查...' : '检查更新' }}</span>
         </button>
       </div>
 
@@ -18,13 +22,23 @@
         <div class="kernel-status-row">
           <div class="status-left">
             <span class="status-label">当前运行内核：</span>
-            <span class="version-badge current">v{{ currentVersion }}</span>
+            <span class="version-badge current">v{{ coreStore.currentVersion }}</span>
             <span class="status-text">100% 规则对齐 (Official Sidecar)</span>
+            <!-- macOS TUN 依赖 SUID root：内核被替换后该属性会丢，
+                 这里主动提示，避免用户遇到"TUN 突然起不来"却无从排查 -->
+            <span
+              v-if="isMac && !coreStore.kernelPrivileged"
+              class="suid-warning"
+              title="TUN 模式需要内核具备管理员权限。请在「TUN 网卡」面板重新授权"
+            >
+              <BaseIcon name="AlertTriangle" :size="12" />
+              TUN 模式暂不可用（内核缺少管理员权限）
+            </span>
           </div>
 
-          <div class="status-right" v-if="updateInfo">
-            <span v-if="updateInfo.has_update" class="update-found-badge">
-              发现新版本 {{ updateInfo.latest_version }}
+          <div v-if="coreStore.updateInfo" class="status-right">
+            <span v-if="coreStore.updateInfo.has_update" class="update-found-badge">
+              发现新版本 {{ coreStore.updateInfo.latest_version }}
             </span>
             <span v-else class="up-to-date-badge"><BaseIcon name="Check" :size="13" /> 已是最新版本</span>
           </div>
@@ -36,35 +50,57 @@
             <span>导出 JSON Schema</span>
             <span class="sub-label">生成本内核的配置校验文件（config/schema.json），VS Code 等外部编辑器加载后可对 config.json 字段级补全校验</span>
           </div>
-          <button class="btn-restore" @click="handleExportSchema" :disabled="exportingSchema">
+          <button class="btn-restore" :disabled="exportingSchema" @click="handleExportSchema">
             <span>{{ exportingSchema ? '正在导出...' : '导出 Schema' }}</span>
           </button>
         </div>
 
-        <!-- 升级通知卡片（发现新版本时显示） -->
-        <div v-if="updateInfo && updateInfo.has_update" class="update-release-box">
+        <!-- 升级通知卡片：发现新版本、或升级任务在途/刚结束时显示。
+             升级中即便 updateInfo 因切页丢失也必须常驻，否则进度会凭空消失 -->
+        <div v-if="showUpdateBox" class="update-release-box">
           <div class="release-header">
             <div class="release-title">
-              <span class="release-tag">{{ updateInfo.latest_version }}</span>
-              <span class="release-date">发布于 {{ formatDate(updateInfo.published_at) }}</span>
+              <span v-if="latestVersion" class="release-tag">{{ latestVersion }}</span>
+              <span class="release-date">
+                {{ releaseSubtitle }}
+              </span>
             </div>
             <button
               class="btn-upgrade-now"
+              :class="{ 'is-running': coreStore.isUpgrading }"
+              :disabled="coreStore.isUpgrading || !downloadUrl"
+              :title="downloadUrl ? '' : '未找到对应平台的下载资产'"
               @click="handleUpgrade"
-              :disabled="upgrading"
             >
-              <span v-if="!upgrading">立即在线升级</span>
+              <span v-if="!coreStore.isUpgrading">立即在线升级</span>
               <span v-else class="upgrading-state">
                 <span class="spinner"></span>
-                正在下载并替换内核 (请勿关闭)...
+                <span>{{ coreStore.stageLabel }}</span>
+              </span>
+              <!-- 按钮内进度条：与文字同处一个按钮，切页回来进度即刻可见 -->
+              <span v-if="coreStore.isUpgrading" class="btn-progress-track">
+                <span class="btn-progress-fill" :style="{ width: coreStore.progress.percent + '%' }"></span>
               </span>
             </button>
           </div>
 
+          <!-- 阶段细节 + 结果态文案 -->
+          <div v-if="coreStore.isUpgrading" class="upgrade-progress-detail">
+            {{ coreStore.progressDetail }}
+          </div>
+          <div
+            v-else-if="coreStore.isFinished"
+            class="upgrade-result"
+            :class="coreStore.progress.success ? 'ok' : 'fail'"
+          >
+            <BaseIcon :name="coreStore.progress.success ? 'Check' : 'X'" :size="13" />
+            <span>{{ coreStore.resultMessage }}</span>
+          </div>
+
           <!-- 更新日志摘要 -->
-          <div class="release-notes" v-if="updateInfo.release_notes">
+          <div v-if="coreStore.updateInfo?.release_notes" class="release-notes">
             <div class="notes-title">更新日志 (Changelog):</div>
-            <pre class="notes-content">{{ updateInfo.release_notes }}</pre>
+            <pre class="notes-content">{{ coreStore.updateInfo.release_notes }}</pre>
           </div>
         </div>
       </div>
@@ -89,8 +125,8 @@
             <span class="sub-label">在分流页面启用全景 4 层动态交互式贝塞尔流光拓扑画布</span>
           </div>
           <input
-            type="checkbox"
             v-model="settingsStore.settings.topology_enabled"
+            type="checkbox"
             class="switch"
             @change="save"
           />
@@ -102,8 +138,8 @@
             <span class="sub-label">一键关闭背景毛玻璃与高耗 GPU/CPU 动画滤镜，适应低功耗场景</span>
           </div>
           <input
-            type="checkbox"
             v-model="settingsStore.settings.performance_mode"
+            type="checkbox"
             class="switch"
             @change="handlePerfModeChange"
           />
@@ -114,7 +150,7 @@
             <span>恢复上一次配置备份</span>
             <span class="sub-label">若当前内核配置文件异常，一键恢复 config.backup.json 并重启</span>
           </div>
-          <button class="btn-restore" @click="handleRestore" :disabled="restoring">
+          <button class="btn-restore" :disabled="restoring" @click="handleRestore">
             <span>{{ restoring ? '正在恢复...' : '恢复备份' }}</span>
           </button>
         </div>
@@ -177,16 +213,12 @@
 import BaseIcon from "@/components/common/BaseIcon.vue";
 import { computed, ref, watch, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
+import { useCoreUpdateStore } from "@/stores/coreUpdate.store";
+import { isMacOS } from "@/utils/format";
 import { useToast } from "@/composables/useToast";
 import { useConfirm } from "@/composables/useConfirm";
-import { invoke } from "@tauri-apps/api/core";
-import {
-  checkSingboxUpdate,
-  restoreConfigBackup,
-} from "@/api/ipc/settings";
+import { restoreConfigBackup } from "@/api/ipc/settings";
 import { exportConfigSchema } from "@/api/ipc/configEditor";
-import { invokeWithTimeout } from "@/api/ipc/client";
-import type { SingboxUpdateInfo } from "@/types";
 import ConfigEditorModal from "./ConfigEditorModal.vue";
 
 const props = defineProps<{
@@ -195,12 +227,35 @@ const props = defineProps<{
 
 const settingsStore = useSettingsStore();
 const toast = useToast();
+const coreStore = useCoreUpdateStore();
+/** SUID/TUN 相关提示仅 macOS 适用：Windows 用服务、Linux 无 SUID 概念 */
+const isMac = ref(isMacOS());
 
-const currentVersion = ref<string>("加载中...");
 const highlightTopology = ref(false);
 
 /** test-core 端口基址：0 / 未设置时回落到后端内置默认 40040，仅用于文案展示 */
 const testCorePortBase = computed(() => settingsStore.settings.test_core_port_base || 0);
+
+/** 新版本号（无 updateInfo 时降级为空串，避免渲染出空的版本标签） */
+const latestVersion = computed(() => coreStore.updateInfo?.latest_version || "");
+/** 下载资产地址：缺失时升级按钮禁用并给出 title 提示 */
+const downloadUrl = computed(() => coreStore.updateInfo?.download_url || "");
+/** 升级卡片副标题：升级中优先显示"目标版本"，否则显示发布时间 */
+const releaseSubtitle = computed(() => {
+  if (coreStore.isUpgrading) return "正在升级到该版本";
+  if (!coreStore.updateInfo?.published_at) return "";
+  return `发布于 ${formatDate(coreStore.updateInfo.published_at)}`;
+});
+/**
+ * 升级卡片可见性
+ *
+ * 关键：任务在途（isUpgrading）或刚结束（isFinished）时必须保持显示。
+ * 只按 has_update 判断的话，切页导致 updateInfo 丢失后卡片会整体消失，
+ * 用户既看不到进度也点不了重试。
+ */
+const showUpdateBox = computed(
+  () => coreStore.isUpgrading || coreStore.isFinished || !!coreStore.updateInfo?.has_update
+);
 
 /**
  * 校验并保存 test-core 端口基址
@@ -225,12 +280,9 @@ async function handlePortBaseChange() {
     );
   }
 }
-const checkingUpdate = ref(false);
-const upgrading = ref(false);
 const restoring = ref(false);
 const exportingSchema = ref(false);
 const showConfigEditor = ref(false);
-const updateInfo = ref<SingboxUpdateInfo | null>(null);
 
 function formatDate(dateStr: string): string {
   if (!dateStr) return "";
@@ -242,69 +294,19 @@ function formatDate(dateStr: string): string {
   }
 }
 
-async function fetchCurrentVersion() {
-  try {
-    const res = await invoke<any>("proxy_get_singbox_version");
-    if (res.success && res.data) {
-      currentVersion.value = res.data;
-    } else {
-      currentVersion.value = "未知";
-    }
-  } catch {
-    currentVersion.value = "无法获取";
-  }
+// 检查更新 / 在线升级的逻辑与状态全部下沉到 coreUpdate.store：
+// 组件只负责渲染与转发点击，进度状态不随本组件卸载而消失。
+function handleCheckUpdate() {
+  coreStore.clearResult();
+  void coreStore.checkUpdate();
 }
 
-async function handleCheckUpdate() {
-  if (checkingUpdate.value) return;
-  checkingUpdate.value = true;
-  toast.info("正在查询 GitHub Release 最新版本...");
-  try {
-    const res = await checkSingboxUpdate();
-    if (res.success && res.data) {
-      updateInfo.value = res.data;
-      if (res.data.has_update) {
-        toast.info(`发现新版本 ${res.data.latest_version}`, "点击「立即升级」可一键自动更新内核");
-      } else {
-        toast.success("当前已是最新内核版本", `v${res.data.current_version}`);
-      }
-    } else {
-      toast.error("检查更新失败", res.error || "无法连接到 GitHub API");
-    }
-  } catch (e) {
-    toast.error("检查更新失败", e instanceof Error ? e.message : String(e));
-  } finally {
-    checkingUpdate.value = false;
-  }
-}
-
-async function handleUpgrade() {
-  if (!updateInfo.value || !updateInfo.value.download_url) {
+function handleUpgrade() {
+  if (!downloadUrl.value) {
     toast.error("未找到对应平台的下载资产");
     return;
   }
-
-  upgrading.value = true;
-  toast.info("正在下载内核安装包并执行热替换，请稍候...");
-  // 内核下载 + 解压 + 热替换耗时较长，显式传 10 分钟大超时（默认 180s 不够）
-  try {
-    const res = await invokeWithTimeout<import("@/types").ApiResponse<void>>(
-      "core_upgrade_singbox",
-      { downloadUrl: updateInfo.value.download_url },
-      600000
-    );
-    if (res.success) {
-      toast.success("Sing-box 内核升级成功！", "新版本已自动替换并重新拉起运行");
-      await fetchCurrentVersion();
-      updateInfo.value.has_update = false;
-    } else {
-      toast.error("内核升级失败", res.error || "下载或解压过程中发生异常");
-    }
-  } catch (e) {
-    toast.error("内核升级失败", e instanceof Error ? e.message : String(e));
-  } finally {
-    upgrading.value = false;
-  }
+  void coreStore.startUpgrade(downloadUrl.value);
 }
 
 async function save() {
@@ -387,8 +389,11 @@ watch(
   { immediate: true }
 );
 
-onMounted(() => {
-  fetchCurrentVersion();
+onMounted(async () => {
+  // init() 幂等：App.vue 启动时已注册监听并回查过后端进度，
+  // 这里再调一次只为在深链直达本面板时也能确保状态就绪
+  await coreStore.init();
+  await coreStore.fetchCurrentVersion();
 });
 </script>
 
@@ -466,6 +471,21 @@ onMounted(() => {
   color: var(--text-tertiary);
 }
 
+/* 内核缺少 SUID 权限告警：仅 macOS 出现，提示 TUN 模式不可用 */
+.suid-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--status-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-danger) 35%, transparent);
+  border-radius: 6px;
+  color: var(--status-danger);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+}
+
 .update-found-badge {
   padding: 3px 8px;
   background: color-mix(in srgb, var(--accent-red) 15%, transparent);
@@ -517,6 +537,14 @@ onMounted(() => {
 }
 
 .btn-upgrade-now {
+  /* 升级中按钮内要容纳"文字 + 进度条"两行，故允许换行并锁定最小宽度，
+     避免百分比数字跳动导致按钮宽度反复重排 */
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  min-width: 148px;
   padding: 7px 16px;
   background: var(--accent-cyan-vivid);
   color: var(--text-on-cyan-grad);
@@ -526,6 +554,8 @@ onMounted(() => {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
+  overflow: hidden;
+  text-align: center;
 }
 
 .btn-upgrade-now:hover:not(:disabled) {
@@ -538,10 +568,75 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
+/* 升级中：半透明底 + 禁止 hover 位移，视觉上与"可点击"区分开 */
+.btn-upgrade-now.is-running {
+  transform: none;
+  background: color-mix(in srgb, var(--accent-cyan-vivid) 22%, transparent);
+  color: var(--accent-cyan-vivid);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cyan-vivid) 45%, transparent);
+}
+
+/* 按钮内进度条：随百分比推进，是"进度显示在按钮上"的落点 */
+.btn-progress-track {
+  display: block;
+  width: 100%;
+  height: 4px;
+  background: color-mix(in srgb, var(--text-on-cyan-grad) 25%, transparent);
+  border-radius: var(--radius-full, 9999px);
+  overflow: hidden;
+}
+
+.btn-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--text-on-cyan-grad);
+  border-radius: var(--radius-full, 9999px);
+  transition: width 0.2s ease-out;
+}
+
+/* 升级中按钮内的加载圈（此前模板用了 .spinner 但面板未定义样式，实际不可见） */
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
 .upgrading-state {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  white-space: nowrap;
+}
+
+/* 进度条下方的阶段细节文案（已下载 / 总量等） */
+.upgrade-progress-detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  word-break: break-all;
+}
+
+/* 升级结果态（成功绿 / 失败红） */
+.upgrade-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.upgrade-result.ok {
+  color: var(--accent-green);
+}
+
+.upgrade-result.fail {
+  color: var(--status-danger);
 }
 
 .release-notes {
