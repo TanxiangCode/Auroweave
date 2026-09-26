@@ -143,13 +143,18 @@ export const useSubscriptionStore = defineStore("subscription", () => {
   }
 
   async function activateSub(id: string) {
+    // 先记住切换前的状态：后端是多选 toggle（只翻转目标订阅），
+    // 若按"单选"语义回写会把其他仍在聚合中的订阅全部置为 false，
+    // 导致界面状态与后端不一致（表现为其他卡片都变回"加入聚合"）。
+    const wasActive = subscriptions.value.find((s) => s.id === id)?.is_active ?? false;
+
     const res = await activateSubscription(id);
     if (res.success && res.data) {
-      // 更新本地列表的 is_active 状态
-      subscriptions.value = subscriptions.value.map((s) => ({
-        ...s,
-        is_active: s.id === id,
-      }));
+      // 以后端返回的该订阅为准做本地翻转，其余订阅状态原样保留
+      const nextActive = res.data.is_active ?? !wasActive;
+      subscriptions.value = subscriptions.value.map((s) =>
+        s.id === id ? { ...s, is_active: nextActive } : s
+      );
       try {
         await useProxyStore().fetchGroups();
       } catch (e) {

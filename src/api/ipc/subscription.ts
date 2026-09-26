@@ -1,6 +1,25 @@
 import type { ApiResponse, Subscription } from "@/types";
 import { SUBSCRIPTION_FETCH_TIMEOUT_MS } from "@/constants";
 import { invokeWithTimeout } from "./client";
+import { useSettingsStore } from "@/stores/settings.store";
+
+/**
+ * 解析订阅拉取超时时长（毫秒）
+ *
+ * 取设置页「订阅管理 → 订阅网络请求超时（秒）」`settings.connection_timeout_secs`，
+ * 该值此前只有 UI、无人消费（订阅拉取一直走硬编码常量），此处接通真实链路。
+ *
+ * 说明：这是**前端等待 IPC 响应的上限**；后端 HTTP 客户端自身的连接/读取超时
+ * 由 Rust 侧控制，两者独立，调大此项不会让后端请求变慢。
+ * 越界或未加载时回落到常量默认值，避免 store 尚未就绪导致超时为 0。
+ */
+function subscriptionFetchTimeoutMs(): number {
+  const secs = useSettingsStore().settings.connection_timeout_secs;
+  if (typeof secs === "number" && Number.isFinite(secs) && secs >= 5 && secs <= 60) {
+    return secs * 1000;
+  }
+  return SUBSCRIPTION_FETCH_TIMEOUT_MS;
+}
 
 /**
  * 导入订阅（URL 方式）- 传入较长的拉取超时时间
@@ -17,7 +36,7 @@ export async function importSubscription(
   return invokeWithTimeout<ApiResponse<Subscription>>(
     "subscription_import",
     { name, url, autoGroup },
-    SUBSCRIPTION_FETCH_TIMEOUT_MS
+    subscriptionFetchTimeoutMs()
   );
 }
 
@@ -40,7 +59,7 @@ export async function refreshSubscription(
   return invokeWithTimeout<ApiResponse<Subscription>>(
     "subscription_refresh",
     { id },
-    SUBSCRIPTION_FETCH_TIMEOUT_MS
+    subscriptionFetchTimeoutMs()
   );
 }
 
@@ -56,7 +75,7 @@ export async function activateSubscription(
   return invokeWithTimeout<ApiResponse<Subscription>>(
     "subscription_activate",
     { id },
-    SUBSCRIPTION_FETCH_TIMEOUT_MS
+    subscriptionFetchTimeoutMs()
   );
 }
 
@@ -72,7 +91,7 @@ export async function importContentSubscription(
   return invokeWithTimeout<ApiResponse<Subscription>>(
     "subscription_import_content",
     { name, content, sourceType, filePath, autoGroup },
-    SUBSCRIPTION_FETCH_TIMEOUT_MS
+    subscriptionFetchTimeoutMs()
   );
 }
 
