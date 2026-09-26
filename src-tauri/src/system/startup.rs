@@ -134,7 +134,11 @@ pub async fn apply_core_mode_with_fallback(
     // proxy_guard 期望态已是关闭（上次正常退出/从未开启）时直接跳过，
     // 全量清理仅在实际残留开启状态时执行。
     if crate::system::proxy_guard::is_desired_enabled() {
-        let _ = crate::system::sysproxy::set_system_proxy_silent(false, 0);
+        // 失败不静默：残留代理 = 整机断网，必须留下线索
+        // （真正的兜底在 direct 快速路径的 finalize_direct_release）
+        if let Err(e) = crate::system::sysproxy::set_system_proxy_silent(false, 0) {
+            error!("[app] 启动前清理系统代理失败: {}", e);
+        }
     }
     #[cfg(target_os = "windows")]
     let _ = crate::system::service_control::stop_direct_tun_task();
@@ -256,8 +260,8 @@ pub async fn apply_core_mode_with_fallback(
         if current_settings.proxy_mode == "direct" && !current_settings.tun_enabled {
             info!("[app] 服务模式下：系统处于直连且TUN关闭，通知服务停止内核");
             let _ = crate::core::ipc_client::send_ipc_request("SHUTDOWN_CORE", None).await;
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-            return Ok(());
+            // 收尾同 local 路径：内核都要停了，系统代理必须回读校验为已关闭
+            return crate::system::sysproxy::ensure_system_proxy_disabled();
         }
 
         // ---- 步骤4a-3: 服务模式成功，设置系统代理 ----
@@ -277,7 +281,7 @@ pub async fn apply_core_mode_with_fallback(
         // 这是纯直连模式，不启动任何代理进程
         if settings.proxy_mode == "direct" && !settings.tun_enabled {
             info!("[app] 系统处于直连且TUN关闭，sing-box 保持停止");
-            return Ok(());
+            return finalize_direct_release(&sm, &path_str, settings.mixed_port);
         }
 
         let port = settings.mixed_port;
@@ -332,11 +336,38 @@ pub async fn apply_core_mode_with_fallback(
                 return Err(format!("启动内核进程失败: {}", e));
             } else {
                 info!("[app] sing-box 进程已拉起");
-                let _ = crate::system::sysproxy::set_system_proxy(true, port);
+                if let Err(e) = crate::system::sysproxy::set_system_proxy(true, port) {
+                    error!("[app] 设置系统代理失败（内核已运行但流量未接管）: {}", e);
+                }
             }
         }
     }
     Ok(())
+}
+
+/// 直连模式收尾：关停系统代理 + 回读校验残留 + 兜底保网
+///
+/// 系统代理停在 127.0.0.1 而内核已停 = 整机断网，因此"关闭代理"必须以
+/// **回读校验**为成功判据（见 sysproxy::ensure_system_proxy_disabled）。
+/// 万一关不掉（用户拒绝提权 / 个别网络服务拒绝写入），这里兜底把内核拉起：
+/// 系统代理本就指向本地 mixed 端口，内核在则网络照常可用，绝不留下
+/// "代理还开着、内核却没了"的静默断网状态，同时把失败原因上抛给调用方。
+fn finalize_direct_release(
+    sm: &Arc<crate::core::sidecar::SidecarManager>,
+    config_path: &str,
+    port: u16,
+) -> Result<(), String> {
+    match crate::system::sysproxy::ensure_system_proxy_disabled() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            error!("[app] 系统代理未能关闭: {}（残留代理端口 {}）", e, port);
+            spawn_core_only(sm.clone(), config_path.to_string());
+            Err(format!(
+                "{}；已临时保留内核运行以避免断网，请重新关闭或在系统设置中手动关闭代理",
+                e
+            ))
+        }
+    }
 }
 
 /// 原子性地更新 settings：读取最新值 → 应用闭包修改 → 持久化保存
@@ -387,6 +418,21 @@ fn spawn_local_start(sm: Arc<crate::core::sidecar::SidecarManager>, path: String
     tokio::spawn(async move {
         let _ = sm.start(&path).await;
         let _ = crate::system::sysproxy::set_system_proxy(true, port);
+    });
+}
+
+/// 仅拉起内核，**不触碰系统代理**
+///
+/// 与 spawn_local_start 的区别：系统代理已经处于开启态（且关不掉），
+/// 此处要做的只是让 127.0.0.1:mixed_port 上有人监听，避免整机断网。
+fn spawn_core_only(sm: Arc<crate::core::sidecar::SidecarManager>, path: String) {
+    tokio::spawn(async move {
+        if let Err(e) = sm.start(&path).await {
+            error!(
+                "[app] 兜底拉起内核失败（系统代理残留且无内核，网络不可用）: {}",
+                e
+            );
+        }
     });
 }
 

@@ -191,37 +191,99 @@ mod mac_sysproxy {
         }
     }
 
+    /// 批次执行日志路径
+    ///
+    /// 放 /private/tmp：提权后的 root shell 与普通用户 shell 均可读写，
+    /// 且不经过 TCC 保护目录（与 osascript 提权链的 cwd 规避同理）。
+    const BATCH_LOG: &str = "/private/tmp/auroweave-networksetup.log";
+
+    /// 生成并行执行脚本，并**逐条回收子进程退出码**
+    ///
+    /// 关键：不能用 `cmd & wait` 收尾——POSIX 里无操作数的 `wait` 退出码恒为 0，
+    /// 等于把 networksetup 的每一次失败静默吞掉。旧实现正是如此：macOS 上
+    /// 提权被拒或个别网络服务拒绝写入时，调用方依旧收到"成功"，
+    /// proxy_guard 期望态被错误改写，残留代理无人收敛（表现为整机断网）。
+    fn build_batch_script(commands: &[String]) -> String {
+        let mut script = format!(": > {} ; __rc=0", BATCH_LOG);
+        for (i, cmd) in commands.iter().enumerate() {
+            // `&` 之后紧跟的赋值仍在父 shell 执行，`$!` 才能取到后台子 shell 的 PID
+            script.push_str(&format!(
+                " ; ( {} ) >> {} 2>&1 & __p{}=$!",
+                cmd, BATCH_LOG, i
+            ));
+        }
+        for i in 0..commands.len() {
+            // 失败标记只写序号：命令文本可能含引号，翻译成人类可读文本交给 Rust 侧
+            script.push_str(&format!(
+                " ; wait $__p{0} || {{ __rc=1 ; echo \"AUROWEAVE_FAIL:{0}\" >> {1} ; }}",
+                i, BATCH_LOG
+            ));
+        }
+        // 末尾 cat 日志：错误详情随 do shell script 的输出一起回到调用方
+        script.push_str(&format!(" ; cat {} ; exit $__rc", BATCH_LOG));
+        script
+    }
+
+    /// 把批次日志翻译为可定位的失败描述
+    fn summarize_batch_failure(log_text: &str, commands: &[String]) -> String {
+        let failed: Vec<&String> = commands
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| log_text.contains(&format!("AUROWEAVE_FAIL:{}", i)))
+            .map(|(_, cmd)| cmd)
+            .collect();
+        let output: Vec<&str> = log_text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.contains("AUROWEAVE_FAIL:"))
+            .collect();
+
+        let mut msg = String::new();
+        if !failed.is_empty() {
+            msg.push_str(&format!(
+                "失败命令: {}",
+                failed
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ));
+        }
+        if !output.is_empty() {
+            let tail: Vec<&str> = output.iter().rev().take(3).rev().copied().collect();
+            msg.push_str(&format!("；输出: {}", tail.join(" / ")));
+        }
+        if msg.is_empty() {
+            msg.push_str("无附加输出");
+        }
+        msg
+    }
+
     /// 批量执行 networksetup 命令
     ///
     /// 策略:
-    /// 1. 先尝试直接执行 (无 root 权限)，某些 macOS 版本或配置下可能成功
+    /// 1. 先尝试直接执行 (无 root 权限)——macOS 上"关闭代理"类命令无需提权，
+    ///    常见的开启/关闭往返都在这一步完成
     /// 2. 若直接执行失败且 allow_prompt=true，通过 osascript 提权执行 (会弹出密码框)
     /// 3. 若 allow_prompt=false，直接返回错误
+    ///
+    /// 返回 Ok 的含义是"**每条命令都成功退出**"，不再有静默吞错的可能。
     fn run_networksetup_batch(commands: &[String], allow_prompt: bool) -> Result<(), String> {
         if commands.is_empty() {
             return Ok(());
         }
 
-        // 合并为并发执行的 shell 命令：每个命令后台运行，最后 wait 等待全部完成
-        let combined = if commands.len() > 1 {
-            format!("{} & wait", commands.join(" & "))
-        } else {
-            commands.join(" ; ")
-        };
+        let script = build_batch_script(commands);
 
         // 1. 先尝试直接执行（无 root 权限）
-        let direct_result = Command::new("sh")
-            .arg("-c")
-            .arg(&combined)
-            .output();
-
-        if let Ok(out) = &direct_result {
-            if out.status.success() {
-                return Ok(());
+        match Command::new("sh").arg("-c").arg(&script).output() {
+            Ok(out) if out.status.success() => return Ok(()),
+            Ok(out) => {
+                let detail =
+                    summarize_batch_failure(&String::from_utf8_lossy(&out.stdout), commands);
+                log::debug!("[sysproxy] networksetup 直接执行失败: {}", detail);
             }
-            // 直接执行失败，记录 stderr 供调试
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            log::debug!("[sysproxy] networksetup 直接执行失败: {}", stderr.trim());
+            Err(e) => log::debug!("[sysproxy] networksetup 直接执行无法启动: {}", e),
         }
 
         if !allow_prompt {
@@ -230,15 +292,15 @@ mod mac_sysproxy {
 
         // 2. 通过 osascript 提权执行
         // AppleScript do shell script 中需要转义反斜杠和双引号
-        let escaped = combined.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!(
+        let escaped = script.replace('\\', "\\\\").replace('"', "\\\"");
+        let apple_script = format!(
             r#"do shell script "{}" with administrator privileges"#,
             escaped
         );
 
         log::info!("[sysproxy] 通过 osascript 提权执行 networksetup...");
         let mut elevated = Command::new("osascript");
-        elevated.arg("-e").arg(&script);
+        elevated.arg("-e").arg(&apple_script);
         // CWD 若位于 TCC 受保护目录（~/Documents 等），提权后的 root shell
         // 初始化阶段 getcwd() 即被拒（shell-init 错误），命令必然失败。
         // 显式切换到 /private/tmp 根治（与 sidecar 提权链同款修复）。
@@ -249,38 +311,75 @@ mod mac_sysproxy {
                     log::info!("[sysproxy] osascript 提权执行成功");
                     Ok(())
                 } else {
+                    // do shell script 把内层 stdout（日志）作为结果回传，stderr 里
+                    // 则是 "User canceled. (-128)" 之类的 AppleScript 层错误
+                    let detail =
+                        summarize_batch_failure(&String::from_utf8_lossy(&out.stdout), commands);
                     let stderr = String::from_utf8_lossy(&out.stderr);
-                    Err(format!("networksetup 提权执行失败: {}", stderr.trim()))
+                    let stderr = stderr.trim();
+                    if stderr.is_empty() {
+                        Err(format!("networksetup 提权执行失败: {}", detail))
+                    } else {
+                        Err(format!(
+                            "networksetup 提权执行失败: {}（osascript: {}）",
+                            detail, stderr
+                        ))
+                    }
                 }
             }
             Err(e) => Err(format!("无法执行 osascript: {}", e)),
         }
     }
 
+    /// 生成一次性状态查询脚本：每个已启用服务的 Web / HTTPS / SOCKS 三项
+    ///
+    /// 合成一条 shell 命令执行，避免逐条 spawn（守护每 30s 一拍，开销敏感）。
+    fn build_proxy_query_script(services: &[String]) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        for service in services {
+            // 转义服务名中的单引号 (shell 单引号字符串中用 '\'' 转义)
+            let s = service.replace('\'', "'\\''");
+            for kind in ["web", "secureweb", "socksfirewall"] {
+                parts.push(format!("networksetup -get{}proxy '{}'", kind, s));
+            }
+        }
+        parts.join(" ; ")
+    }
+
+    /// 解析 networksetup 查询输出：任一 "Enabled: Yes" 即视为系统代理开启
+    ///
+    /// 注意必须"任一"而非"首个"：多网卡（Wi-Fi + 有线 + Tailscale/雷雳桥）
+    /// 场景下，首个服务已关而其余仍开着同样会断网。
+    fn parse_proxy_enabled(stdout: &str) -> bool {
+        stdout.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("Enabled:") && t.to_lowercase().contains("yes")
+        })
+    }
+
     /// 查询系统代理是否开启（macOS）
     ///
-    /// 通过 `networksetup -getwebproxy Wi-Fi`（或首个可用网络服务）解析
-    /// "Enabled: Yes/No" 判断；查询失败按未开启处理。
+    /// 遍历**所有**已启用的网络服务，Web/HTTPS/SOCKS 任一为 "Enabled: Yes"
+    /// 即视为开启；单个服务查询失败（服务已消失等）按该项未开启处理。
+    ///
+    /// 旧实现只看 `services.first()`，会把"首服务已关、其余仍开着"误判为
+    /// 已关闭——托盘显示已关闭、守护认为无漂移，残留代理持续生效导致整机
+    /// 断网而无人察觉。
     pub fn is_proxy_enabled() -> bool {
         let services = get_network_services();
-        let service = match services.first() {
-            Some(s) => s.replace('\'', "'\\''"),
-            None => return false,
-        };
+        if services.is_empty() {
+            return false;
+        }
         let output = Command::new("sh")
             .arg("-c")
-            .arg(format!("networksetup -getwebproxy '{}'", service))
+            .arg(build_proxy_query_script(&services))
             .output();
         match output {
-            Ok(out) if out.status.success() => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                stdout
-                    .lines()
-                    .find(|l| l.trim_start().starts_with("Enabled"))
-                    .map(|l| l.to_lowercase().contains("yes"))
-                    .unwrap_or(false)
+            Ok(out) => parse_proxy_enabled(&String::from_utf8_lossy(&out.stdout)),
+            Err(e) => {
+                log::debug!("[sysproxy] 查询系统代理状态失败: {}", e);
+                false
             }
-            _ => false,
         }
     }
 
@@ -345,6 +444,121 @@ mod mac_sysproxy {
         );
 
         run_networksetup_batch(&commands, allow_prompt)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{
+            build_batch_script, build_proxy_query_script, parse_proxy_enabled,
+            run_networksetup_batch, summarize_batch_failure, BATCH_LOG,
+        };
+
+        #[test]
+        fn batch_succeeds_when_all_commands_exit_zero() {
+            // 真跑一次 sh：全成功批次必须 Ok（命令本身无害，不触碰网络设置）
+            run_networksetup_batch(&["true".to_string(), "echo ok".to_string()], false)
+                .expect("全部命令零退出码时应成功");
+        }
+
+        #[test]
+        fn batch_reports_failure_instead_of_silent_success() {
+            // 核心回归防线：旧实现下这条恒为 Ok（`cmd & wait` 吞掉退出码），
+            // 上层据此误判"代理已关闭"，残留 127.0.0.1 代理 → 整机断网
+            let err = run_networksetup_batch(
+                &["sh -c 'echo ** Error: nope >&2; exit 3'".to_string()],
+                false,
+            )
+            .expect_err("失败命令必须上报错误");
+            // 静默模式不提权，因此止步于权限分支，但错误必须真实返回
+            assert!(err.contains("root 权限"), "{err}");
+        }
+
+        #[test]
+        fn batch_script_never_uses_bare_wait() {
+            // 回归防线：`cmd & wait` 中无操作数的 wait 退出码恒为 0，
+            // 会把 networksetup 的失败全部吞掉（残留代理 → 整机断网）
+            let commands = vec!["networksetup -setwebproxystate 'Wi-Fi' off".to_string()];
+            let script = build_batch_script(&commands);
+            assert!(
+                !script.contains("& wait"),
+                "批次脚本不得使用裸 wait: {script}"
+            );
+            assert!(script.contains("wait $__p0 ||"), "缺少逐条回收: {script}");
+            assert!(script.ends_with("exit $__rc"), "{script}");
+        }
+
+        #[test]
+        fn batch_script_collects_exit_code_of_every_command() {
+            let commands = vec![
+                "networksetup -setwebproxystate 'Wi-Fi' off".to_string(),
+                "networksetup -setwebproxystate 'Tailscale' off".to_string(),
+            ];
+            let script = build_batch_script(&commands);
+            for i in 0..commands.len() {
+                assert!(script.contains(&format!("__p{i}=$!")), "{script}");
+                assert!(script.contains(&format!("wait $__p{i} ||")), "{script}");
+                assert!(script.contains(&format!("AUROWEAVE_FAIL:{i}")), "{script}");
+            }
+            assert!(script.contains(BATCH_LOG), "批次日志路径缺失: {script}");
+        }
+
+        #[test]
+        fn batch_script_is_single_line_for_osascript_escaping() {
+            // 提权路径把整段脚本塞进 AppleScript 字符串字面量，跨行会破坏字面量
+            let commands = vec!["networksetup -listallnetworkservices".to_string()];
+            let script = build_batch_script(&commands);
+            assert!(!script.contains('\n'), "脚本必须保持单行: {script}");
+        }
+
+        #[test]
+        fn parse_proxy_enabled_detects_any_service_left_on() {
+            // 模拟多网卡：Wi-Fi/有线已关，雷雳桥与 Tailscale 仍开着
+            let stdout = "Enabled: No\nServer: 127.0.0.1\nPort: 8890\n\
+                          Enabled: No\nServer: 127.0.0.1\nPort: 8890\n\
+                          Enabled: Yes\nServer: 127.0.0.1\nPort: 8890\n";
+            assert!(parse_proxy_enabled(stdout));
+        }
+
+        #[test]
+        fn parse_proxy_enabled_is_false_when_everything_off() {
+            let stdout = "Enabled: No\nServer: 127.0.0.1\nPort: 8890\n\
+                 Enabled: No\nServer: 127.0.0.1\nPort: 8890\n";
+            assert!(!parse_proxy_enabled(stdout));
+            assert!(!parse_proxy_enabled(""));
+        }
+
+        #[test]
+        fn proxy_query_script_covers_all_three_proxy_kinds() {
+            let services = vec!["Wi-Fi".to_string(), "Thunderbolt Bridge".to_string()];
+            let script = build_proxy_query_script(&services);
+            for service in &services {
+                assert!(
+                    script.contains(&format!("-getwebproxy '{service}'")),
+                    "{script}"
+                );
+                assert!(
+                    script.contains(&format!("-getsecurewebproxy '{service}'")),
+                    "{script}"
+                );
+                assert!(
+                    script.contains(&format!("-getsocksfirewallproxy '{service}'")),
+                    "{script}"
+                );
+            }
+        }
+
+        #[test]
+        fn summarize_failure_names_the_failing_command() {
+            let commands = vec![
+                "networksetup -setwebproxystate 'Wi-Fi' off".to_string(),
+                "networksetup -setwebproxystate 'Tailscale' off".to_string(),
+            ];
+            let log = "AUROWEAVE_FAIL:1\n** Error: The parameters were not valid.";
+            let summary = summarize_batch_failure(log, &commands);
+            assert!(summary.contains("Tailscale"), "{summary}");
+            assert!(!summary.contains("'Wi-Fi'"), "{summary}");
+            assert!(summary.contains("parameters were not valid"), "{summary}");
+        }
     }
 }
 
@@ -472,6 +686,35 @@ pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
         crate::system::proxy_guard::set_desired(enabled);
     }
     result
+}
+
+/// 确保系统代理处于关闭态（"关闭代理"动作的成功判据）
+///
+/// 为什么必须回读校验：系统代理指向 127.0.0.1 而内核已停 = **整机断网**。
+/// 只要"关闭"没真正落到所有网络服务上，用户就彻底失去网络且毫无提示，
+/// 因此这里的返回值必须代表"回读确认已关闭"，而不是"写入命令发起过"：
+/// - 回读已关闭 → 直接返回，零开销零提权（绝大多数情况）
+/// - 回读仍开启 → 带提权重试（用户显式点了关闭，允许弹一次密码框）
+/// - 仍关不掉 → 返回 Err，由上层兜底（拉起内核）并向用户报错
+///
+/// 期望态无论成败都先置 false：用户的意图是"关"，守护不应再把它打开
+/// （否则下次 30s 拍的漂移恢复会把刚残留的代理又拉起来）。
+pub fn ensure_system_proxy_disabled() -> Result<(), String> {
+    crate::system::proxy_guard::set_desired(false);
+
+    if !get_system_proxy_status() {
+        return Ok(());
+    }
+
+    log::info!("[sysproxy] 回读发现系统代理仍处于开启态，执行关闭（含提权重试）");
+    // 直接用 impl 而非 set_system_proxy：期望态已在上面显式置 false，
+    // 避免"写入失败但钩子按成功处理"的语义混淆
+    set_system_proxy_impl(false, 0)?;
+
+    if get_system_proxy_status() {
+        return Err("系统代理仍处于开启状态（部分网络服务拒绝关闭），整机可能断网，请检查 系统设置 → 网络 → 详细信息 → 代理".to_string());
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

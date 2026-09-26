@@ -253,7 +253,10 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 log::info!("[app] 程序正在退出，清理网络代理...");
                 // 使用静默模式清理代理，避免退出时弹出 macOS 密码框阻塞退出流程
-                let _ = system::sysproxy::set_system_proxy_silent(false, 0);
+                // 失败必须留痕：残留 127.0.0.1 代理 = 下次开机前整机断网
+                if let Err(e) = system::sysproxy::set_system_proxy_silent(false, 0) {
+                    log::error!("[app] 退出清理系统代理失败（可能残留代理导致断网）: {}", e);
+                }
                 // test-core 短命测试内核：退出时必须清理（与运行模式无关，
                 // 服务模式下它同样可能因批量检测而存活）
                 {

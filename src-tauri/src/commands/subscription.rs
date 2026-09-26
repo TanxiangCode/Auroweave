@@ -8,6 +8,7 @@ use crate::core::config_builder::ConfigBuilder;
 use crate::core::parser::{parse_subscription_content, SubscriptionFormat};
 use crate::core::sidecar::SidecarManager;
 use crate::error::{ApiResponse, AppError};
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::Arc;
@@ -659,9 +660,12 @@ async fn build_and_apply_config(
     // 同步系统代理状态
     let settings = crate::commands::settings::settings_get_internal(app_handle);
     if settings.proxy_mode != "direct" {
-        let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
-    } else {
-        let _ = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port);
+        if let Err(e) = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port) {
+            warn!("[subscription] 同步系统代理（开启）失败: {}", e);
+        }
+    } else if let Err(e) = crate::system::sysproxy::set_system_proxy(false, settings.mixed_port) {
+        // 直连态下关不掉 = 残留 127.0.0.1 代理；proxy_guard 会在 30s 内静默重试
+        warn!("[subscription] 同步系统代理（关闭）失败: {}", e);
     }
 
     Ok(node_count)
