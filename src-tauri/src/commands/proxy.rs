@@ -305,26 +305,48 @@ return ApiResponse::ok(());
 ApiResponse::err("以管理员身份提权重启失败".to_string(), 500)
 }
 
+/// 内核版本信息（版本号 + 提权状态 + 实际路径）
+///
+/// 提权状态随附返回：macOS 的 TUN 模式依赖 SUID root，内核升级/重装后
+/// 可能丢失。前端据此主动提示用户，而不是等 TUN 起不来再去排查。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SingboxVersionInfo {
+    /// 版本号，如 1.14.2
+    pub version: String,
+    /// 是否具备 SUID root 权限（macOS TUN 模式前提）
+    pub privileged: bool,
+    /// 实际解析到的内核路径（排查命名/多版本问题用）
+    pub path: String,
+}
+
 /// 获取内核版本号
 ///
 /// Command::output() 是阻塞系统调用（外部进程执行 + 管道读取），
 /// 移入 spawn_blocking 避免阻塞 tokio 异步运行时工作线程。
 #[tauri::command]
-pub async fn proxy_get_singbox_version() -> ApiResponse<String> {
+pub async fn proxy_get_singbox_version() -> ApiResponse<SingboxVersionInfo> {
     let version_result = tauri::async_runtime::spawn_blocking(|| {
         crate::core::sidecar::SidecarManager::resolve_binary_path().map(|path| {
-            match std::process::Command::new(path).arg("version").output() {
+            // SUID 状态：macOS TUN 模式依赖它，升级/换机后可能丢失。
+            // 一并返回让前端能主动提示，而不是等 TUN 起不来再排查
+            let privileged = crate::core::sidecar::SidecarManager::is_privileged_binary(&path);
+            let version = match std::process::Command::new(&path).arg("version").output() {
                 Ok(output) => {
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                     // 提取版本号（sing-box version 1.14.0）
-                    for line in stdout.lines() {
-                        if line.starts_with("sing-box version ") {
-                            return line.replace("sing-box version ", "").trim().to_string();
-                        }
-                    }
-                    stdout.lines().next().unwrap_or("Unknown").to_string()
+                    stdout
+                        .lines()
+                        .find(|l| l.starts_with("sing-box version "))
+                        .map(|l| l.replace("sing-box version ", "").trim().to_string())
+                        .or_else(|| stdout.lines().next().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "Unknown".to_string())
                 }
                 Err(_) => "Unknown".to_string(),
+            };
+            SingboxVersionInfo {
+                version,
+                privileged,
+                path: path.to_string_lossy().to_string(),
             }
         })
     })
@@ -332,7 +354,7 @@ pub async fn proxy_get_singbox_version() -> ApiResponse<String> {
     .unwrap_or_else(|e| Err(crate::error::AppError::Unknown(format!("版本查询任务失败: {}", e))));
 
     match version_result {
-        Ok(version) => ApiResponse::ok(version),
+        Ok(info) => ApiResponse::ok(info),
         Err(_) => ApiResponse::err("未找到内核程序", 404),
     }
 }

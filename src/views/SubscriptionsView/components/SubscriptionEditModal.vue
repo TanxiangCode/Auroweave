@@ -37,7 +37,8 @@ onMounted(async () => {
   try {
     const res = await getSingboxVersion();
     if (res.success && res.data) {
-      currentSingboxVer.value = res.data;
+      // 后端返回的是 SingboxVersionInfo（version + 提权状态 + 路径）
+      currentSingboxVer.value = res.data.version;
     }
   } catch (_) {}
 });

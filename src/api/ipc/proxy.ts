@@ -51,10 +51,14 @@ export async function closeAllConnections(): Promise<ApiResponse<void>> {
   return invokeWithTimeout<ApiResponse<void>>("proxy_close_all_connections");
 }
 
-/** 获取当前使用的 sing-box 版本号 */
-export async function getSingboxVersion(): Promise<ApiResponse<string>> {
-  return invokeWithTimeout<ApiResponse<string>>("proxy_get_singbox_version");
-}
+/**
+ * 获取当前使用的 sing-box 版本号
+ *
+ * 统一从 settings.ts 转发：后端 proxy_get_singbox_version 现返回
+ * SingboxVersionInfo（version + privileged + path），两处各留一份
+ * 声明会导致类型漂移——一处按 string 用、一处按对象用，迟早出事。
+ */
+export { getSingboxVersion } from "./settings";
 
 // === 分组配置持久化（P0 修复新增）===
 
