@@ -44,6 +44,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   latency_persistent_reuse: true,
   pinned_nodes: [],
 
+  // 测速探测内核（后端 scheduler.rs / unlock_check.rs 消费）
+  /** test-core 端口基址（0 = 后端默认 40040） */
+  test_core_port_base: 0,
+  /** test-core 批量探测并发上限（2-16） */
+  unlock_test_concurrency: 8,
+  /** 上下行并行测速（默认关 = 串行保精度） */
+  speedtest_parallel_updown: false,
+
   // DNS / TUN 进阶（sing-box 1.14.0）
   dns_mode: "fakeip",
   dns_remote_doh: "8.8.8.8",

@@ -287,6 +287,13 @@ export type AppLanguage = "zh-CN" | "en-US";
 
 export interface AppSettings {
   theme: ThemeMode;
+  /**
+   * 界面语言。
+   *
+   * 注意：项目目前**没有 i18n 基建**（无 vue-i18n，全站文案硬编码中文），
+   * 该字段前后端已定义但无人消费，设置页也刻意不提供选择器——
+   * 加了会是「改了没反应」的假设置。待引入 i18n 后再接线。
+   */
   language: AppLanguage;
   proxy_mode: ProxyMode;
   auto_start: boolean;

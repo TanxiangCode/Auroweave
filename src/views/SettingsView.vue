@@ -3,7 +3,7 @@
  * 设置视图 — 九大面板控制中心
  * 作者: TanXiang
  */
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch } from "vue";
 import { useRoute } from "vue-router";
 import GeneralPanel from "./panels/GeneralPanel.vue";
 import DashboardPanel from "./panels/DashboardPanel.vue";
@@ -71,17 +71,24 @@ const filteredNavItems = computed(() => {
   });
 });
 
-onMounted(() => {
-  if (route.query.panel) {
-    const p = route.query.panel as PanelKey;
-    if (navItems.some((n) => n.key === p)) {
+// 从路由 query 同步面板与高亮目标。
+//
+// 注意：这里必须用 watch + { immediate: true }，不能用 onMounted ——
+// Vue 的生命周期是「子组件 onMounted 先于父组件 onMounted」，
+// 而 activePanel / highlightTarget 正是靠这两个值把子面板**切换出来**的。
+// 若放在 onMounted，子面板挂载时读到的仍是初始空值，深链高亮永远不触发。
+watch(
+  () => route.query,
+  (q) => {
+    const p = q.panel as PanelKey | undefined;
+    if (p && navItems.some((n) => n.key === p)) {
       activePanel.value = p;
     }
-  }
-  if (route.query.highlight) {
-    highlightTarget.value = route.query.highlight as string;
-  }
-});
+    const h = q.highlight as string | undefined;
+    if (h) highlightTarget.value = h;
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -128,7 +135,7 @@ onMounted(() => {
       <SubscriptionPanel v-else-if="activePanel === 'subscription'" />
       <RouteModePanel v-else-if="activePanel === 'routemode'" />
       <DnsPanel v-else-if="activePanel === 'dns'" />
-      <SpeedtestPanel v-else-if="activePanel === 'speedtest'" />
+      <SpeedtestPanel v-else-if="activePanel === 'speedtest'" :highlight-target="highlightTarget" />
       <TunPanel v-else-if="activePanel === 'tun'" />
       <AutomationPanel v-else-if="activePanel === 'automation'" />
       <HotkeyPanel v-else-if="activePanel === 'hotkey'" />
@@ -157,8 +164,8 @@ onMounted(() => {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-normal);
   border-radius: 12px;
   flex-shrink: 0;
 }
@@ -168,14 +175,14 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
   transition: all 0.2s;
 }
 
 .nav-search-box:focus-within {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--surface-hover);
   border-color: color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan-vivid) 10%, transparent);
 }
@@ -194,18 +201,18 @@ onMounted(() => {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 11.5px;
 }
 
 .nav-search-box input::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .btn-clear {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   cursor: pointer;
   font-size: 10px;
 }
@@ -228,7 +235,7 @@ onMounted(() => {
   border-radius: 8px;
   background: transparent;
   border: 1px solid transparent;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--text-secondary);
   font-size: 12.5px;
   cursor: pointer;
   transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
@@ -236,8 +243,8 @@ onMounted(() => {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .nav-item.active {
@@ -260,15 +267,15 @@ onMounted(() => {
   padding: 16px;
   text-align: center;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .settings-main {
   flex: 1;
   padding: 18px 22px;
   overflow-y: auto;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
 }
 </style>

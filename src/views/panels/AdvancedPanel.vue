@@ -131,6 +131,43 @@
       </div>
     </div>
 
+    <!-- 测速探测内核端口（高级/排障项，后端 scheduler.rs 与 unlock_check.rs 均消费） -->
+    <div class="setting-card glass-effect">
+      <div class="card-header">
+        <span class="card-icon"><BaseIcon name="Cpu" :size="20" /></span>
+        <div class="card-title-group">
+          <h3>测速探测内核端口</h3>
+          <p>独立 test-core 实例的监听端口基址，仅在默认端口被占用或与本机其他服务冲突时才需修改</p>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="setting-item">
+          <div class="item-label">
+            <span>test-core 端口基址</span>
+            <span class="sub-label">
+              批量延迟/解锁探测会为每个探测实例分配 {{ testCorePortBase || 40040 }} 起的连续端口；
+              设为 0 表示使用内置默认值。修改后需重启测速任务生效。
+            </span>
+          </div>
+          <input
+            v-model.number="settingsStore.settings.test_core_port_base"
+            type="number"
+            class="num-input"
+            min="0"
+            max="65000"
+            step="1"
+            @change="handlePortBaseChange"
+          />
+        </div>
+
+        <div class="marker-hint">
+          <strong>排障提示：</strong>若测速批量任务报「端口被占用」或启动失败，可把基址改成其他空闲高位端口
+          （如 41000）。批量探测会在基址之后按并发数顺延分配，单节点测速另用基址 +500 的端口段，二者不冲突。
+        </div>
+      </div>
+    </div>
+
     <!-- 配置编辑器弹窗（plan-Q Q2） -->
     <ConfigEditorModal :visible="showConfigEditor" @close="showConfigEditor = false" />
   </div>
@@ -138,7 +175,7 @@
 
 <script setup lang="ts">
 import BaseIcon from "@/components/common/BaseIcon.vue";
-import { ref, onMounted } from "vue";
+import { computed, ref, watch, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
 import { useConfirm } from "@/composables/useConfirm";
@@ -161,6 +198,33 @@ const toast = useToast();
 
 const currentVersion = ref<string>("加载中...");
 const highlightTopology = ref(false);
+
+/** test-core 端口基址：0 / 未设置时回落到后端内置默认 40040，仅用于文案展示 */
+const testCorePortBase = computed(() => settingsStore.settings.test_core_port_base || 0);
+
+/**
+ * 校验并保存 test-core 端口基址
+ *
+ * 该端口段仅用于测速探测实例，误配会导致批量测速启动失败；
+ * 这里做区间收敛并把非法值回退为 0（=后端默认），避免用户填入越界值后无从恢复。
+ */
+async function handlePortBaseChange() {
+  const raw = settingsStore.settings.test_core_port_base ?? 0;
+  const value = Number.isFinite(raw) ? Math.trunc(raw) : 0;
+  if (value < 0 || value > 65000) {
+    settingsStore.settings.test_core_port_base = 0;
+    toast.error("端口基址超出范围", "已重置为默认值 0（后端按 40040 起算）。");
+    return;
+  }
+  settingsStore.settings.test_core_port_base = value;
+  const res = await settingsStore.updateSettings({ test_core_port_base: value });
+  if (res.success) {
+    toast.success(
+      "端口基址已保存",
+      value === 0 ? "已恢复默认（后端按 40040 起算）" : `批量探测将从 ${value} 起分配端口`
+    );
+  }
+}
 const checkingUpdate = ref(false);
 const upgrading = ref(false);
 const restoring = ref(false);
@@ -306,13 +370,24 @@ async function handleExportSchema() {
   }
 }
 
+// 深链高亮：watch prop 而非在 onMounted 里读一次。
+// 父组件 SettingsView 用 watch(immediate) 设置 activePanel，本面板是被
+// v-else-if 切换出来的，挂载时机晚于父组件 onMounted；onMounted 里读
+// 只能拿到初始空值，高亮永远不触发。
+watch(
+  () => props.highlightTarget,
+  (target) => {
+    if (target === "topology") {
+      highlightTopology.value = true;
+      setTimeout(() => {
+        highlightTopology.value = false;
+      }, 3000);
+    }
+  },
+  { immediate: true }
+);
+
 onMounted(() => {
-  if (props.highlightTarget === "topology") {
-    highlightTopology.value = true;
-    setTimeout(() => {
-      highlightTopology.value = false;
-    }, 3000);
-  }
   fetchCurrentVersion();
 });
 </script>
@@ -344,7 +419,7 @@ onMounted(() => {
 
 .btn-check-update:hover:not(:disabled) {
   background: var(--accent-cyan-vivid);
-  color: #000;
+  color: var(--text-on-cyan-grad);
 }
 
 .spinning {
@@ -361,7 +436,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-inset);
   border-radius: 8px;
 }
 
@@ -373,7 +448,7 @@ onMounted(() => {
 }
 
 .status-label {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
 }
 
 .version-badge.current {
@@ -388,15 +463,15 @@ onMounted(() => {
 
 .status-text {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-tertiary);
 }
 
 .update-found-badge {
   padding: 3px 8px;
-  background: rgba(239, 68, 68, 0.15);
+  background: color-mix(in srgb, var(--accent-red) 15%, transparent);
   border: 1px solid rgba(239, 68, 68, 0.35);
   border-radius: 6px;
-  color: #f87171;
+  color: var(--status-danger);
   font-size: 11.5px;
   font-weight: 600;
 }
@@ -432,19 +507,19 @@ onMounted(() => {
 .release-tag {
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-primary);
   font-family: monospace;
 }
 
 .release-date {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
 }
 
 .btn-upgrade-now {
   padding: 7px 16px;
   background: var(--accent-cyan-vivid);
-  color: #000;
+  color: var(--text-on-cyan-grad);
   border: none;
   border-radius: 8px;
   font-size: 12px;
@@ -478,14 +553,14 @@ onMounted(() => {
 .notes-title {
   font-size: 11.5px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-secondary);
 }
 
 .notes-content {
   font-size: 11px;
   font-family: monospace;
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(0, 0, 0, 0.3);
+  color: var(--text-secondary);
+  background: var(--layer-0);
   padding: 8px 10px;
   border-radius: 6px;
   max-height: 120px;
@@ -494,55 +569,27 @@ onMounted(() => {
   margin: 0;
 }
 
-.text-input {
-  padding: 6px 10px;
-  background: #141824;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 12px;
-  width: 260px;
-  outline: none;
-  font-family: monospace;
-}
-
-.text-input:focus,
-.num-input:focus {
-  border-color: var(--accent-cyan-vivid);
-}
-
-.num-input {
-  padding: 6px 10px;
-  background: #141824;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 12px;
-  width: 90px;
-  outline: none;
-}
-
 .btn-restore {
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 12px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
 .btn-restore:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-hover);
 }
 
 /* 解锁判据说明块 */
 .marker-hint {
   font-size: 11px;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-inset);
   border-left: 2px solid color-mix(in srgb, var(--accent-cyan-vivid) 40%, transparent);
   border-radius: 0 8px 8px 0;
 }

@@ -31,6 +31,24 @@
           </div>
           <input type="checkbox" v-model="settingsStore.settings.auto_group_on_import" class="switch" @change="save" />
         </div>
+
+        <div class="setting-item">
+          <div class="item-label">
+            <span>订阅网络请求超时 (秒)</span>
+            <span class="sub-label">
+              远程拉取订阅节点与规则集时，前端等待响应的上限 (默认: 15 秒，可设 5~60 秒)。
+              订阅源响应较慢时可适当调大；注意不影响服务端请求本身的超时。
+            </span>
+          </div>
+          <input
+            v-model.number="settingsStore.settings.connection_timeout_secs"
+            type="number"
+            class="num-input"
+            min="5"
+            max="60"
+            @change="save"
+          />
+        </div>
       </div>
     </div>
 
@@ -121,10 +139,11 @@ onMounted(() => {
   subStore.fetchAll();
 });
 
-/** 保存订阅设置开关（patch 式：仅提交本面板字段） */
+/** 保存订阅设置（patch 式：仅提交本面板字段） */
 async function save() {
   await settingsStore.updateSettings({
     auto_group_on_import: settingsStore.settings.auto_group_on_import,
+    connection_timeout_secs: settingsStore.settings.connection_timeout_secs,
   });
   toast.success("订阅设置已保存");
 }
@@ -168,7 +187,7 @@ function formatTime(ts?: number): string {
 
 .btn-goto-full:hover {
   background: color-mix(in srgb, var(--accent-cyan-vivid) 20%, transparent);
-  color: #fff;
+  color: var(--text-primary);
   transform: translateX(2px);
 }
 

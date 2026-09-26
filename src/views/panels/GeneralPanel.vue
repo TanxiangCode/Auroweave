@@ -176,19 +176,5 @@ async function save(field: keyof AppSettings) {
    此处只保留本面板独有的控件样式。 */
 
 /* switch 统一走 App.vue 全局胶囊开关（36×20，勾选青色高亮） */
-
-.select-input {
-  padding: 6px 12px;
-  background: #141824;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #fff;
-  font-size: 12px;
-  outline: none;
-  cursor: pointer;
-}
-
-.select-input:focus {
-  border-color: var(--accent-cyan-vivid);
-}
+/* 输入框 / 下拉统一走 common.css 全局控件体系 */
 </style>
