@@ -275,8 +275,12 @@ pub async fn apply_core_mode_with_fallback(
         info!("[app] 配置已成功同步至系统服务");
         let final_settings = crate::commands::settings::settings_get_internal(app_handle);
         if final_settings.tun_enabled {
-            // TUN 接管时无需系统代理（双开=流量双重接管+状态混乱）
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+            // TUN 模式下系统代理不需要开启（流量已被 TUN 接管），且必须关干净：
+            // 双开 = 流量被双重接管 + 状态混乱。用 ensure_* 做回读校验，
+            // 而不是"发起即算成功"（否则残留 127.0.0.1 = 整机断网）
+            if let Err(e) = crate::system::sysproxy::ensure_system_proxy_disabled(app_handle) {
+                error!("[app] 服务模式 TUN 接管时关闭系统代理失败: {}", e);
+            }
         } else if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
             app_handle,
             true,
@@ -341,6 +345,8 @@ pub async fn apply_core_mode_with_fallback(
                 }
             }
 
+            // 三条平台分支走到这里 = TUN 已成功接管
+            enforce_tun_invariant(app_handle);
         } else {
             // local 模式无 TUN：直接启动 sing-box 子进程
             if let Err(e) = sm.start(&path_str).await {
@@ -357,6 +363,22 @@ pub async fn apply_core_mode_with_fallback(
         }
     }
     Ok(())
+}
+
+/// TUN 接管的系统代理不变式：系统代理必须关闭
+///
+/// TUN 已在网卡层接管全部流量，系统代理同时开启会造成"双开"：流量先被 TUN
+/// 抓一次，再被系统代理送进 mixed 端口二次接管，表现为状态混乱、连接重复、
+/// 部分应用不走代理。
+///
+/// 此前 local TUN 分支与 config_editor 的 TUN 分支都不碰系统代理，只依赖启动
+/// 流程开头的清理（且被进程内期望态门控），"应用重启 + 有残留"的组合下会在
+/// 切换瞬间出现双开窗口。统一用 ensure_system_proxy_disabled 做回读校验，
+/// 且在 TUN 已接管后再执行一次，避免启动期清理与本次接管之间的时间差。
+fn enforce_tun_invariant(app_handle: &tauri::AppHandle) {
+    if let Err(e) = crate::system::sysproxy::ensure_system_proxy_disabled(app_handle) {
+        error!("[app] TUN 接管要求关闭系统代理，但关闭失败（双开风险）: {}", e);
+    }
 }
 
 /// 直连模式收尾：关停系统代理 + 回读校验残留 + 兜底保网

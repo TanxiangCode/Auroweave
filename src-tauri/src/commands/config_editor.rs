@@ -215,14 +215,17 @@ pub async fn config_editor_restart_core(
             )));
         }
         info!("[config-editor] 服务模式下内核已按编辑后配置重新拉起");
-        if !settings.tun_enabled {
-            if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
-                &app_handle,
-                true,
-                settings.mixed_port,
-            ) {
-                log::error!("[config-editor] 重启内核后恢复系统代理失败: {}", e);
+        if settings.tun_enabled {
+            // TUN 接管时无需系统代理，且必须关干净（双开=流量双重接管+状态混乱）
+            if let Err(e) = crate::system::sysproxy::ensure_system_proxy_disabled(&app_handle) {
+                log::error!("[config-editor] TUN 接管下关闭系统代理失败: {}", e);
             }
+        } else if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
+            &app_handle,
+            true,
+            settings.mixed_port,
+        ) {
+            log::error!("[config-editor] 重启内核后恢复系统代理失败: {}", e);
         }
         return Ok(ApiResponse::ok(()));
     }
@@ -238,15 +241,17 @@ pub async fn config_editor_restart_core(
     sm.start(&path_str).await
         .map_err(|e| AppError::Sidecar(format!("重启内核失败（请检查编辑后的配置）: {}", e)))?;
 
-    // 无 TUN 时恢复系统代理指向
-    if !settings.tun_enabled {
-        if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
-            &app_handle,
-            true,
-            settings.mixed_port,
-        ) {
-            log::error!("[config-editor] 重启内核后恢复系统代理失败: {}", e);
+    // TUN 接管时无需系统代理（且必须关干净）；否则恢复系统代理指向
+    if settings.tun_enabled {
+        if let Err(e) = crate::system::sysproxy::ensure_system_proxy_disabled(&app_handle) {
+            log::error!("[config-editor] TUN 接管下关闭系统代理失败: {}", e);
         }
+    } else if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup(
+        &app_handle,
+        true,
+        settings.mixed_port,
+    ) {
+        log::error!("[config-editor] 重启内核后恢复系统代理失败: {}", e);
     }
     Ok(ApiResponse::ok(()))
 }

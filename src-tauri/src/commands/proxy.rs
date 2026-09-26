@@ -184,8 +184,7 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
             // 用 ensure_* 做回读校验：只写不验会留下"以为关了其实还开着"，
             // 此时 TUN 已接管全部流量，残留的 127.0.0.1 代理指向 mixed 端口
             // 尚能转发，但状态与统计都会失真。
-            crate::system::proxy_guard::set_desired(false);
-            if let Err(e) = crate::system::sysproxy::set_system_proxy(false, 0) {
+            if let Err(e) = crate::system::sysproxy::ensure_system_proxy_disabled(&app_handle) {
                 log::error!("[proxy] TUN 模式下关闭系统代理失败: {}（可能残留双开状态）", e);
             }
         } else {
