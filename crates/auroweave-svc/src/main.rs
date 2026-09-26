@@ -25,6 +25,15 @@ fn main() {
         }
     }
 
+    // 解析 --staged <path>：GUI 在线升级在 service 模式下先把新内核放到
+    // 暂存区，再由提权子进程（apply-core）搬进受保护的 bin/
+    let mut staged_path = None;
+    for i in 0..args.len() {
+        if args[i] == "--staged" && i + 1 < args.len() {
+            staged_path = Some(args[i + 1].clone());
+        }
+    }
+
     match subcommand {
         "install" | "install-service" => {
             #[cfg(target_os = "windows")]
@@ -94,6 +103,36 @@ fn main() {
             #[cfg(not(target_os = "windows"))]
             {
                 eprintln!("run 命令仅支持 Windows 平台");
+                std::process::exit(1);
+            }
+        }
+        "apply-core" => {
+            // 由 GUI 通过 UAC (ShellExecuteExW + runas) 拉起，以管理员权限执行。
+            // GUI 进程本身无权限写 bin/（installer 用 SDDL 锁成只读+执行），
+            // 因此这一步必须提权，否则内核实测会因 ACL 拒绝而失败。
+            #[cfg(target_os = "windows")]
+            {
+                init_file_logging();
+                let Some(staged) = staged_path.as_deref() else {
+                    eprintln!("用法: AuroDaemon apply-core --staged <path>");
+                    std::process::exit(2);
+                };
+                match crate::installer::apply_staged_core(std::path::Path::new(&staged)) {
+                    Ok(ver) => {
+                        println!("{}", ver);
+                        tracing::info!("内核已升级到 {}", ver);
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        tracing::error!("内核应用失败: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = staged_path;
+                eprintln!("apply-core 命令仅支持 Windows 平台");
                 std::process::exit(1);
             }
         }
