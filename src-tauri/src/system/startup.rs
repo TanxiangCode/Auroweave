@@ -247,7 +247,9 @@ pub async fn apply_core_mode_with_fallback(
             } else {
                 // local 模式无 TUN：直接启动子进程
                 let _ = sm.start(&path_str).await;
-                let _ = crate::system::sysproxy::set_system_proxy(true, port);
+                if let Err(e) = crate::system::sysproxy::set_system_proxy(true, port) {
+                    error!("[app] 回退模式设置系统代理失败（内核已起但流量未接管）: {}", e);
+                }
             }
             return Ok(());
         }
@@ -268,10 +270,16 @@ pub async fn apply_core_mode_with_fallback(
         info!("[app] 配置已成功同步至系统服务");
         let final_settings = crate::commands::settings::settings_get_internal(app_handle);
         if final_settings.tun_enabled {
-            // TUN 模式下系统代理不需要开启（流量已被 TUN 接管）
-            let _ = crate::system::sysproxy::set_system_proxy(false, 0);
-        } else {
-            let _ = crate::system::sysproxy::set_system_proxy(true, final_settings.mixed_port);
+            // TUN 模式下系统代理不需要开启（流量已被 TUN 接管），且必须关干净：
+            // 双开 = 流量被双重接管 + 状态混乱。用 ensure_* 做回读校验，
+            // 而不是"发起即算成功"（否则残留 127.0.0.1 = 整机断网）
+            if let Err(e) = crate::system::sysproxy::ensure_system_proxy_disabled() {
+                error!("[app] 服务模式 TUN 接管时关闭系统代理失败: {}", e);
+            }
+        } else if let Err(e) =
+            crate::system::sysproxy::set_system_proxy(true, final_settings.mixed_port)
+        {
+            error!("[app] 服务模式设置系统代理失败: {}", e);
         }
     } else {
         // ---- 步骤4b: 本地直接运行模式分支 ----
@@ -417,7 +425,9 @@ async fn wait_for_service_ipc_ready() -> bool {
 fn spawn_local_start(sm: Arc<crate::core::sidecar::SidecarManager>, path: String, port: u16) {
     tokio::spawn(async move {
         let _ = sm.start(&path).await;
-        let _ = crate::system::sysproxy::set_system_proxy(true, port);
+        if let Err(e) = crate::system::sysproxy::set_system_proxy(true, port) {
+            error!("[app] TUN 回退为系统代理时设置失败（用户以为已接管）: {}", e);
+        }
     });
 }
 

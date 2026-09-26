@@ -85,7 +85,18 @@ pub fn start_guard(app_handle: tauri::AppHandle) {
                     log::error!("[proxy_guard] 恢复系统代理失败（下轮重试）: {}", e);
                 }
             } else if proxy_on && !(desired && running) {
-                // 实际开 + 非"期望开且内核活着"：残留状态，静默关闭
+                // 实际开 + 非"期望开且内核活着"：疑似残留，静默关闭
+                //
+                // 归属闸门：无人值守的自动动作必须先确认"这是我们写的"。
+                // Auroweave 只写 127.0.0.1:<mixed_port>，若当前开启的端点不是它，
+                // 说明是用户自己的公司代理 / ClashX / Surge —— 绝不干预。
+                // 代价是"旧端口残留"会漏清理，但用户点一次开关即收敛，
+                // 方向上宁可不作为，也不可误关别人的代理。
+                let port = crate::commands::settings::settings_get_internal(&app_handle).mixed_port;
+                if !crate::system::sysproxy::is_own_proxy_endpoint(port) {
+                    log::debug!("[proxy_guard] 系统代理由外部配置（非本应用写入），不干预");
+                    continue;
+                }
                 let reason = if !desired {
                     "用户期望已关闭"
                 } else {

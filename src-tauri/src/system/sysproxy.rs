@@ -86,6 +86,52 @@ mod win_registry {
         }
     }
 
+    /// 读取注册表 ProxyServer 原始值（REG_SZ）
+    ///
+    /// 形如 "127.0.0.1:8890"，也可能是多协议分机格式
+    /// "http=127.0.0.1:8890;https=127.0.0.1:8890"（解析交由上层做）。
+    /// 只读不改，用于代理归属判定（见 crate 公共 API 的 is_own_proxy_endpoint）。
+    pub fn read_proxy_server() -> Option<String> {
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+        let mut hkey: *mut std::ffi::c_void = ptr::null_mut();
+        unsafe {
+            if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey) != 0 {
+                return None;
+            }
+            let name = to_wide("ProxyServer");
+            // 两段式读取：先问长度再取内容（REG_SZ 以 UTF-16 存储）
+            let mut cb_data: u32 = 0;
+            let size_res = RegQueryValueExW(
+                hkey,
+                name.as_ptr(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut cb_data,
+            );
+            if size_res != 0 || cb_data == 0 || cb_data > 4096 {
+                RegCloseKey(hkey);
+                return None;
+            }
+            let mut buf = vec![0u16; (cb_data as usize) / 2];
+            let read_res = RegQueryValueExW(
+                hkey,
+                name.as_ptr(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                buf.as_mut_ptr() as *mut u8,
+                &mut cb_data,
+            );
+            RegCloseKey(hkey);
+            if read_res != 0 {
+                return None;
+            }
+            let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            let s = String::from_utf16_lossy(&buf[..end]);
+            if s.is_empty() { None } else { Some(s) }
+        }
+    }
+
 
     pub fn set_proxy_registry(enabled: bool, server: &str) -> Result<(), String> {
         let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
@@ -196,6 +242,9 @@ mod mac_sysproxy {
     /// 放 /private/tmp：提权后的 root shell 与普通用户 shell 均可读写，
     /// 且不经过 TCC 保护目录（与 osascript 提权链的 cwd 规避同理）。
     const BATCH_LOG: &str = "/private/tmp/auroweave-networksetup.log";
+
+    /// 状态查询输出的分块标记（前缀 + 序号）
+    const QUERY_MARKER: &str = "||AUROWEAVE_PROXY||";
 
     /// 生成并行执行脚本，并**逐条回收子进程退出码**
     ///
@@ -331,30 +380,94 @@ mod mac_sysproxy {
         }
     }
 
+    /// 单条代理项的查询结果（某服务的 Web / HTTPS / SOCKS 之一）
+    #[derive(Debug, PartialEq)]
+    struct ProxyEntry {
+        /// 与 build_proxy_query 中顺序一致的序号
+        index: usize,
+        enabled: bool,
+        server: String,
+        port: u16,
+    }
+
     /// 生成一次性状态查询脚本：每个已启用服务的 Web / HTTPS / SOCKS 三项
     ///
+    /// 每项前置 `||AUROWEAVE_PROXY||<i>` 标记：`-getsecurewebproxy` 的输出
+    /// 比 `-getwebproxy` 多一行认证信息，靠分隔标记切块比按行数切更稳。
     /// 合成一条 shell 命令执行，避免逐条 spawn（守护每 30s 一拍，开销敏感）。
-    fn build_proxy_query_script(services: &[String]) -> String {
+    fn build_proxy_query(services: &[String]) -> String {
         let mut parts: Vec<String> = Vec::new();
         for service in services {
             // 转义服务名中的单引号 (shell 单引号字符串中用 '\'' 转义)
             let s = service.replace('\'', "'\\''");
             for kind in ["web", "secureweb", "socksfirewall"] {
-                parts.push(format!("networksetup -get{}proxy '{}'", kind, s));
+                let marker = format!("{}{}", QUERY_MARKER, parts.len());
+                parts.push(format!(
+                    "echo '{}' ; networksetup -get{}proxy '{}'",
+                    marker, kind, s
+                ));
             }
         }
         parts.join(" ; ")
     }
 
-    /// 解析 networksetup 查询输出：任一 "Enabled: Yes" 即视为系统代理开启
+    /// 解析 networksetup 查询输出
     ///
     /// 注意必须"任一"而非"首个"：多网卡（Wi-Fi + 有线 + Tailscale/雷雳桥）
     /// 场景下，首个服务已关而其余仍开着同样会断网。
-    fn parse_proxy_enabled(stdout: &str) -> bool {
-        stdout.lines().any(|l| {
-            let t = l.trim();
-            t.starts_with("Enabled:") && t.to_lowercase().contains("yes")
-        })
+    fn parse_proxy_entries(stdout: &str) -> Vec<ProxyEntry> {
+        let mut entries: Vec<ProxyEntry> = Vec::new();
+        let mut current: Option<ProxyEntry> = None;
+        for line in stdout.lines() {
+            let t = line.trim();
+            if let Some(idx) = t.strip_prefix(QUERY_MARKER) {
+                if let Some(done) = current.take() {
+                    entries.push(done);
+                }
+                current = Some(ProxyEntry {
+                    index: idx.trim().parse().unwrap_or(usize::MAX),
+                    enabled: false,
+                    server: String::new(),
+                    port: 0,
+                });
+                continue;
+            }
+            // 分隔标记之前的内容一律忽略（查询失败时的错误输出等）
+            let Some(entry) = current.as_mut() else {
+                continue;
+            };
+            if let Some(v) = t.strip_prefix("Enabled:") {
+                // "Authenticated Proxy Enabled: 0" 不以 Enabled: 开头，天然被排除
+                entry.enabled = v.trim().eq_ignore_ascii_case("yes");
+            } else if let Some(v) = t.strip_prefix("Server:") {
+                entry.server = v.trim().to_string();
+            } else if let Some(v) = t.strip_prefix("Port:") {
+                entry.port = v.trim().parse().unwrap_or(0);
+            }
+        }
+        if let Some(done) = current.take() {
+            entries.push(done);
+        }
+        entries
+    }
+
+    /// 查询全部已启用服务的三项代理状态
+    fn query_proxy_entries() -> Vec<ProxyEntry> {
+        let services = get_network_services();
+        if services.is_empty() {
+            return Vec::new();
+        }
+        match Command::new("sh")
+            .arg("-c")
+            .arg(build_proxy_query(&services))
+            .output()
+        {
+            Ok(out) => parse_proxy_entries(&String::from_utf8_lossy(&out.stdout)),
+            Err(e) => {
+                log::debug!("[sysproxy] 查询系统代理状态失败: {}", e);
+                Vec::new()
+            }
+        }
     }
 
     /// 查询系统代理是否开启（macOS）
@@ -366,21 +479,16 @@ mod mac_sysproxy {
     /// 已关闭——托盘显示已关闭、守护认为无漂移，残留代理持续生效导致整机
     /// 断网而无人察觉。
     pub fn is_proxy_enabled() -> bool {
-        let services = get_network_services();
-        if services.is_empty() {
-            return false;
-        }
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(build_proxy_query_script(&services))
-            .output();
-        match output {
-            Ok(out) => parse_proxy_enabled(&String::from_utf8_lossy(&out.stdout)),
-            Err(e) => {
-                log::debug!("[sysproxy] 查询系统代理状态失败: {}", e);
-                false
-            }
-        }
+        query_proxy_entries().iter().any(|e| e.enabled)
+    }
+
+    /// 当前开启项指向的端点（server, port），未开启返回 None
+    pub fn enabled_endpoint() -> Option<(String, u16)> {
+        query_proxy_entries()
+            .into_iter()
+            .find(|e| e.enabled)
+            .filter(|e| !e.server.is_empty() && e.port > 0)
+            .map(|e| (e.server, e.port))
     }
 
     /// 设置系统代理 (macOS)
@@ -449,8 +557,8 @@ mod mac_sysproxy {
     #[cfg(test)]
     mod tests {
         use super::{
-            build_batch_script, build_proxy_query_script, parse_proxy_enabled,
-            run_networksetup_batch, summarize_batch_failure, BATCH_LOG,
+            build_batch_script, build_proxy_query, parse_proxy_entries, run_networksetup_batch,
+            summarize_batch_failure, BATCH_LOG, QUERY_MARKER,
         };
 
         #[test]
@@ -511,26 +619,42 @@ mod mac_sysproxy {
         }
 
         #[test]
-        fn parse_proxy_enabled_detects_any_service_left_on() {
-            // 模拟多网卡：Wi-Fi/有线已关，雷雳桥与 Tailscale 仍开着
-            let stdout = "Enabled: No\nServer: 127.0.0.1\nPort: 8890\n\
-                          Enabled: No\nServer: 127.0.0.1\nPort: 8890\n\
-                          Enabled: Yes\nServer: 127.0.0.1\nPort: 8890\n";
-            assert!(parse_proxy_enabled(stdout));
+        fn parse_proxy_entries_detects_any_service_left_on() {
+            // 模拟多网卡：Wi-Fi/有线已关，雷雳桥仍开着（-getsecurewebproxy 多一行认证信息）
+            let stdout = "||AUROWEAVE_PROXY||0\nEnabled: No\nServer: 127.0.0.1\nPort: 8890\n\
+                          ||AUROWEAVE_PROXY||1\nEnabled: No\nServer: 127.0.0.1\nPort: 8890\n\
+                          Authenticated Proxy Enabled: 0\n\
+                          ||AUROWEAVE_PROXY||2\nEnabled: Yes\nServer: 127.0.0.1\nPort: 8890\n";
+            let entries = parse_proxy_entries(stdout);
+            assert_eq!(entries.len(), 3);
+            assert!(!entries[0].enabled && !entries[1].enabled);
+            assert!(entries[2].enabled);
+            assert!(entries.iter().any(|e| e.enabled));
         }
 
         #[test]
-        fn parse_proxy_enabled_is_false_when_everything_off() {
-            let stdout = "Enabled: No\nServer: 127.0.0.1\nPort: 8890\n\
-                 Enabled: No\nServer: 127.0.0.1\nPort: 8890\n";
-            assert!(!parse_proxy_enabled(stdout));
-            assert!(!parse_proxy_enabled(""));
+        fn parse_proxy_entries_is_all_off_when_everything_off() {
+            let stdout = "||AUROWEAVE_PROXY||0\nEnabled: No\nServer: 127.0.0.1\nPort: 8890\n\
+                          ||AUROWEAVE_PROXY||1\nEnabled: No\nServer: 127.0.0.1\nPort: 8890\n";
+            let entries = parse_proxy_entries(stdout);
+            assert!(!entries.iter().any(|e| e.enabled));
+            assert!(parse_proxy_entries("").is_empty());
+        }
+
+        #[test]
+        fn parse_proxy_entries_keeps_endpoint_of_enabled_item() {
+            // 归属判定的数据来源：开启项的 Server/Port 必须被正确取到
+            let stdout = "||AUROWEAVE_PROXY||0\nEnabled: No\nServer: 10.0.0.1\nPort: 8080\n\
+                          ||AUROWEAVE_PROXY||1\nEnabled: Yes\nServer: 127.0.0.1\nPort: 8890\n";
+            let entries = parse_proxy_entries(stdout);
+            let hit = entries.iter().find(|e| e.enabled).expect("应有开启项");
+            assert_eq!((hit.server.as_str(), hit.port), ("127.0.0.1", 8890));
         }
 
         #[test]
         fn proxy_query_script_covers_all_three_proxy_kinds() {
             let services = vec!["Wi-Fi".to_string(), "Thunderbolt Bridge".to_string()];
-            let script = build_proxy_query_script(&services);
+            let script = build_proxy_query(&services);
             for service in &services {
                 assert!(
                     script.contains(&format!("-getwebproxy '{service}'")),
@@ -545,6 +669,8 @@ mod mac_sysproxy {
                     "{script}"
                 );
             }
+            // 每个服务三项 = 6 个分块标记，解析才切得开
+            assert_eq!(script.matches(QUERY_MARKER).count(), 6, "{script}");
         }
 
         #[test]
@@ -629,6 +755,93 @@ mod linux_sysproxy {
         }
 
         Ok(())
+    }
+}
+
+// ===========================================================================
+// 代理归属判定（跨平台共用）
+// ===========================================================================
+
+/// 判断主机是否为环回地址（IPv4/IPv6/localhost，兼容 Windows 的 "[::1]" 写法）
+///
+/// 本文件所有平台实现写入的代理服务器都是 127.0.0.1，因此"环回"是
+/// "这是本应用留下的"的第一道判据。
+fn is_loopback_host(host: &str) -> bool {
+    let h = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_matches(|c| c == ' ' || c == '"' || c == '\'')
+        .to_ascii_lowercase();
+    h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h.starts_with("127.")
+}
+
+/// 解析代理服务器字符串为 (host, port)
+///
+/// 兼容 Windows 两种常见格式：
+/// - 单一端点："127.0.0.1:8890"
+/// - 多协议分机："http=127.0.0.1:8890;https=127.0.0.1:8890"（取第一个分机）
+///
+/// 端口缺失/非法时返回 None（调用方按"无法归属"处理，绝不误判）。
+// 非 Windows 平台没有调用方（端点来自 networksetup 输出），但保留为跨平台纯
+// 函数以便在任意开发机上单测这条判据。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_proxy_server(raw: &str) -> Option<(String, u16)> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let first = raw.split(';').next().unwrap_or(raw);
+    // 形如 "http=host:port"：取等号右侧
+    let value = match first.split_once('=') {
+        Some((_proto, v)) => v,
+        None => first,
+    }
+    .trim();
+    let (host, port) = value.rsplit_once(':')?;
+    let port: u16 = port.trim().parse().ok()?;
+    let host = host.trim();
+    if host.is_empty() || port == 0 {
+        return None;
+    }
+    Some((host.to_string(), port))
+}
+
+/// 查询当前开启的系统代理指向的端点（host, port）；未开启返回 None
+pub fn get_system_proxy_endpoint() -> Option<(String, u16)> {
+    #[cfg(target_os = "windows")]
+    {
+        if !win_registry::is_proxy_enabled() {
+            return None;
+        }
+        win_registry::read_proxy_server()
+            .as_deref()
+            .and_then(parse_proxy_server)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        mac_sysproxy::enabled_endpoint()
+    }
+    // Linux/其他：端点读取未实现（gsettings 键路径差异大），一律按"无法归属"
+    // 处理 —— 守护因此不自动干预，宁可不清理也绝不误关用户代理。
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        None
+    }
+}
+
+/// 判断当前开启的系统代理是否为**本应用写入**的残留
+///
+/// 判据：环回地址 + 我们管理的端口（`settings.mixed_port`）——本文件所有平台
+/// 实现都只写 `127.0.0.1:<mixed_port>`，因此"环回 + 端口命中"即可确定归属。
+///
+/// 为什么必须有这道闸：守护的"残留清理"是**无人值守**的自动动作，不看归属
+/// 就关闭，会把用户自己配置的公司代理 / ClashX / Surge 代理静默关掉，且应用内
+/// 没有恢复入口。宁可漏清理（用户点一次开关即收敛），不可误关。
+pub fn is_own_proxy_endpoint(managed_port: u16) -> bool {
+    match get_system_proxy_endpoint() {
+        Some((host, port)) => port == managed_port && is_loopback_host(&host),
+        None => false,
     }
 }
 
@@ -785,5 +998,66 @@ pub fn flush_system_dns_cache() {
         let _ = std::process::Command::new("resolvectl")
             .arg("flush-caches")
             .output();
+    }
+}
+
+/// 代理归属判定的跨平台单测（不依赖具体平台的系统调用）
+#[cfg(test)]
+mod attribution_tests {
+    use super::{is_loopback_host, parse_proxy_server};
+
+    #[test]
+    fn loopback_detection_covers_all_local_forms() {
+        for host in [
+            "127.0.0.1",
+            "127.0.0.53",
+            "localhost",
+            "LOCALHOST",
+            "::1",
+            "[::1]",
+            "0:0:0:0:0:0:0:1",
+            " 127.0.0.1 ",
+        ] {
+            assert!(is_loopback_host(host), "应识别为环回: {host}");
+        }
+    }
+
+    #[test]
+    fn non_loopback_hosts_are_rejected() {
+        // 守护的归属闸门：公司代理 / ClashX 的远程端点绝不能被当成"我们写的"
+        for host in ["10.0.0.1", "proxy.corp.example.com", "192.168.1.10", ""] {
+            assert!(!is_loopback_host(host), "不应视为环回: {host}");
+        }
+    }
+
+    #[test]
+    fn proxy_server_parsing_handles_windows_both_formats() {
+        assert_eq!(
+            parse_proxy_server("127.0.0.1:8890"),
+            Some(("127.0.0.1".to_string(), 8890))
+        );
+        assert_eq!(
+            parse_proxy_server("http=127.0.0.1:8890;https=127.0.0.1:8890"),
+            Some(("127.0.0.1".to_string(), 8890))
+        );
+        assert_eq!(
+            parse_proxy_server("socks=proxy.corp.example.com:8080"),
+            Some(("proxy.corp.example.com".to_string(), 8080))
+        );
+    }
+
+    #[test]
+    fn proxy_server_parsing_rejects_malformed_values() {
+        // 解析不出来 → 无法归属 → 守护不干预（安全侧）
+        for raw in [
+            "",
+            "   ",
+            "127.0.0.1",
+            "127.0.0.1:abc",
+            "127.0.0.1:0",
+            ":8890",
+        ] {
+            assert!(parse_proxy_server(raw).is_none(), "不应解析成功: {raw:?}");
+        }
     }
 }

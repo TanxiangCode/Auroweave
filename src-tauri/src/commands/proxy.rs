@@ -222,7 +222,10 @@ pub async fn proxy_set_mode(app_handle: tauri::AppHandle, mode: String) -> ApiRe
             let config_path_str = config_path.to_string_lossy().to_string();
             match sm.start(&config_path_str).await {
                 Ok(_) => {
-                    let _ = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port);
+                    if let Err(e) = crate::system::sysproxy::set_system_proxy(true, settings.mixed_port)
+                    {
+                        log::error!("[proxy] direct 模式设置系统代理失败: {}", e);
+                    }
                     log::info!("[proxy] direct 模式 sing-box 已启动，系统代理已设置");
                     ApiResponse::ok(())
                 }
@@ -274,7 +277,9 @@ let status = std::process::Command::new("powershell")
 
 if status.is_ok() {
 // 注销系统代理，防止退出时残留
-let _ = crate::system::sysproxy::set_system_proxy(false, 0);
+if let Err(e) = crate::system::sysproxy::set_system_proxy(false, 0) {
+log::error!("[proxy] 提权重启前注销系统代理失败（重启后可能残留）: {}", e);
+}
 app_handle.exit(0);
 return ApiResponse::ok(());
 }
