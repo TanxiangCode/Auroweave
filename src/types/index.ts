@@ -383,6 +383,13 @@ export interface AppSettings {
 }
 
 
+/** Sing-box 内核版本信息（含提权状态，macOS TUN 模式依赖 SUID root） */
+export interface SingboxVersionInfo {
+  version: string;
+  privileged: boolean;
+  path: string;
+}
+
 export interface SingboxUpdateInfo {
   current_version: string;
   latest_version: string;
@@ -391,4 +398,41 @@ export interface SingboxUpdateInfo {
   published_at: string;
   download_url?: string;
   download_size: number;
+}
+
+/**
+ * 内核升级阶段（与后端 SingboxUpdateStage 一一对应）
+ *
+ * 拆成多阶段而非单一百分比：下载只占升级的一小段，停止内核 / 替换文件 /
+ * 重新拉起才是耗时且用户无感知的部分，不分阶段进度条会在 70% 后长时间静止。
+ */
+export type SingboxUpdateStage =
+  | "idle"
+  | "preparing"
+  | "downloading"
+  | "verifying"
+  | "extracting"
+  | "stopping_core"
+  | "replacing"
+  | "restarting"
+  | "done"
+  | "failed";
+
+/** 内核升级实时进度：既是事件负载，也是 core_upgrade_status 的返回体 */
+export interface SingboxUpdateProgress {
+  stage: SingboxUpdateStage;
+  /** 整体进度 0-100（下载段占前 70，其余阶段为固定锚点） */
+  percent: number;
+  /** 阶段中文描述，可直接展示 */
+  message: string;
+  /** 已下载字节数 */
+  downloaded: number;
+  /** 升级包总字节数（服务端未返回 Content-Length 时为 0） */
+  total: number;
+  /** 任务是否已终结（成功或失败） */
+  finished: boolean;
+  /** 成功与否：仅在 finished 为 true 时有值 */
+  success?: boolean | null;
+  /** 失败原因：仅 stage === "failed" 时有值 */
+  error?: string | null;
 }
