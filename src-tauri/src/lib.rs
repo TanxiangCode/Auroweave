@@ -3,6 +3,7 @@
 pub mod error;
 pub mod commands;
 pub mod core;
+pub mod core_paths;
 pub mod fs_utils;
 pub mod speedtest;
 pub mod system;
@@ -171,6 +172,8 @@ pub fn run() {
             // sing-box 内核版本检测与在线更新
             commands::singbox_update::core_check_singbox_update,
             commands::singbox_update::core_upgrade_singbox,
+            // 内核升级进度回查（前端切页/重载后复原按钮进度）
+            commands::singbox_update::core_upgrade_status,
             // 配置编辑器（plan-Q）：schema 导出 + 安全编辑
             commands::config_editor::config_export_schema,
             commands::config_editor::config_editor_load,

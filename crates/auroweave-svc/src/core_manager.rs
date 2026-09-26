@@ -444,48 +444,10 @@ impl CoreManager {
     ///
     /// 在候选目录内按文件修改时间选择最新版本（支持多版本共存场景）。
     fn resolve_binary_path() -> Result<PathBuf, String> {
-        let mut candidate_dirs = Vec::new();
-
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                // 仅信任与当前运行 exe 同级的目录（生产为 SYSTEM/Admin 加锁的 bin 目录）；
-                // 不再包含指向开发目录的调试候选路径
-                candidate_dirs.push(exe_dir.to_path_buf());
-            }
-        }
-
-        let mut latest_path = None;
-        let mut latest_time = std::time::SystemTime::UNIX_EPOCH;
-
-        for dir in candidate_dirs {
-            if !dir.exists() || !dir.is_dir() { continue; }
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.is_file() { continue; }
-                    
-                    let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-                    
-                    let is_match = file_name.starts_with("sing-box") && file_name.ends_with(".exe");
-
-                    if is_match {
-                        if let Ok(metadata) = std::fs::metadata(&path) {
-                            if let Ok(modified) = metadata.modified() {
-                                if modified > latest_time {
-                                    latest_time = modified;
-                                    latest_path = Some(path);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(path) = latest_path {
-            return Ok(path);
-        }
-
-        Err("在候选目录下找不到任何 sing-box 可执行二进制文件".to_string())
+        // 路径决策已收敛到 utils（服务侧唯一真源），与 GUI 侧 core_paths 同规则。
+        // 安全说明：候选目录已不含指向源码树/开发目录的路径，
+        // 因此普通用户无法往 SYSTEM 会加载的目录里塞入可执行文件。
+        crate::utils::resolve_core_binary()
+            .ok_or_else(|| "未找到 sing-box 内核二进制".to_string())
     }
 }

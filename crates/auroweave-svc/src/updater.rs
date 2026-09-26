@@ -70,7 +70,7 @@ fn is_trusted_source(src: &Path) -> bool {
 
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     let mut trusted_dirs: Vec<PathBuf> = vec![
-        PathBuf::from(&program_data).join("Auroweave").join("bin"),
+        crate::utils::bin_dir(),
         PathBuf::from(&program_data).join("Auroweave").join("update_staging"),
     ];
     // 当前运行中的 exe 所在目录（主程序安装目录）
@@ -138,7 +138,7 @@ fn copy_and_verify_hash(src: &Path, dst: &Path, expect_hash: &str, name: &str) -
 pub fn check_and_apply_updates() {
     let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     let config_dir = PathBuf::from(&program_data).join("Auroweave").join("config");
-    let bin_dir = PathBuf::from(&program_data).join("Auroweave").join("bin");
+    let bin_dir = crate::utils::bin_dir();
     
     // ---- 步骤1: 清理上次更新遗留的 old.exe ----
     let old_svc_path = bin_dir.join("AuroDaemon.old.exe");
@@ -184,7 +184,8 @@ pub fn check_and_apply_updates() {
     // ---- 步骤3: 检查 sing-box.exe 是否需要更新 ----
     // 比对当前文件的 SHA-256 与 manifest 中的期望哈希；
     // 哈希计算失败（None）时直接跳过该文件的更新，不做任何覆盖动作
-    let target_sb_path = bin_dir.join("sing-box.exe");
+    let target_sb_path = bin_dir.join(crate::utils::active_core_name());
+
     let current_sb_hash = crate::utils::compute_sha256(&target_sb_path);
     let sb_needs_update = match &current_sb_hash {
         None => {
@@ -202,6 +203,25 @@ pub fn check_and_apply_updates() {
                 warn!("sing-box.exe 更新失败: {}", e);
             } else {
                 info!("sing-box.exe 更新完成，哈希复验通过");
+                // 回收 GUI 在线升级留下的版本化内核文件。
+                // 两者共存会让 bin/ 随每次升级单调膨胀（GUI 写
+                // sing-box-1.14.3.exe，本步骤写 sing-box.exe），
+                // 且 core_manager 按 mtime 取最新，可能选中已被 manifest
+                // 判定为旧版的那份 —— 表现为"服务重启后又回退到旧内核"。
+                crate::utils::cleanup_stale_core_binaries(&bin_dir, &target_sb_path);
+            }
+        }
+    } else {
+        // 无需更新时同样收敛：若 bin/ 里存在比稳定入口更新的版本化文件
+        // （例如 GUI 刚完成在线升级），必须清掉，否则服务下次读取会
+        // 按 mtime 选中它，与 manifest 声明的版本产生分叉。
+        if let Some(newest) = crate::utils::newest_core_in_dir(&bin_dir) {
+            if newest != target_sb_path {
+                info!(
+                    "回收 GUI 升级遗留的版本化内核: {:?}（稳定入口 {:?} 更新且已验证）",
+                    newest, target_sb_path
+                );
+                crate::utils::cleanup_stale_core_binaries(&bin_dir, &target_sb_path);
             }
         }
     }

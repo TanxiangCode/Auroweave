@@ -714,95 +714,10 @@ impl SidecarManager {
     /// 在每个候选目录中查找 `sing-box*` 前缀的可执行文件，
     /// 按文件修改时间选择最新版本（支持多版本共存场景）。
     pub fn resolve_binary_path() -> Result<PathBuf, AppError> {
-        let mut candidate_dirs = Vec::new();
-
-        // 候选目录1: 开发环境工作目录下的 sidecar-bin
-        #[cfg(target_os = "windows")]
-        {
-            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/windows-x64"));
-            candidate_dirs.push(PathBuf::from("sidecar-bin/windows-x64"));
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/macos-arm64"));
-            candidate_dirs.push(PathBuf::from("src-tauri/sidecar-bin/macos-amd64"));
-            candidate_dirs.push(PathBuf::from("sidecar-bin/macos-arm64"));
-            candidate_dirs.push(PathBuf::from("sidecar-bin/macos-amd64"));
-        }
-
-        // 候选目录2: 可执行文件同目录（安装后的标准位置）
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                candidate_dirs.push(exe_dir.to_path_buf());
-            }
-        }
-
-        // 候选目录3: 服务安装后的位置
-        #[cfg(target_os = "windows")]
-        {
-            let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-            candidate_dirs.push(PathBuf::from(program_data).join("Auroweave").join("bin"));
-        }
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(home) = std::env::var("HOME") {
-                candidate_dirs.push(PathBuf::from(home).join("Library").join("Application Support").join("Auroweave").join("bin"));
-            }
-        }
-
-        // 遍历所有候选目录，按修改时间选择最新的 sing-box 可执行文件
-        let mut latest_path = None;
-        let mut latest_time = std::time::SystemTime::UNIX_EPOCH;
-
-        for dir in candidate_dirs {
-            if !dir.exists() || !dir.is_dir() { continue; }
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.is_file() { continue; }
-
-                    let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-
-                    #[cfg(target_os = "windows")]
-                    let is_match = file_name.starts_with("sing-box") && file_name.ends_with(".exe");
-
-                    #[cfg(not(target_os = "windows"))]
-                    let is_match = file_name.starts_with("sing-box")
-                        && !file_name.ends_with(".tar.gz")
-                        && !file_name.ends_with(".zip")
-                        && !file_name.ends_with(".txt")
-                        && !file_name.ends_with(".gitkeep");
-
-                    if is_match {
-                        if let Ok(metadata) = std::fs::metadata(&path) {
-                            if let Ok(modified) = metadata.modified() {
-                                if modified > latest_time {
-                                    latest_time = modified;
-                                    latest_path = Some(path);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(path) = latest_path {
-            let abs_path = if path.is_absolute() {
-                path
-            } else {
-                std::env::current_dir()
-                    .map(|cwd| cwd.join(&path))
-                    .unwrap_or(path)
-            };
-            let abs_path = std::fs::canonicalize(&abs_path).unwrap_or(abs_path);
-            return Ok(abs_path);
-        }
-
-        let err_msg = "找不到 sing-box 二进制文件，请运行 download-sidecar 脚本或通过界面下载".to_string();
-        error!("{}", err_msg);
-        Err(AppError::Sidecar(err_msg))
+        // 路径决策已收敛到 core_paths（唯一真源）。
+        // 这里保留 Result 包装仅为兼容既有调用方签名，避免全量改动的噪音。
+        crate::core_paths::resolve_core_binary()
+            .ok_or_else(|| AppError::Sidecar("未找到 sing-box 内核二进制".to_string()))
     }
 }
 

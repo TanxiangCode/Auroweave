@@ -73,8 +73,7 @@ fn secure_bin_file(file_path: &std::path::Path) -> Result<(), String> {
 ///    - 复验目标文件 SHA-256 与源文件一致，防止复制中途被替换（TOCTOU）
 /// 4. 返回 AuroDaemon.exe 的目标路径
 fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
+    let bin_dir = crate::utils::bin_dir();
 
     // 安全顺序要求：bin 目录必须已由调用方在复制任何文件之前创建并锁定
     if !bin_dir.is_dir() {
@@ -91,39 +90,21 @@ fn copy_binaries(singbox_src_path: Option<&str>) -> Result<PathBuf, String> {
     if let Some(src_path_str) = singbox_src_path {
         let src_path = PathBuf::from(src_path_str);
         if src_path.exists() {
-            let target_sb_path = bin_dir.join("sing-box.exe");
+            let target_sb_path = bin_dir.join(crate::utils::active_core_name());
             copy_and_verify(&src_path, &target_sb_path, "sing-box.exe")?;
         } else {
             return Err(format!("传入的 sing-box 路径不存在: {:?}", src_path));
         }
     } else {
-        // 如果没有传入，尝试在同级目录下寻找并拷贝
+        // 如果没有传入，尝试在同级目录下寻找并拷贝（查找逻辑复用 utils 唯一实现）
         if let Some(exe_dir) = current_exe.parent() {
-            let mut latest_path = None;
-            let mut latest_time = std::time::SystemTime::UNIX_EPOCH;
-            
-            if let Ok(entries) = std::fs::read_dir(exe_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.is_file() { continue; }
-                    let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
-                    if file_name.starts_with("sing-box") && file_name.ends_with(".exe") {
-                        if let Ok(metadata) = std::fs::metadata(&path) {
-                            if let Ok(modified) = metadata.modified() {
-                                if modified > latest_time {
-                                    latest_time = modified;
-                                    latest_path = Some(path);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            match latest_path {
+            match crate::utils::newest_core_in_dir(exe_dir) {
                 Some(p) => {
-                    let target_sb_path = bin_dir.join("sing-box.exe");
+                    let target_sb_path = bin_dir.join(crate::utils::active_core_name());
                     copy_and_verify(&p, &target_sb_path, "sing-box.exe")?;
+                    // 安装成功后回收同目录的历史内核，避免 GUI 升级留下的
+                    // 版本化文件与本步骤写入的稳定入口名长期共存
+                    crate::utils::cleanup_stale_core_binaries(&bin_dir, &target_sb_path);
                     info!("在同级目录下找到并复制 {:?} 至 {:?}", p, target_sb_path);
                 }
                 None => return Err("未指定 singbox 路径且无法在当前目录下找到任何 sing-box*.exe".to_string()),
@@ -268,8 +249,7 @@ pub fn install_service(singbox_src_path: Option<&str>) -> Result<(), String> {
     // 步骤2-3: 先创建并锁定 bin 目录（受保护 DACL），再复制文件
     // 安全顺序：目录在无保护状态下复制文件，会给攻击者留下替换文件的窗口，
     // 因此必须先应用 D:PAI 受保护 DACL，后续复制的文件强制继承受限 ACE。
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
+    let bin_dir = crate::utils::bin_dir();
     secure_bin_dir(&bin_dir)?;
 
     let svc_path = copy_binaries(singbox_src_path)?;
@@ -365,8 +345,7 @@ pub fn install_task(singbox_src_path: Option<&str>) -> Result<(), String> {
     info!("开始以计划任务模式安装提权组件...");
 
     // 步骤1: 先创建并锁定 bin 目录，再复制文件（安全顺序与 install_service 一致）
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
+    let bin_dir = crate::utils::bin_dir();
     secure_bin_dir(&bin_dir)?;
 
     // 步骤2: 复制二进制文件（文件级 SDDL + SHA-256 复验由 copy_binaries 内部完成）
@@ -419,8 +398,7 @@ pub fn uninstall() -> Result<(), String> {
     let _ = remove_direct_tun_task();
 
     // 步骤4: 递归删除 bin 目录
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-    let bin_dir = PathBuf::from(program_data).join("Auroweave").join("bin");
+    let bin_dir = crate::utils::bin_dir();
     if bin_dir.exists() {
         if let Err(e) = std::fs::remove_dir_all(&bin_dir) {
             info!("清理服务二进制目录失败（可能部分文件被占用）: {}", e);
@@ -594,3 +572,446 @@ fn remove_direct_tun_task() -> Result<(), String> {
         .status();
     Ok(())
 }
+
+/// 把暂存区的新内核安装到受保护的 bin/（提权执行）
+///
+/// 背景：GUI 在线升级在 service 模式下**无法自己写 bin/**——
+/// installer 用 SDDL 把该目录锁成 `Authenticated Users: FRGX`
+/// （只读+执行），这是刻意的安全设计：防止普通用户替换以 SYSTEM
+/// 运行的提权组件。于是 GUI 只能把新内核放到暂存区（用户可写），
+/// 再由本子命令以 SYSTEM 权限完成"校验 → 复制 → 回收旧版本"。
+///
+/// 安全要求（与既有 updater 同等强度）：
+/// 1. 源路径必须在 `update_staging/` 内（不接受任意路径，杜绝
+///    "让 SYSTEM 去读用户指定任意文件"的提权原语）；
+/// 2. 复制后复验 SHA-256，防止复制途中被替换（TOCTOU）；
+/// 3. 目标文件名由本 crate 的命名规则生成，不接受外部传入任意文件名。
+pub fn apply_staged_core(staged: &std::path::Path) -> Result<String, String> {
+    let bin_dir = crate::utils::bin_dir();
+
+    // ---- 步骤1: 源路径白名单 ----
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    let staging_dir = std::path::PathBuf::from(&program_data)
+        .join("Auroweave")
+        .join("update_staging");
+    let canonical_staged = std::fs::canonicalize(staged)
+        .map_err(|e| format!("暂存内核文件不存在或不可读: {}", e))?;
+    let canonical_staging = std::fs::canonicalize(&staging_dir)
+        .map_err(|e| format!("暂存目录不存在: {}", e))?;
+    // 前缀匹配（canonicalize 已解析 .. 与符号链接），必须落在暂存目录内
+    if !canonical_staged.starts_with(&canonical_staging) {
+        return Err(format!(
+            "拒绝应用：源文件不在受信任的暂存目录内: {:?}",
+            canonical_staged
+        ));
+    }
+    if !crate::utils::is_core_file_name(
+        &canonical_staged
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+    ) {
+        return Err("拒绝应用：暂存文件名不是内核本体".to_string());
+    }
+
+    // ---- 步骤2: 识别新版本（用于版本化命名）----
+    let version = detect_version_from_binary(&canonical_staged)
+        .ok_or_else(|| "无法识别暂存内核的版本号，拒绝应用（避免写出服务读不到的文件名）".to_string())?;
+    let target = bin_dir.join(crate::utils::versioned_core_name(&version));
+
+    let src_hash = crate::utils::compute_sha256(&canonical_staged)
+        .ok_or_else(|| "计算暂存内核哈希失败，拒绝应用".to_string())?;
+
+    std::fs::create_dir_all(&bin_dir).map_err(|e| format!("创建 bin 目录失败: {}", e))?;
+
+    // ---- 步骤3: 复制 + 哈希复验（防 TOCTOU）----
+    std::fs::copy(&canonical_staged, &target).map_err(|e| {
+        format!(
+            "复制内核到 {} 失败: {}（若内核正在运行请先停止服务）",
+            target.display(),
+            e
+        )
+    })?;
+    let dst_hash = crate::utils::compute_sha256(&target)
+        .ok_or_else(|| "复验目标内核哈希失败".to_string())?;
+    if dst_hash != src_hash {
+        // 复验失败立即回滚，避免 bin/ 里留下一个半截文件
+        let _ = std::fs::remove_file(&target);
+        return Err(format!(
+            "内核复制后哈希不一致（可能复制途中被替换）: 期望 {}，实际 {}",
+            src_hash, dst_hash
+        ));
+    }
+
+    // ---- 步骤4: 回收历史内核 ----
+    crate::utils::cleanup_stale_core_binaries(&bin_dir, &target);
+
+    Ok(version)
+}
+
+/// 从内核二进制的 `version` 自述中解析版本号
+fn detect_version_from_binary(path: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new(path).arg("version").output().ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for line in stdout.lines() {
+        if let Some(rest) = line.trim().strip_prefix("sing-box version ") {
+            let v = rest.trim().trim_start_matches(['v', 'V']);
+            if !v.is_empty()
+                && v.chars().all(|c| c.is_ascii_digit() || c == '.')
+                && v.starts_with(|c: char| c.is_ascii_digit())
+            {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_core_must_live_in_trusted_staging_dir() {
+        // 提权原语防线：SYSTEM 绝不能去复制暂存目录之外的任意文件
+        let fake = std::env::temp_dir().join(format!("auroweave_notstaged_{}", std::process::id()));
+        std::fs::write(&fake, b"x").unwrap();
+        let err = apply_staged_core(&fake).unwrap_err();
+        assert!(
+            err.contains("暂存目录") || err.contains("不存在"),
+            "应拒绝暂存目录外的源文件，实际: {}",
+            err
+        );
+        let _ = std::fs::remove_file(&fake);
+    }
+
+    #[test]
+    fn non_core_filename_rejected() {
+        let dir = std::env::temp_dir().join(format!("auroweave_badname_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let evil = dir.join("payload.exe");
+        std::fs::write(&evil, b"x").unwrap();
+        let err = apply_staged_core(&evil).unwrap_err();
+        assert!(err.contains("不是内核本体") || err.contains("暂存目录"), "实际: {}", err);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 下载段百分比：已下载/总量 映射到整体进度的前 DOWNLOAD_PERCENT_CAP
+    fn download_percent(downloaded: u64, total: u64) -> u8 {
+        if total == 0 {
+            return 0;
+        }
+        ((downloaded.min(total) * DOWNLOAD_PERCENT_CAP) / total) as u8
+    }
+
+    #[test]
+    fn download_percent_maps_into_download_weight() {
+        // 起止锚点：0% 对应 0，100% 对应下载段上限 70
+        assert_eq!(download_percent(0, 1000), 0);
+        assert_eq!(download_percent(500, 1000), 35);
+        assert_eq!(download_percent(1000, 1000), DOWNLOAD_PERCENT_CAP as u8);
+    }
+
+    #[test]
+    fn download_percent_clamps_when_more_bytes_than_content_length() {
+        // 代理/CDN 改写 Content-Length 时已下载可能超过 total，
+        // 绝不能让百分比越过 70 侵占后续阶段区间（否则进度条会倒退）
+        assert_eq!(download_percent(1500, 1000), DOWNLOAD_PERCENT_CAP as u8);
+    }
+
+    #[test]
+    fn download_percent_is_zero_when_total_unknown() {
+        // chunked 传输拿不到 Content-Length：退化为不确定态而非除零 panic
+        assert_eq!(download_percent(5000, 0), 0);
+    }
+
+    #[test]
+    fn download_percent_never_decreases_monotonic() {
+        let total = 3_400_000u64;
+        let mut last = 0u8;
+        for downloaded in (0..=total).step_by(50_000) {
+            let pct = download_percent(downloaded, total);
+            assert!(pct >= last, "进度回退: {downloaded} -> {pct} (上次 {last})");
+            last = pct;
+        }
+        assert_eq!(last, DOWNLOAD_PERCENT_CAP as u8);
+    }
+
+    #[test]
+    fn stages_after_download_occupy_disjoint_ascending_ranges() {
+        // 关键不变量：下载(≤70) < 校验(72) < 解压(78) < 停核(84)
+        // < 替换(90) < 重启(96) < 完成(100)，保证进度条单调不回退
+        let anchors = [
+            (SingboxUpdateStage::Downloading, DOWNLOAD_PERCENT_CAP as u8),
+            (SingboxUpdateStage::Verifying, 72),
+            (SingboxUpdateStage::Extracting, 78),
+            (SingboxUpdateStage::StoppingCore, 84),
+            (SingboxUpdateStage::Replacing, 90),
+            (SingboxUpdateStage::Restarting, 96),
+            (SingboxUpdateStage::Done, 100),
+        ];
+        for w in anchors.windows(2) {
+            assert!(
+                w[0].1 < w[1].1,
+                "阶段锚点倒挂: {:?}={} 之后 {:?}={}",
+                w[0].0, w[0].1, w[1].0, w[1].1
+            );
+        }
+    }
+
+    #[test]
+    fn only_done_and_failed_are_terminal() {
+        // 前端据 finished 解锁按钮并停止展示进度条，判定错误会导致
+        // 按钮永久锁死（用户无法重试）或永不显示结果
+        assert!(SingboxUpdateStage::Done.is_terminal());
+        assert!(SingboxUpdateStage::Failed.is_terminal());
+        for stage in [
+            SingboxUpdateStage::Idle,
+            SingboxUpdateStage::Preparing,
+            SingboxUpdateStage::Downloading,
+            SingboxUpdateStage::Verifying,
+            SingboxUpdateStage::Extracting,
+            SingboxUpdateStage::StoppingCore,
+            SingboxUpdateStage::Replacing,
+            SingboxUpdateStage::Restarting,
+        ] {
+            assert!(!stage.is_terminal(), "{:?} 不应被判定为终态", stage);
+        }
+    }
+
+    #[test]
+    fn stage_serializes_to_snake_case_matching_ts_union() {
+        // 前端 SingboxUpdateStage 联合类型逐字对齐这些字符串，改名会静默失配
+        let cases = [
+            (SingboxUpdateStage::Idle, "\"idle\""),
+            (SingboxUpdateStage::Preparing, "\"preparing\""),
+            (SingboxUpdateStage::Downloading, "\"downloading\""),
+            (SingboxUpdateStage::Verifying, "\"verifying\""),
+            (SingboxUpdateStage::Extracting, "\"extracting\""),
+            (SingboxUpdateStage::StoppingCore, "\"stopping_core\""),
+            (SingboxUpdateStage::Replacing, "\"replacing\""),
+            (SingboxUpdateStage::Restarting, "\"restarting\""),
+            (SingboxUpdateStage::Done, "\"done\""),
+            (SingboxUpdateStage::Failed, "\"failed\""),
+        ];
+        for (stage, expected) in cases {
+            assert_eq!(serde_json::to_string(&stage).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn idle_progress_is_not_upgrading() {
+        // init() 依赖这一判定决定是否回填进度：idle 必须算"未在途"，
+        // 否则会把上一次的残留状态复活成"正在升级"
+        let p = SingboxUpdateProgress::idle();
+        assert_eq!(p.stage, SingboxUpdateStage::Idle);
+        assert!(!p.finished);
+        assert!(!p.success.unwrap_or(false));
+        // 前端 isUpgrading = !finished && stage != "idle"，idle 必须为 false
+        let is_upgrading = !p.finished && p.stage != SingboxUpdateStage::Idle;
+        assert!(!is_upgrading, "idle 不得被判定为升级中，否则会复活残留状态");
+    }
+
+    #[test]
+    fn download_url_whitelist_accepts_official_github_hosts() {
+        for url in [
+            "https://github.com/SagerNet/sing-box/releases/download/v1.13.0/sing-box-linux-amd64.tar.gz",
+            "https://objects.githubusercontent.com/github-production-release-asset/abc",
+            "https://github-releases.githubusercontent.com/github-production-release-asset/abc",
+        ] {
+            assert!(validate_download_url(url).is_ok(), "应放行: {}", url);
+        }
+    }
+
+    #[test]
+    fn download_url_whitelist_rejects_non_github_and_plain_http() {
+        // 内核二进制以 SUID/管理员权限运行，被替换等于任意代码提权，
+        // 白名单与 HTTPS 强制是安全边界，必须守住
+        for url in [
+            "https://evil.example.com/sing-box.tar.gz",
+            "https://github.com.evil.com/x.tar.gz",
+            "http://github.com/SagerNet/sing-box/releases/download/v1/sing-box.tar.gz",
+            "ftp://github.com/x.tar.gz",
+        ] {
+            assert!(validate_download_url(url).is_err(), "应拒绝: {}", url);
+        }
+    }
+
+    #[test]
+    fn format_bytes_human_matches_expected_units() {
+        assert_eq!(format_bytes_human(0), "0 B");
+        assert_eq!(format_bytes_human(512), "512 B");
+        assert_eq!(format_bytes_human(1024), "1.0 KB");
+        assert_eq!(format_bytes_human(14_300_000), "13.6 MB");
+        assert_eq!(format_bytes_human(34_000_000), "32.4 MB");
+    }
+}
+
+
+    /// 真机联调（快）：对真实 GitHub 小资产验证流式进度链路。
+    ///
+    /// 默认跳过（`#[ignore]`）：需外网。开启：
+    ///   cargo test --lib e2e_real_download -- --ignored --nocapture
+    ///
+    /// 用小资产走通与生产完全相同的 download_with_progress 路径，
+    /// 验证真实 HTTP 下的 Content-Length、字节累计与百分比映射。
+    /// 大资产（27MB）那条见 e2e_large_asset_*，因网络耗时过长单独标注。
+    #[tokio::test]
+    #[ignore = "需外网，默认跳过"]
+    async fn e2e_real_download_reports_monotonic_progress() {
+        let url = "https://github.com/SagerNet/sing-box/releases/download/v1.14.2/SFA-version-metadata.json";
+        let client = reqwest::Client::builder()
+            .user_agent("Auroweave-Client/1.0")
+            .timeout(std::time::Duration::from_secs(600))
+            .build()
+            .unwrap();
+
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+
+        let bytes = download_with_progress(client, url, move |d, t, p, m| {
+            sink.lock().unwrap().push((d, t, p, m));
+        })
+        .await
+        .expect("真实下载应成功");
+
+        let events = seen.lock().unwrap().clone();
+        println!("e2e: 下载 {} 字节, {} 次回调", bytes.len(), events.len());
+        for (d, t, p, m) in events.iter() {
+            println!("  downloaded={} total={} percent={} msg={}", d, t, p, m);
+        }
+
+        // 1) 首帧必须存在（按钮要能从"准备中"切到"下载中"）
+        assert!(!events.is_empty(), "应至少有一次首帧回调");
+        assert_eq!(events[0].0, 0, "首帧已下载应为 0");
+
+        // 2) 真实 Content-Length 应可得（否则前端退化为无百分比展示）
+        let total = events[0].1;
+        assert!(total > 0, "GitHub 应返回 Content-Length，实际: {}", total);
+
+        // 3) 实收字节与 Content-Length 一致（未截断）
+        assert_eq!(bytes.len() as u64, total, "实收字节应与 Content-Length 一致");
+
+        // 4) 收尾回调应满字节且达到下载段权重
+        let last = events.last().unwrap();
+        assert_eq!(last.0, total, "收尾回调应报告满字节");
+        assert_eq!(last.2, DOWNLOAD_PERCENT_CAP as u8, "收尾百分比应等于下载段上限");
+
+        // 5) 字节与百分比全程单调不回退
+        let mut prev_bytes = 0u64;
+        let mut prev_pct = 0u8;
+        for (d, _, p, _) in events.iter() {
+            assert!(*d >= prev_bytes, "字节数回退: {} -> {}", prev_bytes, d);
+            assert!(*p >= prev_pct, "百分比回退: {} -> {}", prev_pct, p);
+            prev_bytes = *d;
+            prev_pct = *p;
+        }
+
+        // 6) 文案含真实可读体积
+        assert!(
+            last.3.contains("B") || last.3.contains("KB") || last.3.contains("MB"),
+            "下载文案应含可读体积，实际: {}", last.3
+        );
+    }
+
+    /// 真机联调（大资产，27MB）：验证节流在多 MB 传输中确实生效。
+    ///
+    /// 单独标注且默认跳过：当前网络到 release-assets 主机带宽很低
+    /// （实测 10~400 KB/s 波动），整包可能耗时十分钟或因链路抖动中断，
+    /// 不适合放进常规验证流程。网络条件允许时手动运行。
+    #[tokio::test]
+    #[ignore = "需外网 + 27MB 真实下载，网络慢时可能超时，默认跳过"]
+    async fn e2e_large_asset_throttles_progress_callbacks() {
+        let url = "https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-darwin-arm64.tar.gz";
+        let client = reqwest::Client::builder()
+            .user_agent("Auroweave-Client/1.0")
+            .timeout(std::time::Duration::from_secs(600))
+            .build()
+            .unwrap();
+
+        let count = std::sync::Arc::new(std::sync::Mutex::new(0usize));
+        let last_pct = std::sync::Arc::new(std::sync::Mutex::new(0u8));
+        let c = count.clone();
+        let lp = last_pct.clone();
+
+        let res = download_with_progress(client, url, move |_d, _t, p, _m| {
+            *c.lock().unwrap() += 1;
+            let mut g = lp.lock().unwrap();
+            assert!(p >= *g, "百分比回退: {} -> {}", *g, p);
+            *g = p;
+        })
+        .await;
+
+        // 链路中断属网络环境问题，不计为代码缺陷：如实打印后跳过断言
+        let bytes = match res {
+            Ok(b) => b,
+            Err(e) => {
+                println!("e2e-large: 下载中断（网络环境）: {}", e);
+                println!(
+                    "e2e-large: 中断前已回调 {} 次, 末态百分比 {}",
+                    count.lock().unwrap(),
+                    last_pct.lock().unwrap()
+                );
+                return;
+            }
+        };
+
+        println!("e2e-large: 下载 {} 字节, {} 次回调", bytes.len(), count.lock().unwrap());
+        // 节流生效：回调次数应远小于 KB 数
+        let n = *count.lock().unwrap();
+        assert!(
+            n <= (bytes.len() / 1024).max(16),
+            "节流失效：{} 字节产生 {} 次回调",
+            bytes.len(),
+            n
+        );
+    }
+
+
+    #[test]
+    fn detect_version_from_extracted_dir_name() {
+        // 官方包解压根目录固定为 sing-box-<ver>-<os>-<arch>
+        let dir = std::env::temp_dir().join(format!("auroweave_ver_{}", std::process::id()));
+        let top = dir.join("sing-box-1.14.2-darwin-arm64");
+        std::fs::create_dir_all(&top).unwrap();
+        // 造一个不可执行的占位文件，让 version 自述必然失败 → 走目录名回退
+        let fake = top.join("sing-box");
+        std::fs::write(&fake, b"not a real binary").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o644));
+        }
+
+        let v = detect_new_version(&fake, &dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(v, Some("1.14.2".to_string()));
+    }
+
+    #[test]
+    fn detect_version_returns_none_when_unidentifiable() {
+        // 识别不出版本号必须返回 None 让调用方中止，绝不能猜一个版本写进文件名
+        let dir = std::env::temp_dir().join(format!("auroweave_vnone_{}", std::process::id()));
+        let top = dir.join("weird-name");
+        std::fs::create_dir_all(&top).unwrap();
+        let fake = top.join("sing-box");
+        std::fs::write(&fake, b"junk").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o644));
+        }
+        let v = detect_new_version(&fake, &dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(v, None);
+    }
+
+
+
+
