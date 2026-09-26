@@ -43,6 +43,44 @@ const canvasRef = ref<HTMLCanvasElement | null>(null);
 
 let animationFrameId: number | null = null;
 
+// Canvas 2D 的 strokeStyle/fillStyle 不支持 CSS 变量：赋值 "var(--x)" 会被静默忽略，
+// 保留上一次的颜色（初始为 #000 黑）。必须先用 getComputedStyle 取出真实色值再赋值。
+// 主题切换会改变 token 定义，故缓存需在 data-theme 变化时失效。
+let themeObserver: MutationObserver | null = null;
+const cssVarCache = new Map<string, string>();
+
+/** 读取当前主题下 CSS 变量的真实色值（带缓存，主题切换时清空） */
+function cssVar(name: string, fallback: string): string {
+  const hit = cssVarCache.get(name);
+  if (hit) return hit;
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  const resolved = v || fallback;
+  cssVarCache.set(name, resolved);
+  return resolved;
+}
+
+/** 给 token 色值套上透明度，产出 canvas 可用的 rgba()。
+ *  token 可能是 #rgb / #rrggbb / rgb() / rgba()，统一转换。 */
+function withAlpha(color: string, alpha: number): string {
+  const c = color.trim();
+  let r = 0, g = 0, b = 0;
+  if (c.startsWith("#")) {
+    const hex = c.slice(1);
+    const full = hex.length === 3 || hex.length === 4
+      ? hex.split("").map((ch) => ch + ch).join("")
+      : hex.slice(0, 6);
+    r = parseInt(full.slice(0, 2), 16);
+    g = parseInt(full.slice(2, 4), 16);
+    b = parseInt(full.slice(4, 6), 16);
+  } else {
+    const m = c.match(/[\d.]+/g);
+    if (m) { r = +m[0]; g = +m[1]; b = +m[2]; }
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 // 平滑量程阻尼值
 let currentMaxDown = 1024 * 100;
 let currentMaxUp = 1024 * 50;
@@ -104,7 +142,7 @@ const renderChart = () => {
 
   // 3. 绘制顶部最大刻度参考线 (Top Reference Line)
   ctx.beginPath();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+  ctx.strokeStyle = cssVar("--border-strong", "rgba(0, 0, 0, 0.15)");
   ctx.lineWidth = 1;
   ctx.moveTo(0, topGuideY);
   ctx.lineTo(width, topGuideY);
@@ -126,11 +164,12 @@ const renderChart = () => {
   ctx.lineTo(0, baselineY);
   ctx.closePath();
 
-  // 下载填充渐变色（与图例/描边同源的科技蓝）
+  // 下载填充渐变色（与图例/描边同源，跟随主题）
+  const downColor = cssVar("--accent-blue", "rgb(0, 127, 249)");
   const downFillGrad = ctx.createLinearGradient(0, topGuideY, 0, baselineY);
-  downFillGrad.addColorStop(0, "rgba(0, 127, 249, 0.55)");
-  downFillGrad.addColorStop(0.5, "rgba(0, 100, 200, 0.45)");
-  downFillGrad.addColorStop(1, "rgba(10, 60, 130, 0.55)");
+  downFillGrad.addColorStop(0, withAlpha(downColor, 0.55));
+  downFillGrad.addColorStop(0.5, withAlpha(downColor, 0.45));
+  downFillGrad.addColorStop(1, withAlpha(downColor, 0.2));
   ctx.fillStyle = downFillGrad;
   ctx.fill();
 
@@ -146,7 +185,7 @@ const renderChart = () => {
       ctx.lineTo(x, y);
     }
   }
-  ctx.strokeStyle = "rgb(0, 127, 249)";
+  ctx.strokeStyle = downColor;
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
@@ -168,11 +207,12 @@ const renderChart = () => {
   ctx.lineTo(0, baselineY);
   ctx.closePath();
 
-  // 上传填充渐变色（与图例/描边同源的上传红）
+  // 上传填充渐变色（与图例/描边同源，跟随主题）
+  const upColor = cssVar("--status-danger", "rgb(254, 49, 56)");
   const upFillGrad = ctx.createLinearGradient(0, baselineY, 0, height);
-  upFillGrad.addColorStop(0, "rgba(180, 20, 30, 0.55)");
-  upFillGrad.addColorStop(0.6, "rgba(220, 30, 40, 0.4)");
-  upFillGrad.addColorStop(1, "rgba(140, 15, 25, 0.5)");
+  upFillGrad.addColorStop(0, withAlpha(upColor, 0.55));
+  upFillGrad.addColorStop(0.6, withAlpha(upColor, 0.4));
+  upFillGrad.addColorStop(1, withAlpha(upColor, 0.2));
   ctx.fillStyle = upFillGrad;
   ctx.fill();
 
@@ -188,7 +228,7 @@ const renderChart = () => {
       ctx.lineTo(x, y);
     }
   }
-  ctx.strokeStyle = "rgb(254, 49, 56)";
+  ctx.strokeStyle = upColor;
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
@@ -196,7 +236,7 @@ const renderChart = () => {
 
   // 6. 绘制中轴线 (Baseline Divider)
   ctx.beginPath();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+  ctx.strokeStyle = cssVar("--text-tertiary", "rgba(0, 0, 0, 0.4)");
   ctx.lineWidth = 1;
   ctx.moveTo(0, baselineY);
   ctx.lineTo(width, baselineY);
@@ -213,25 +253,37 @@ watch(
 onMounted(() => {
   renderChart();
   window.addEventListener("resize", renderChart);
+
+  // 主题切换后 token 值已变，清缓存并重绘，否则图表仍用上一主题的线条颜色
+  themeObserver = new MutationObserver(() => {
+    cssVarCache.clear();
+    renderChart();
+  });
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme", "class"],
+  });
 });
 
 onUnmounted(() => {
   window.removeEventListener("resize", renderChart);
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
+  themeObserver?.disconnect();
+  themeObserver = null;
 });
 </script>
 
 <style scoped>
 .speed-chart-card {
-  background: #14161f;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--layer-1);
+  border: 1px solid var(--border-normal);
   border-radius: var(--radius-xl, 18px);
   padding: 14px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   backdrop-filter: var(--blur-panel);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-md);
   position: relative;
   overflow: hidden;
 }
@@ -261,7 +313,7 @@ onUnmounted(() => {
   gap: 8px;
   font-size: var(--text-xs, 12px);
   font-weight: var(--weight-semibold, 600);
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   letter-spacing: 0.3px;
 }
 
@@ -269,8 +321,8 @@ onUnmounted(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: rgb(0, 127, 249);
-  box-shadow: 0 0 8px rgba(0, 127, 249, 0.8);
+  background: var(--accent-blue);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-blue) 80%, transparent);
   animation: pulse 2s infinite;
 }
 
@@ -300,27 +352,27 @@ onUnmounted(() => {
 }
 
 .dot-badge.blue {
-  background: rgb(0, 127, 249);
-  box-shadow: 0 0 6px rgba(0, 127, 249, 0.7);
+  background: var(--accent-blue);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent-blue) 70%, transparent);
 }
 
 .dot-badge.red {
-  background: rgb(254, 49, 56);
-  box-shadow: 0 0 6px rgba(254, 49, 56, 0.7);
+  background: var(--status-danger);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--status-danger) 70%, transparent);
 }
 
 .indicator.download .val {
-  color: rgb(0, 127, 249);
+  color: var(--accent-blue);
   font-weight: var(--weight-bold, 700);
 }
 
 .indicator.upload .val {
-  color: rgb(254, 49, 56);
+  color: var(--status-danger);
   font-weight: var(--weight-bold, 700);
 }
 
 .indicator .label {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-tertiary);
   font-size: 11px;
 }
 
@@ -331,7 +383,7 @@ onUnmounted(() => {
   position: relative;
   border-radius: 8px;
   overflow: hidden;
-  background: #10121a;
+  background: var(--surface-inset);
 }
 
 .canvas-wrapper.compact-height {
