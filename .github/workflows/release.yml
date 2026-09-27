@@ -1,0 +1,221 @@
+# Auroweave 自动发布
+#
+# 触发：推送 `v*` 形式的 git tag（如 v0.8.0），或手动 dispatch。
+# 产物：macOS arm64 的 .app / .dmg，以及 tauri-plugin-updater 所需的
+#      `latest.json` + 已签名更新包，全部作为 Release 附件上传。
+#
+# 为什么 tag 触发而不是 push main：
+# updater 端点指向 `releases/latest/download/latest.json`，GitHub 的
+# `latest` 指向"最新非预发布版本"，只有打了 tag 的 Release 才会被它选中。
+# 若在 main 上发布，`latest` 不会更新，线上用户永远拿不到新版本。
+#
+# 私钥安全：TAURI_SIGNING_PRIVATE_KEY 存在 GitHub Actions Secret，
+# 绝不入库。公钥在 src-tauri/tauri.conf.json 的 plugins.updater.pubkey，
+# 可公开。**私钥一旦泄露必须立即重签所有历史版本**，否则会有人伪造更新包。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "手动发布时的版本号（如 v0.8.0），留空则从 package.json 读取"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # 同一分支只允许一个发布进行中，避免并发推送 tag 造成 Release 竞态
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: 版本号一致性校验
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 校验 8 处版本号与 CHANGELOG 一致
+        # 打包出错最常见的原因是版本号漂移（manifest 与 tag 不匹配导致
+        # updater 永远认为"已是最新"），这里提前失败并给出可读原因
+        run: npm run version:check
+
+      - name: 校验 tag 版本与 package.json 一致
+        run: |
+          set -euo pipefail
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF_NAME}"
+
+  build:
+    name: 构建 macOS arm64
+    needs: verify
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Rust 工具链：1.94 为当前 stable，满足 tauri 2.12 的 MSRV 1.90
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: release
+
+      - run: npm ci
+
+      - name: 下载 sing-box 内核
+        # sidecar-bin/ 在 .gitignore 中（仅 .gitkeep 入库），
+        # 必须由 CI 自行拉取，否则打出来的包没有代理内核
+        run: npm run download:sing-box
+
+      - name: 校验内核已就位
+        run: |
+          set -euo pipefail
+          ls -la src-tauri/sidecar-bin/macos-arm64/
+          test -x "src-tauri/sidecar-bin/macos-arm64/sing-box-1.14.2" \
+            || (echo "::error::内核不可执行，检查 download:sing-box"; exit 1)
+
+      - name: 校验版本号一致
+        run: npm run version:check
+
+      - name: 单元测试
+        run: npm run test:unit
+
+      - name: 构建并签名
+        env:
+          # 从 Secret 读取私钥；此处不 echo，避免泄露到日志
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --bundles app,dmg
+
+      - name: 校验更新产物与签名
+        run: |
+          set -euo pipefail
+          BUNDLE=src-tauri/target/release/bundle
+          echo "--- 产物 ---"
+          find "$BUNDLE" -maxdepth 2 \( -name "*.app" -o -name "*.dmg" \
+            -o -name "*.tar.gz" -o -name "*.sig" \) | sort
+          test -d "$BUNDLE/macos/Auroweave.app" || (echo "::error::缺少 .app"; exit 1)
+          test -f "$BUNDLE/macos/Auroweave.app.tar.gz" || (echo "::error::缺少更新包"; exit 1)
+          test -f "$BUNDLE/macos/Auroweave.app.tar.gz.sig" || (echo "::error::缺少更新签名"; exit 1)
+          # 签名必须由 tauri 密钥生成：校验 trusted comment 里带版本号，
+          # 否则 updater 端会因签名不匹配拒绝安装
+          head -2 "$BUNDLE/macos/Auroweave.app.tar.gz.sig" | base64 -d | grep -q "version:" \
+            || (echo "::error::签名格式异常"; exit 1)
+
+      - uses: actions/upload-artifact@v4
+        with:
+
+  release:
+    name: 创建 Release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: auroweave-macos-arm64
+          path: artifacts
+
+      # latest.json 必须以 `latest.json` 上传：plugins.updater.endpoints
+      # 指向 releases/latest/download/latest.json，文件名不能改
+      - name: 生成 latest.json
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          SIGNATURE=$(cat artifacts/Auroweave.app.tar.gz.sig)
+          REPO="${GITHUB_REPOSITORY}"
+          cat > latest.json <<EOF
+          {
+            "version": "v${VERSION}",
+            "notes": "Auroweave v${VERSION}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIGNATURE}",
+                "url": "https://github.com/${REPO}/releases/download/v${VERSION}/Auroweave.app.tar.gz"
+              }
+            }
+          }
+          EOF
+          cat latest.json
+
+      - name: 创建 Release 并上传附件
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [ -n "${{ inputs.version }}" ]; then
+            TAG="${{ inputs.version }}"
+          fi
+          VERSION="${TAG#v}"
+          # tag 已存在时（重跑 workflow）先删掉旧 Release，否则 gh 会报冲突
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，删除后重建"
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          gh release create "$TAG" \
+            --title "Auroweave v${VERSION}" \
+            --generate-notes \
+            artifacts/Auroweave.app.tar.gz \
+            artifacts/Auroweave.app.tar.gz.sig \
+            artifacts/*.dmg \
+            latest.json
+          echo "✅ Release 已发布：$TAG"
+
+      - name: 验证 updater 端点可访问
+        # 自更新能否生效全看这个 URL 能否取到 latest.json。
+        # GitHub 的 releases/latest 会跳过预发布，故这里确认非预发布可见
+        run: |
+          set -euo pipefail
+          sleep 5
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json"
+          for i in 1 2 3 4 5 6; do
+            if curl -fsSL "$URL" -o /tmp/latest.json; then
+              echo "✅ updater 端点可访问："
+              cat /tmp/latest.json
+              exit 0
+            fi
+            echo "等待 GitHub 完成 Release 传播（第 $i 次重试）…"
+            sleep 10
+          done
+          echo "::error::updater 端点 $URL 不可访问，线上用户将无法收到更新"
+          exit 1
+
+          name: auroweave-macos-arm64
+          path: |
+            src-tauri/target/release/bundle/macos/Auroweave.app.tar.gz
+            src-tauri/target/release/bundle/macos/Auroweave.app.tar.gz.sig
+            src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+          if [ -n "${{ inputs.version }}" ]; then
+            TAG="${{ inputs.version }}"
+          fi
+          TAG_VER="${TAG#v}"
+          if [ "$TAG_VER" != "$PKG" ]; then
+            echo "::error::tag 版本 ($TAG_VER) 与 package.json ($PKG) 不一致"
+            echo "先执行 npm run version:set -- $TAG_VER 再打 tag"
+            exit 1
+          fi
+          echo "✅ 版本一致：$TAG_VER"
