@@ -128,7 +128,9 @@ function getRegionBadge(tag: string): RegionBadgeInfo {
 function getGroupTypeLabel(tag: string, type: string): string {
   if (tag === "proxy") return "主选择器";
   if (tag === "auto") return "自动优选";
-  if (tag === "balance") return "独立优选";
+  // P1 修复：balance 已由 urltest 改为 selector（消除与 auto 重复的健康检查），
+  // 标签改为「地区聚合」以反映真实语义——它是 auto + 各地区组的聚合选择器。
+  if (tag === "balance") return "地区聚合";
   if (type === "urltest") return "URLTest";
   return type.toUpperCase();
 }

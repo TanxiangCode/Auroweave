@@ -212,8 +212,10 @@ export const useProxyStore = defineStore("proxy", () => {
     }
 
     if (path.length > 0) {
+      // P1 修复：balance 现为「地区聚合」组（selector），不再是独立优选，
+      // 文案随之同步避免与 GroupSidebar 标签不一致。
       const groupLabel = path[0] === "balance"
-        ? "独立优选"
+        ? "地区聚合"
         : path[0] === "auto"
         ? "自动选择"
         : path[0];
