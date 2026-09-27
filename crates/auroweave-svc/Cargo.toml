@@ -1,6 +1,6 @@
 [package]
 name = "AuroDaemon"
-version = "0.1.0"
+version.workspace = true
 authors = ["TanXiang"]
 edition = "2021"
 

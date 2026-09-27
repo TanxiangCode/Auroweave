@@ -125,7 +125,23 @@ npm run tauri build
 npm run tauri build
 ```
 
-> **macOS 注意**：当前版本未经 Apple 公证，首次运行需执行：
+### 构建并安装到当前系统
+
+```bash
+npm run build:install                  # 打包 + 安装（自动识别 Windows / macOS / Linux）
+npm run build:install -- --skip-build  # 跳过打包，只重新安装上一次产物
+```
+
+安装行为按平台自动分流：
+
+| 平台 | 产物 | 安装方式 |
+| --- | --- | --- |
+| Windows | NSIS `*.exe` | `/S` 静默安装（自动弹 UAC 提权）；无 NSIS 时用 MSI `msiexec /qn` |
+| macOS | `Auroweave.app` | 关闭运行中实例 → 覆盖 `/Applications/Auroweave.app` → 自动 `xattr -dr com.apple.quarantine` |
+| Linux | `.deb` / `.rpm` / `.AppImage` | `apt-get install` / `dpkg` / `rpm`；无包管理器产物时 AppImage 落到 `~/.local/bin/auroweave` |
+
+> **macOS 注意**：当前版本未经 Apple 公证，`npm run build:install` 已自动清除隔离属性；
+> 若用 `npm run tauri build` 产物手动安装，首次运行需执行：
 > ```bash
 > xattr -cr /Applications/Auroweave.app
 > ```

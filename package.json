@@ -1,7 +1,7 @@
 {
   "name": "auroweave",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,9 @@
     "preview": "vite preview",
     "tauri": "tauri dev",
     "build:installer": "tauri build",
+    "build:install": "tsx scripts/build-install.ts",
+    "version:check": "tsx scripts/version-sync.ts",
+    "version:set": "tsx scripts/version-sync.ts",
     "lint": "eslint . --fix",
     "test:unit": "vitest run",
     "download:sing-box": "tsx scripts/download-singbox.ts",

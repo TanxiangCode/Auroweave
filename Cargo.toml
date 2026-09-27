@@ -4,3 +4,9 @@ members = [
     "crates/auroweave-svc"
 ]
 resolver = "2"
+
+# 版本号唯一真源：两个成员 crate 用 `version.workspace = true` 继承此处。
+# 这样 `npm run version:set` 只需写 package.json + 本文件，成员 crate 与
+# Cargo.lock 会由 cargo 自动同步，无需手改。
+[workspace.package]
+version = "0.7.0"
