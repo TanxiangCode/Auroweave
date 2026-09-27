@@ -66,11 +66,12 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
             }
         ],
         "outbounds": [
-            { "type": "direct", "tag": "direct" },
+            // P0：移除 route.default_domain_resolver 后 direct 必须自带解析器，
+            // 否则 1.14 命中 missing-domain-resolver 弃用开关直接 FATAL。
+            { "type": "direct", "tag": "direct", "domain_resolver": "local" },
             { "type": "block", "tag": "block" }
         ],
         "route": {
-            "default_domain_resolver": "local",
             "rules": [
                 { "action": "sniff" },
                 { "protocol": "dns", "action": "hijack-dns" },
@@ -310,6 +311,20 @@ impl ConfigBuilder {
 
             let mut raw_json = out.raw_json.clone();
             raw_json["tag"] = json!(tag);
+            // P0 修复（2026-09-27）：显式绑定 domain_resolver=bootstrap。
+            //
+            // 背景：1.14 中 `route.default_domain_resolver` 一旦指定 tag，出站解析会被
+            // dialer 固定绑定到该 DNS transport 并**完全绕过 dns.rules**
+            // （common/dialer/dialer.go → resolve.go initServer() 填 queryOptions.Transport，
+            //  dns/router.go Lookup 走 `if options.Transport != nil` 分支直接查，不进规则匹配）。
+            // 因此原先挂在 dns.rules 的节点域名主备对冲链在出站路径上从未生效，
+            // 节点域名实际由系统 local 解析器解析（最需要防污染的一类域名反而裸奔）。
+            //
+            // 修复：给每个节点出站显式指定 bootstrap（直连 DoH，绕开运营商递归与
+            // proxy 回环），并移除 route.default_domain_resolver。
+            // bootstrap 服务器自身若填域名，canonical_direct_doh_server 已挂
+            // domain_resolver=local，不会形成解析环。
+            raw_json["domain_resolver"] = json!("bootstrap");
             all_node_tags.push(tag.clone());
             raw_outbounds.push(raw_json);
 
@@ -343,7 +358,10 @@ impl ConfigBuilder {
         // ---- 阶段2: 构建出站列表 ----
 
         // 2a. Direct 与 Block 基础出站
-        final_outbounds.push(json!({ "type": "direct", "tag": "direct" }));
+        // P0 修复：direct 也显式绑定 domain_resolver=local。移除
+        // route.default_domain_resolver 后，任何 server 为域名的出站若无显式解析器
+        // 会命中 1.14 的 missing-domain-resolver 弃用开关并直接 FATAL 拒载。
+        final_outbounds.push(json!({ "type": "direct", "tag": "direct", "domain_resolver": "local" }));
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
         // 2b. Selector "proxy" 主出站
@@ -687,14 +705,12 @@ impl ConfigBuilder {
 
         let route = if rule_set_config.is_empty() {
             json!({
-                "default_domain_resolver": "local",
                 "rules": route_rules,
                 "final": "proxy",
                 "auto_detect_interface": true
             })
         } else {
             json!({
-                "default_domain_resolver": "local",
                 "rule_set": rule_set_config,
                 "rules": route_rules,
                 "final": "proxy",

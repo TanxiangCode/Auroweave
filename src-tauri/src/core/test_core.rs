@@ -59,9 +59,11 @@ pub fn plan_batches(len: usize, batch_size: usize) -> Vec<Vec<usize>> {
 ///   规避订阅刷新双写问题——test-core 消费的是生成时刻快照）
 /// - route：`inbound: t-in-{i} → outbound: t-node-{i}` 逐条钉死
 ///
-/// 显式 `default_domain_resolver: local`：1.14 强制迁移项，缺失直接 FATAL
-/// （见 singbox 1.14 升级实测记录）。无 TUN / clash_api / cache_file：
-/// 短命测试实例零状态零控制面，与主实例端口/文件完全隔离。
+/// 每个出站显式携带 `domain_resolver: local`：1.14 对「server 为域名且无解析器」
+/// 的出站直接 FATAL（见 singbox 1.14 升级实测记录）。P0 修复刻意**不**使用
+/// `route.default_domain_resolver`——该字段会让出站解析绕过 dns.rules。
+/// 无 TUN / clash_api / cache_file：短命测试实例零状态零控制面，
+/// 与主实例端口/文件完全隔离。
 pub fn build_test_config(
     nodes: &[crate::core::parser::ParsedOutbound],
     port_base: u16,
@@ -79,6 +81,11 @@ pub fn build_test_config(
         }));
         let mut raw = node.raw_json.clone();
         raw["tag"] = json!(format!("t-node-{i}"));
+        // P0 修复（与主配置同源）：显式绑定 domain_resolver。1.14 中
+        // route.default_domain_resolver 一旦指定 tag 会绕过 dns.rules，
+        // 而此处 dns 段只有一个 local server，指定它没有收益。因此每个出站
+        // 显式绑定，direct 同样显式绑定——两者都不依赖 default 字段。
+        raw["domain_resolver"] = json!("local");
         outbounds.push(raw);
         rules.push(json!({
             "inbound": [format!("t-in-{i}")],
@@ -88,7 +95,7 @@ pub fn build_test_config(
 
     // direct 兜底出站：mixed 入站的非代理流量语义安全（本配置所有流量均被
     // inbound 规则钉死，final 仅在规则异常未命中时兜底）
-    outbounds.push(json!({ "type": "direct", "tag": "direct" }));
+    outbounds.push(json!({ "type": "direct", "tag": "direct", "domain_resolver": "local" }));
 
     Ok(json!({
         // 探测是海量短连接，info 级会刷日志；warn 足够暴露配置错误
@@ -106,7 +113,9 @@ pub fn build_test_config(
         "inbounds": inbounds,
         "outbounds": outbounds,
         "route": {
-            "default_domain_resolver": "local",
+            // P0 修复：不再需要 default_domain_resolver——每个出站已自带
+            // domain_resolver（见上方 outbounds 构造）。留着它反而会让
+            // 出站解析固定绑定、绕过 dns.rules。
             "rules": rules,
             "final": "direct",
             "auto_detect_interface": true
@@ -406,9 +415,12 @@ mod tests {
         assert_eq!(rules[1]["inbound"], json!(["t-in-1"]));
         assert_eq!(rules[1]["outbound"], json!("t-node-1"));
 
-        // 1.14 强制项：default_domain_resolver 缺失即 FATAL；实测还需 dns.servers
-        // 提供 "local" 解析器（无 dns 段时 resolver 不存在，见上）
-        assert_eq!(cfg["route"]["default_domain_resolver"], json!("local"));
+        // 1.14 强制项：server 为域名的出站若无 domain_resolver 即 FATAL。
+        // P0 修复后改为每个出站自带解析器，route 上不再有 default_domain_resolver
+        // （留着它会让出站解析绕过 dns.rules）。
+        assert!(cfg["route"].get("default_domain_resolver").is_none());
+        assert_eq!(outbounds[0]["domain_resolver"], json!("local"));
+        assert_eq!(outbounds[3]["domain_resolver"], json!("local"));
         assert_eq!(cfg["dns"]["servers"][0]["type"], json!("local"));
         // 测试配置不启控制面/缓存（与主实例隔离）
         assert!(cfg.get("experimental").is_none());

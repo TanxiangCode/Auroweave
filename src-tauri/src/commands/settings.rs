@@ -575,6 +575,52 @@ pub fn rebuild_config_from_settings(
         }
     }
 
+    // 2.6 P0 修复：为存量 config 回填 domain_resolver（老版本生成的 config.json
+    // 里 direct 与各节点出站都没有该字段，而 default_domain_resolver 已被移除，
+    // 1.14 会对「server 为域名且无解析器」的出站直接 FATAL 拒载）。
+    // 规则：节点类出站（除 direct/block/策略组外）→ bootstrap（直连 DoH）；
+    // direct → local。策略组（selector/urltest）无 server 字段，无需处理。
+    // ConfigBuilder 全量重建时亦写入同一组值（防两路径漂移）。
+    // 注：dns.servers 的探测必须在 outbounds 可变借用之前完成（Rust 借用规则）。
+    let (dns_has_bootstrap, dns_has_local) = config_val
+        .get("dns")
+        .and_then(|d| d.get("servers"))
+        .and_then(|s| s.as_array())
+        .map(|arr| {
+            let has = |tag: &str| {
+                arr.iter()
+                    .any(|s| s.get("tag").and_then(|t| t.as_str()) == Some(tag))
+            };
+            (has("bootstrap"), has("local"))
+        })
+        .unwrap_or((false, false));
+    if let Some(outbounds) = config_val
+        .get_mut("outbounds")
+        .and_then(|o| o.as_array_mut())
+    {
+        for out in outbounds.iter_mut() {
+            let otype = out.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if matches!(otype, "selector" | "urltest") {
+                continue;
+            }
+            if out.get("domain_resolver").is_some() {
+                continue;
+            }
+            let resolver = match otype {
+                "direct" => dns_has_local.then_some("local"),
+                "block" => None,
+                // 其余均为节点出站
+                _ => dns_has_bootstrap.then_some("bootstrap"),
+            };
+            if let Some(tag) = resolver {
+                if let Some(obj) = out.as_object_mut() {
+                    obj.insert("domain_resolver".to_string(), serde_json::json!(tag));
+                    modified = true;
+                }
+            }
+        }
+    }
+
     // 2.5 同步分组测速配置覆盖（GroupEditModal 保存的 interval/tolerance/url）
     // 对 config.json 中已存在的 urltest 出站按 tag 应用用户覆盖，
     // 仅覆盖显式设置的字段；ConfigBuilder 全量重建时亦会应用同一配置
@@ -653,6 +699,12 @@ pub fn rebuild_config_from_settings(
             Some(&valid_outbound_tags),
         );
         route.insert("rules".to_string(), serde_json::json!(full_rules));
+
+        // P0 修复（与 ConfigBuilder::build 同步，防两路径漂移）：
+        // 移除 route.default_domain_resolver——1.14 中该字段一旦指定 tag，
+        // 出站解析会被 dialer 固定绑定并绕过 dns.rules（详见 config_builder.rs
+        // 同位置注释）。节点域名改由各出站自带 domain_resolver 承担。
+        route.remove("default_domain_resolver");
 
         // 同步 rule_set 注册：geosite 与 geoip 各自独立判断（与 build_full_route_rules
         // 的独立布尔语义对齐；旧实现 geoip 被 geosite 门控，geosite 丢失而 geoip
