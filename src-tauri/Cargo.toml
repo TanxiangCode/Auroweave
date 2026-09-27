@@ -12,17 +12,21 @@ name = "auroweave_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }
 cc = "1.0"
 
 
 [dependencies]
 # Tauri 核心
-tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri = { version = "2.12", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-log = "2"
+# 软件自更新：检查 GitHub Release + 下载安装包 + 重启生效。
+# updater 依赖 process 插件做重启，签名为固定密钥（见 bundle > updater）。
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # 序列化
 serde = { version = "1", features = ["derive"] }

@@ -98,6 +98,11 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        // 软件自更新：process 提供重启能力（下载安装完成后重启生效），
+        // updater 负责比对 GitHub Release / endpoint 的版本与签名校验。
+        // 两者必须同时注册，否则前端调 relaunch 会报插件未初始化。
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::proxy::proxy_get_groups,
             commands::proxy::proxy_get_group_nodes,

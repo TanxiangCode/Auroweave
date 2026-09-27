@@ -41,6 +41,19 @@
     ],
     "resources": {
       "sidecar-bin/": "sidecar-bin/"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVGQkUzQTAzRkE0OEI3NUYKUldSZnQwajZBenErWDdCaE8xM3dRaXVZeEFEZHN0c0kzVVVLYWxialVzUmY5ZnlYRlZGSnB2MDAK",
+      "endpoints": [
+        "https://github.com/TanxiangCode/Auroweave/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
