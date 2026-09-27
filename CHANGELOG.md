@@ -5,6 +5,42 @@
 
 ---
 
+## [Unreleased]
+
+> **内核升级与性能优化**：适配 sing-box 1.14.2，并修复若干由实测暴露的功能缺陷。
+
+### Changed
+
+- **内核升级至 sing-box 1.14.2**（1.14.0 → 1.14.2，含 77 个修复提交）。
+  与本项目直接相关的包括：策略组内 UDP 域名目的地丢失、DNS 去重未遵循查询超时、
+  隐式默认 DNS/出站跳过初始化阶段、FakeIP reset 缺 bucket、损坏 cache 文件崩溃、
+  HTTP sniffer 把 IP 字面量误存为域名、早期握手未透传策略组、读循环空转。
+  全部为零配置变更的向后兼容修复。
+- `balance` 组由 `urltest` 改为 `selector`（原与 `auto` 成员完全相同却重复发健康检查，
+  每轮探测请求 1175 → 805 次，降幅 31.5%），语义调整为「地区聚合」。
+- 内核日志级别 `info` → `warn`；日志写入改为长连接文件句柄，轮转检查降频至每 256 行一次。
+
+### Fixed
+
+- **节点域名解析绕过 `dns.rules`**：`route.default_domain_resolver` 在 sing-box 1.14 中
+  会使出站解析固定绑定单一 DNS transport 并跳过全部规则匹配，导致 dns.rules 中的
+  节点域名主备对冲链从未生效。改为每个出站显式携带 `domain_resolver`
+  （节点 → bootstrap 直连 DoH，direct → local），并移除该 route 字段。
+- **应用级流量统计全部记为 Unknown**：内核仅在存在 process 规则时才做进程搜索，
+  App-Matrix 为空时 ClashAPI `processPath` 恒为空串。显式开启 `route.find_process`。
+- 下载脚本的 `AbortSignal.timeout` 是整段请求总时限，80MB 内核包在偏慢网络下必然超时；
+  改为空闲超时并支持断点续传与重试。
+- 内核级配置校验测试不再硬编码版本号（漏改会静默跳过校验），改为复用
+  `core_paths::resolve_core_binary`，找不到内核时显式失败而非跳过。
+
+### Added
+
+- 节点出站开启 TCP Fast Open；`dns.cache_capacity` 提升至 4096（内核默认仅 1024）；
+  嗅探器限定为 http/tls/quic/dns 四种（默认全开 11 种）。
+- 新增 3 项回归测试守护上述优化不被回退。
+
+---
+
 ## [0.1.1] — 2026-07-16
 
 > **架构与安全升级**：全面重构了真实的流量持久化追踪与跨端安全交互机制。
