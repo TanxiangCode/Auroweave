@@ -401,6 +401,24 @@ export interface SingboxUpdateInfo {
 }
 
 /**
+ * 应用本体自更新信息（tauri-plugin-updater）
+ *
+ * 与 `SingboxUpdateInfo` 刻意分开：内核更新走自定义 Rust 命令 + snake_case，
+ * 本体更新走 Tauri 官方插件，字段为插件原生命名。
+ * 仅在 `checkAppUpdate` 返回非 null 时存在（返回 null 即已是最新）。
+ */
+export interface AppUpdateInfo {
+  /** 当前运行版本 */
+  currentVersion: string;
+  /** 最新可用版本 */
+  version: string;
+  /** 发布日期（ISO 字符串，插件未提供时为 null） */
+  date: string | null;
+  /** 更新日志正文（插件未提供时为 null） */
+  body: string | null;
+}
+
+/**
  * 内核升级阶段（与后端 SingboxUpdateStage 一一对应）
  *
  * 拆成多阶段而非单一百分比：下载只占升级的一小段，停止内核 / 替换文件 /
