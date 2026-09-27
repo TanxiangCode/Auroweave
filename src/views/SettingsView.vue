@@ -6,6 +6,7 @@
 import { ref, computed, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useCoreUpdateStore } from "@/stores/coreUpdate.store";
+import { useAppUpdateStore } from "@/stores/appUpdate.store";
 import GeneralPanel from "./panels/GeneralPanel.vue";
 import DashboardPanel from "./panels/DashboardPanel.vue";
 import SubscriptionPanel from "./panels/SubscriptionPanel.vue";
@@ -20,6 +21,8 @@ import AdvancedPanel from "./panels/AdvancedPanel.vue";
 
 const route = useRoute();
 const coreUpdateStore = useCoreUpdateStore();
+// 自更新：侧栏角标需要读取下载进度，故此处也要持有 store 实例
+const appUpdateStore = useAppUpdateStore();
 
 type PanelKey =
   | "general"
@@ -129,6 +132,17 @@ watch(
             :title="coreUpdateStore.progressDetail"
           >
             {{ coreUpdateStore.progress.percent }}%
+          </span>
+          <!-- 自更新下载角标：同理，面板卸载后这里是唯一能看到进度的入口。
+               percent 为 null（chunked 传输拿不到总量）时不显示数字，
+               避免渲染出误导性的 0% -->
+          <span
+            v-else-if="item.key === 'advanced' && appUpdateStore.isBusy"
+            class="nav-updating-badge"
+            :title="appUpdateStore.stageLabel"
+          >
+            <template v-if="appUpdateStore.percent !== null">{{ appUpdateStore.percent }}%</template>
+            <template v-else><span class="nav-updating-spinner"></span></template>
           </span>
         </button>
 
@@ -290,6 +304,23 @@ watch(
 @keyframes nav-badge-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+
+/* 自更新角标里的迷你 loading 圈：拿不到总量时用旋转代替百分比数字。
+   动效受全局 reduced-motion 开关约束（见 useReducedMotion 约定），
+   这里用 CSS 变量而非 JS 判空，保持与既有 pulse 动画同一套节奏。 */
+.nav-updating-spinner {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: nav-badge-spin 0.7s linear infinite;
+}
+
+@keyframes nav-badge-spin {
+  to { transform: rotate(360deg); }
 }
 
 .no-nav-match {

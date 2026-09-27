@@ -106,6 +106,103 @@
       </div>
     </div>
 
+    <!-- 2. 应用本体软件自更新 -->
+    <!-- 与上面的内核更新刻意分成两张卡：
+         内核更新失败只影响代理能力、可直接重试；本体更新要替换应用自身，
+         Windows 上必须先退出进程才能安装，因此多一个「重启生效」的显式确认
+         ——不能自动重启，那会打断进行中的代理连接与 TUN 网卡。 -->
+    <div class="setting-card glass-effect" :class="{ 'highlight-border': highlightAppUpdate }">
+      <div class="card-header">
+        <span class="card-icon"><BaseIcon name="Download" :size="20" /></span>
+        <div class="card-title-group">
+          <h3>应用版本与自动更新</h3>
+          <p>检测 Auroweave 新版本并一键下载安装，签名校验通过后才落盘</p>
+        </div>
+        <button
+          class="btn-check-update"
+          :disabled="appStore.stage === 'checking' || appStore.isBusy"
+          @click="handleCheckAppUpdate"
+        >
+          <span :class="{ spinning: appStore.stage === 'checking' }"></span>
+          <span>{{ appStore.stage === 'checking' ? '正在检查...' : '检查更新' }}</span>
+        </button>
+      </div>
+
+      <div class="card-body">
+        <div class="kernel-status-row">
+          <div class="status-left">
+            <span class="status-label">当前版本：</span>
+            <span class="version-badge current">v{{ appStore.currentVersion }}</span>
+          </div>
+          <div v-if="appStore.checked" class="status-right">
+            <span v-if="appStore.hasUpdate" class="update-found-badge">
+              发现新版本 {{ appStore.updateInfo?.version }}
+            </span>
+            <span v-else class="up-to-date-badge"><BaseIcon name="Check" :size="13" /> 已是最新版本</span>
+          </div>
+        </div>
+
+        <!-- 操作区：发现新版本、或任务在途/刚完成时显示。
+             即便 updateInfo 因切 tab 丢失，下载/安装阶段也必须常驻，
+             否则进度会凭空消失、用户会重复点击重新下载数十 MB 的安装包 -->
+        <div v-if="showAppUpdateBox" class="update-release-box">
+          <div class="release-header">
+            <div class="release-title">
+              <span v-if="appStore.updateInfo" class="release-tag">{{ appStore.updateInfo.version }}</span>
+              <span class="release-date">{{ appUpdateSubtitle }}</span>
+            </div>
+
+            <!-- 三态按钮：待重启 → 重启生效；下载/安装中 → 进度态；否则 → 下载并安装 -->
+            <button
+              v-if="appStore.awaitingRestart"
+              class="btn-upgrade-now"
+              @click="handleAppRestart"
+            >
+              <span>立即重启生效</span>
+            </button>
+            <button
+              v-else
+              class="btn-upgrade-now"
+              :class="{ 'is-running': appStore.isBusy }"
+              :disabled="appStore.isBusy || !appStore.hasUpdate"
+              :title="appStore.hasUpdate ? '' : '未发现新版本'"
+              @click="handleAppUpdate"
+            >
+              <span v-if="!appStore.isBusy">下载并安装</span>
+              <span v-else class="upgrading-state">
+                <span class="spinner"></span>
+                <span>{{ appStore.stageLabel }}</span>
+              </span>
+              <!-- 进度条：total 未知（chunked 传输）时不渲染宽度，避免假 0% -->
+              <span
+                v-if="appStore.stage === 'downloading' && appStore.percent !== null"
+                class="btn-progress-track"
+              >
+                <span class="btn-progress-fill" :style="{ width: appStore.percent + '%' }"></span>
+              </span>
+            </button>
+          </div>
+
+          <!-- 下载细节：仅在拿到 Content-Length 时才有意义的 MB 计数 -->
+          <div
+            v-if="appStore.stage === 'downloading' && appStore.progressDetail"
+            class="upgrade-progress-detail"
+          >
+            {{ appStore.progressDetail }}
+          </div>
+          <div v-else-if="appStore.stage === 'failed'" class="upgrade-result fail">
+            <BaseIcon name="X" :size="13" />
+            <span>{{ appStore.errorMessage }}</span>
+          </div>
+
+          <div v-if="appStore.updateInfo?.body" class="release-notes">
+            <div class="notes-title">更新日志 (Changelog):</div>
+            <pre class="notes-content">{{ appStore.updateInfo.body }}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 延迟测试与吞吐量测速 / AI 服务解锁检测判据 已抽离至 SpeedtestPanel.vue（测速与解锁） -->
 
     <!-- 3. 系统性能与灾备恢复 -->
@@ -214,6 +311,7 @@ import BaseIcon from "@/components/common/BaseIcon.vue";
 import { computed, ref, watch, onMounted } from "vue";
 import { useSettingsStore } from "@/stores/settings.store";
 import { useCoreUpdateStore } from "@/stores/coreUpdate.store";
+import { useAppUpdateStore } from "@/stores/appUpdate.store";
 import { isMacOS } from "@/utils/format";
 import { useToast } from "@/composables/useToast";
 import { useConfirm } from "@/composables/useConfirm";
@@ -228,6 +326,8 @@ const props = defineProps<{
 const settingsStore = useSettingsStore();
 const toast = useToast();
 const coreStore = useCoreUpdateStore();
+/** 应用本体（Auroweave）软件自更新，与 coreStore 的内核升级相互独立 */
+const appStore = useAppUpdateStore();
 /** SUID/TUN 相关提示仅 macOS 适用：Windows 用服务、Linux 无 SUID 概念 */
 const isMac = ref(isMacOS());
 
@@ -256,6 +356,83 @@ const releaseSubtitle = computed(() => {
 const showUpdateBox = computed(
   () => coreStore.isUpgrading || coreStore.isFinished || !!coreStore.updateInfo?.has_update
 );
+
+/* ---------------- 应用本体软件自更新（tauri-plugin-updater） ---------------- */
+
+/**
+ * 自更新卡片副标题：按阶段给不同文案，避免"发布于 …"在下载中还在显示
+ * （用户会以为卡在旧版本上）。
+ */
+const appUpdateSubtitle = computed(() => {
+  switch (appStore.stage) {
+    case "downloading":
+      return "正在下载新版本";
+    case "installing":
+      return "正在安装新版本";
+    case "ready":
+      return "已安装，重启后生效";
+    case "failed":
+      return "更新失败，可重试";
+    default: {
+      const d = appStore.updateInfo?.date;
+      return d ? `发布于 ${d.slice(0, 10)}` : "有新版本可用";
+    }
+  }
+});
+
+/**
+ * 自更新卡片可见性。
+ *
+ * 与内核卡片的 showUpdateBox 同理：任务在途（isBusy）或待重启
+ * （awaitingRestart）时必须常驻，否则切 tab 后进度消失、用户会重复点下载。
+ */
+const showAppUpdateBox = computed(
+  () => appStore.isBusy || appStore.awaitingRestart || appStore.hasUpdate || appStore.stage === "failed"
+);
+
+/** 深链高亮目标（由 Spotlight/路由跳转传入） */
+const highlightAppUpdate = ref(false);
+
+/** 检查应用更新（手动触发才弹 toast，失败时提示原因） */
+async function handleCheckAppUpdate() {
+  // 重新检查前清掉上一轮结果，避免旧版本号在检查期间继续显示
+  appStore.reset();
+  await appStore.checkUpdate(false);
+}
+
+/**
+ * 下载并安装应用更新。
+ *
+ * 安装会替换应用自身文件，过程中可能短暂无响应；这里先确认一次，
+ * 避免用户误以为卡死而反复点击。
+ */
+async function handleAppUpdate() {
+  if (!appStore.hasUpdate) return;
+  const confirmed = await useConfirm().ask({
+    title: "下载并安装更新",
+    message: `将下载并安装 Auroweave ${appStore.updateInfo?.version}。安装完成后需要重启应用生效，期间请勿关闭程序。`,
+    confirmText: "开始更新",
+    level: "danger",
+  });
+  if (!confirmed) return;
+  await appStore.startUpdate();
+}
+
+/**
+ * 立即重启使更新生效。
+ *
+ * 重启会中断进行中的代理连接与 TUN 网卡，属于不可撤销操作，必须二次确认。
+ */
+async function handleAppRestart() {
+  const confirmed = await useConfirm().ask({
+    title: "重启应用",
+    message: "重启后新版本才会生效，当前代理连接与 TUN 网卡会短暂中断。",
+    confirmText: "立即重启",
+    level: "danger",
+  });
+  if (!confirmed) return;
+  await appStore.restartNow();
+}
 
 /**
  * 校验并保存 test-core 端口基址
@@ -385,6 +562,13 @@ watch(
         highlightTopology.value = false;
       }, 3000);
     }
+    // 深链直达自更新卡片（如 Spotlight 搜"更新应用"）
+    if (target === "appUpdate") {
+      highlightAppUpdate.value = true;
+      setTimeout(() => {
+        highlightAppUpdate.value = false;
+      }, 3000);
+    }
   },
   { immediate: true }
 );
@@ -394,6 +578,9 @@ onMounted(async () => {
   // 这里再调一次只为在深链直达本面板时也能确保状态就绪
   await coreStore.init();
   await coreStore.fetchCurrentVersion();
+  // 自更新无 init 概念（插件侧无事件流），只需展示当前版本号；
+  // 不自动发起检查，避免每次打开设置都打一次 GitHub 请求
+  await appStore.fetchCurrentVersion();
 });
 </script>
 
