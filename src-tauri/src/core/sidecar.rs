@@ -64,41 +64,88 @@ async fn is_clash_api_ready(port: u16) -> bool {
 /// 内核日志文件持久化（logs/singbox.log 追加写，超限轮转为 .old）
 ///
 /// 简单轮转策略：写入前检查大小，超过 2MB 时把当前文件 rename 为 .old
-/// （旧 .old 被覆盖），轮转失败不阻断写主日志。写入用 std::fs（行级小量追加，
-/// spawn 的 tokio 任务里阻塞开销可忽略），互斥由调用方每行 append 的粒度保证
-/// 足够（两任务交错至多导致行序微乱，不损文件完整性）。
+/// （旧 .old 被覆盖），轮转失败不阻断写主日志。
+///
+/// P1 修复（2026-09-27）：原先每行都 `fs::metadata` 查大小 + 重新
+/// `OpenOptions::open` 写一行再关闭——即每条日志一次 open/write/close
+/// 系统调用外加一次 stat。370 节点规模下 info 级日志实测达 1.7MB/13942 行，
+/// 这条路径的开销可观。改为持有长生命周期 `File` 句柄：
+/// - 句柄惰性打开并缓存，轮转发生时才重新打开
+/// - 大小检查降频（每 256 行一次 stat），单行写入退化为单次 write
 #[derive(Clone)]
 struct KernelLogFile {
     path: PathBuf,
+    inner: std::sync::Arc<std::sync::Mutex<KernelLogFileState>>,
+}
+
+struct KernelLogFileState {
+    file: Option<std::fs::File>,
+    /// 自上次轮转检查以来已写入的行数（用于 stat 降频）
+    lines_since_check: u32,
 }
 
 impl KernelLogFile {
     const MAX_BYTES: u64 = 2 * 1024 * 1024;
+    /// 每写入 N 行才做一次 size stat（轮转精度下降但 I/O 大幅降低）
+    const SIZE_CHECK_EVERY: u32 = 256;
 
     fn open() -> Self {
         let dir = crate::get_log_dir();
         let _ = std::fs::create_dir_all(&dir);
-        Self { path: dir.join("singbox.log") }
+        Self {
+            path: dir.join("singbox.log"),
+            inner: std::sync::Arc::new(std::sync::Mutex::new(KernelLogFileState {
+                file: None,
+                lines_since_check: 0,
+            })),
+        }
     }
 
-    fn append(&mut self, line: &str) {
-        // 轮转检查（追加前，避免超限后再轮转丢最后一行）
-        if let Ok(meta) = std::fs::metadata(&self.path) {
-            if meta.len() >= Self::MAX_BYTES {
+    fn append(&self, line: &str) {
+        use std::io::Write;
+        let mut state = match self.inner.lock() {
+            Ok(g) => g,
+            Err(e) => e.into_inner(),
+        };
+
+        // 首次写入或轮转后需要重新打开句柄
+        if state.file.is_none() {
+            if let Ok(f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+            {
+                state.file = Some(f);
+            }
+        }
+
+        // 降频的轮转检查
+        state.lines_since_check += 1;
+        if state.lines_since_check >= Self::SIZE_CHECK_EVERY {
+            state.lines_since_check = 0;
+            let needs_rotate = std::fs::metadata(&self.path)
+                .map(|m| m.len() >= Self::MAX_BYTES)
+                .unwrap_or(false);
+            if needs_rotate {
+                // 先丢弃句柄再轮转（Windows 上打开的文件无法 rename）
+                state.file = None;
                 let old = self.path.with_extension("log.old");
                 let _ = std::fs::remove_file(&old);
                 if std::fs::rename(&self.path, &old).is_err() {
                     // rename 失败（文件被占用等）：截断重来，保证日志不无限膨胀
                     let _ = std::fs::write(&self.path, "");
                 }
+                if let Ok(f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.path)
+                {
+                    state.file = Some(f);
+                }
             }
         }
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-        {
+
+        if let Some(f) = state.file.as_mut() {
             let _ = writeln!(f, "{}", line);
         }
     }
@@ -534,7 +581,7 @@ impl SidecarManager {
         if let Some(stderr) = child.stderr.take() {
             use tokio::io::{AsyncBufReadExt, BufReader};
             let arc_clone = stderr_lines_arc.clone();
-            let mut log_file = kernel_log.clone();
+            let log_file = kernel_log.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
@@ -550,7 +597,7 @@ impl SidecarManager {
         }
 
         if let Some(stdout) = stdout {
-            let mut log_file = kernel_log.clone();
+            let log_file = kernel_log.clone();
             tokio::spawn(async move {
                 use tokio::io::{AsyncBufReadExt, BufReader};
                 let mut reader = BufReader::new(stdout).lines();
