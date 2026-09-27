@@ -5,7 +5,7 @@
 **下一代极简跨平台代理客户端**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)](https://github.com/auroweave/auroweave)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)](https://github.com/TanxiangCode/gauzeweave)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-orange)](https://tauri.app)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green)](https://vuejs.org)
 [![Sing-box](https://img.shields.io/badge/sing--box-1.14.2-purple)](https://sing-box.sagernet.org)
@@ -98,7 +98,7 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 
 ```bash
 # 克隆仓库
-git clone https://github.com/auroweave/auroweave.git
+git clone https://github.com/TanxiangCode/gauzeweave.git
 cd auroweave
 
 # 安装前端依赖
