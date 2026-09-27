@@ -146,6 +146,30 @@ npm run build:install -- --skip-build  # 跳过打包，只重新安装上一次
 > xattr -cr /Applications/Auroweave.app
 > ```
 
+### 软件自更新
+
+设置 →「高级与内置」→ 「应用版本与自动更新」可检查并一键安装新版本，
+下载进度实时显示，安装完成后需手动确认重启（重启会中断代理连接与 TUN 网卡）。
+
+> ⚠️ **自更新依赖 GitHub Release**：需为每个版本发布
+> `latest.json` + 已签名的更新产物，否则应用内检查会一直报"已是最新"。
+
+发版时必须带签名密钥构建：
+
+```bash
+export TAURI_SIGNING_PRIVATE_KEY_PATH=~/.tauri/auroweave.key
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""   # 本机密钥无密码
+npx tauri build --bundles app,dmg,nsis
+```
+
+产物位于 `src-tauri/target/release/bundle/`，其中 `*.sig` 为更新签名，
+`latest.json` 需作为 Release 附件上传到 `releases/latest/download/latest.json`
+（`tauri.conf.json` 的 `plugins.updater.endpoints` 指向该地址）。
+
+> 🔑 **私钥丢失 = 自更新永久失效**：`~/.tauri/auroweave.key` 必须备份到安全位置，
+> 且**不要提交进仓库**（`tauri.conf.json` 只存公钥，可安全入库）。
+> 换密钥会让所有已发布版本的签名失效。
+
 ---
 
 ## 项目结构

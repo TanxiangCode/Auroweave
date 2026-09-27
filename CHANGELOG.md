@@ -28,6 +28,50 @@
 
 ---
 
+## [0.8.0] — 2026-09-27
+
+> **升级 Tauri 2.12 并实现软件自更新**：接入 `tauri-plugin-updater` +
+> `plugin-process`，设置端新增「应用版本与自动更新」卡片，
+> 支持检查新版本、签名校验、下载进度与重启生效全流程。
+
+### Added
+
+- **软件自更新闭环**：设置 →「高级与内核」→「应用版本与自动更新」可检查
+  Auroweave 新版本并一键下载安装。阶段机
+  `idle → checking → downloading → installing → ready → 重启`，
+  下载进度实时显示（拿不到 Content-Length 时隐藏百分比，避免"已下 20MB 进度 0%"）。
+- **更新签名校验**：生成 minisign 密钥对，公钥写入 `plugins.updater.pubkey`，
+  更新包签名不通过则拒绝落盘。私钥存放于 `~/.tauri/auroweave.key`（不入库）。
+- 设置端新增「应用版本与自动更新」卡片与侧栏下载角标（面板切走后仍可见进度）。
+- 新增 `appUpdate.store.ts`（应用级单例，切 tab/切页进度不丢）、
+  `api/appUpdate.ts`（插件封装层）、`AppUpdateInfo` 类型。
+- 新增 16 项自更新状态机单测，覆盖"已是最新/发现新版本/网络失败/下载失败/
+  待重启不自动重启/chunked 传输百分比为 null/无句柄时拒绝下载"等路径。
+
+### Changed
+
+- **Tauri 升级至 2.12.0**（CLI 2.11.4 → 2.12.0，`tauri` crate 2.11.5 → 2.12.0，
+  `tauri-build` 2.6.3 → 2.7.0），并新增 `tauri-plugin-updater` 2.13.0、
+  `tauri-plugin-process` 2.4.0。
+- updater 配置从 v1 的 `bundle.updater` 迁到 v2 的 `plugins.updater`
+  （前者在新版 `tauri-utils` 中已无对应字段，会直接导致构建失败）。
+- `bundle.createUpdaterArtifacts` 由 `"v1_signed"` 改为 `true`
+  （该字段只接受布尔或 `"v1Compatible"`，产出 v2 已签名产物）。
+- 自更新改为"所见即所装"：`checkAppUpdate` 同时返回展示信息与插件 Update 句柄，
+  安装时原样传回，不再二次 `check()`，避免"确认 0.8.0 却装上 0.8.1"。
+
+### Fixed
+
+- 补齐 `updater:default` 与 `process:allow-restart` 权限声明：
+  缺少时 `check()` 会被 ACL 拒绝、安装完成后无法重启。
+- 下载进度跑满后自动转入"正在安装"阶段：此前 `installing` 只存在于类型
+  与计算属性中、`setStage` 从未被调用，UI 会一直停在"下载 100%"，
+  用户以为卡死而重复点击（安装包动辄数十 MB）。
+- 未检查更新或已 `reset()` 时发起安装会明确失败，不再复用上一次的
+  Update 句柄下载用户已放弃的版本。
+
+---
+
 ## [0.7.0] — 2026-09-27
 
 > **代理接管正确性与内核 1.14.2**：系统性修复系统代理接管的"假成功/误关/断网"问题，
@@ -354,7 +398,8 @@
 
 ---
 
-[Unreleased]: https://github.com/auroweave/auroweave/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/auroweave/auroweave/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/auroweave/auroweave/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/auroweave/auroweave/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/auroweave/auroweave/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/auroweave/auroweave/compare/v0.4.0...v0.5.0
