@@ -35,7 +35,11 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
         // $schema 注入（与 build() 同步，plan-Q A.4-3）：三条生成路径统一
         "$schema": "https://sing-box.sagernet.org/schema.json",
         "log": {
-            "level": "info",
+            // P1 修复：370 节点规模下 info 级会为每条连接输出一行
+            // （实测 logs/singbox.log 达 1.7MB/13942 行，2MB 即轮转），
+            // 且每行在 sidecar.rs 触发一次 open/write/close 系统调用。
+            // 排查问题时可临时改回 info。
+            "level": "warn",
             "timestamp": true
         },
         "dns": {
@@ -62,7 +66,9 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
                 "type": "mixed",
                 "tag": "mixed-in",
                 "listen": "127.0.0.1",
-                "listen_port": mixed_port
+                "listen_port": mixed_port,
+                // P2 优化：与完整配置同值（TCP Fast Open）
+                "tcp_fast_open": true
             }
         ],
         "outbounds": [
@@ -73,7 +79,9 @@ pub fn generate_minimal_config(mixed_port: u16, clash_api_port: u16) -> Value {
         ],
         "route": {
             "rules": [
-                { "action": "sniff" },
+                // P2 优化：限定嗅探协议范围。默认全开会额外跑 bittorrent/rdp/
+                // ssh/dtls/ntp 嗅探器（route/sniff.md 共 11 种），对分流无贡献。
+                { "action": "sniff", "sniffer": ["http", "tls", "quic", "dns"] },
                 { "protocol": "dns", "action": "hijack-dns" },
                 { "clash_mode": "direct", "action": "route", "outbound": "direct" },
                 { "ip_is_private": true, "action": "route", "outbound": "direct" }
@@ -321,7 +329,7 @@ impl ConfigBuilder {
             // 节点域名实际由系统 local 解析器解析（最需要防污染的一类域名反而裸奔）。
             //
             // 修复：给每个节点出站显式指定 bootstrap（直连 DoH，绕开运营商递归与
-            // proxy 回环），并移除 route.default_domain_resolver。
+            // proxy 回环），并移除 route.default_domain_resolver（见 build() 阶段4/5）。
             // bootstrap 服务器自身若填域名，canonical_direct_doh_server 已挂
             // domain_resolver=local，不会形成解析环。
             raw_json["domain_resolver"] = json!("bootstrap");
@@ -360,7 +368,8 @@ impl ConfigBuilder {
         // 2a. Direct 与 Block 基础出站
         // P0 修复：direct 也显式绑定 domain_resolver=local。移除
         // route.default_domain_resolver 后，任何 server 为域名的出站若无显式解析器
-        // 会命中 1.14 的 missing-domain-resolver 弃用开关并直接 FATAL 拒载。
+        // 会命中 1.14 的 missing-domain-resolver 弃用开关并直接 FATAL 拒载
+        // （实测：ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER 未设时启动失败）。
         final_outbounds.push(json!({ "type": "direct", "tag": "direct", "domain_resolver": "local" }));
         final_outbounds.push(json!({ "type": "block", "tag": "block" }));
 
@@ -401,16 +410,29 @@ impl ConfigBuilder {
             "interrupt_exist_connections": false
         }));
 
-        // 2c-2. "balance" 兼容出站：沿用 URLTest 自动优选语义，暂不提供真正的多节点负载均衡
-        let (bal_interval, bal_url, bal_tolerance) = self.urltest_params("balance");
+        // 2c-2. "balance" 组：P1 修复（2026-09-27）——由 urltest 改为 selector。
+        //
+        // 改前问题：balance 与 auto 的 outbounds 成员列表**逐元素完全相同**
+        // （同为全量 pool_tags），却是第二个独立 urltest，等于把每轮健康检查
+        // 请求数从 805 抬到 1175（+46%，实测），且多出的 370 次探测全部经代理
+        // 打向 gstatic，消耗用户带宽与机场配额，换来的优选结果与 auto 一模一样。
+        //
+        // 改后语义：balance 变为「地区优选聚合器」——成员是各 {region}-auto 组
+        // 与全部节点，零探测开销（selector 不发健康检查），default 指向 auto
+        // 保持「默认走全局最优」的既有用户体验；用户可在 ClashAPI/前端面板
+        // 手动切到任一地区组，实现"锁定某地区自动优选"。
+        // 前端 GroupSidebar 对 tag=="balance" 的图标/文案分支不受类型影响。
+        let balance_members: Vec<String> = {
+            let mut members: Vec<String> = vec!["auto".to_string()];
+            members.extend(sorted_regions.iter().map(|r| format!("{}-auto", r)));
+            members.extend(pool_tags);
+            members
+        };
         final_outbounds.push(json!({
-            "type": "urltest",
+            "type": "selector",
             "tag": "balance",
-            "outbounds": pool_tags,
-            "url": bal_url,
-            "interval": bal_interval,
-            "idle_timeout": "10m",
-            "tolerance": bal_tolerance,
+            "outbounds": balance_members,
+            "default": "auto",
             "interrupt_exist_connections": false
         }));
 
@@ -572,11 +594,13 @@ impl ConfigBuilder {
                     })
                 }
                 "balance" => {
-                    let (interval, url, tolerance) = self.urltest_params(&group_tag);
+                    // P1 修复：与主 balance 组同理——原实现按 urltest 生成，
+                    // 会重复发健康检查。此处降级为 selector（零探测开销），
+                    // 成员与首选语义保持不变：第一个成员即组内首选，
+                    // 用户可在面板手动改选。
                     json!({
-                        "type": "urltest", "tag": group_tag, "outbounds": member_tags,
-                        "url": url, "interval": interval, "idle_timeout": "10m",
-                        "tolerance": tolerance, "interrupt_exist_connections": false
+                        "type": "selector", "tag": group_tag, "outbounds": member_tags,
+                        "interrupt_exist_connections": false
                     })
                 }
                 _ => continue,
@@ -707,14 +731,26 @@ impl ConfigBuilder {
             json!({
                 "rules": route_rules,
                 "final": "proxy",
-                "auto_detect_interface": true
+                "auto_detect_interface": true,
+                // P1 修复：应用级流量统计依赖 ClashAPI connections 的
+                // metadata.processPath，而内核仅在 needFindProcess 为真时才做进程
+                // 搜索（route/router.go: needFindProcess = hasRule(isProcessRule)
+                // || options.FindProcess）。App-Matrix 为空时无 process 规则 →
+                // 进程搜索器不创建 → processPath 恒为空串（实测确认），
+                // traffic_monitor 会把所有连接记成 Unknown。
+                // 显式开启后内核为无进程规则的连接也填充 processPath。
+                // 代价：每连接一次进程查询，内核侧有 200ms LRU 缓存
+                // （route/process_cache.go processCache.SetLifetime）。
+                "find_process": true
             })
         } else {
             json!({
                 "rule_set": rule_set_config,
                 "rules": route_rules,
                 "final": "proxy",
-                "auto_detect_interface": true
+                "auto_detect_interface": true,
+                // 见上方无 rule_set 分支的说明
+                "find_process": true
             })
         };
 
@@ -752,7 +788,9 @@ impl ConfigBuilder {
             // 拿到 VS Code 等兼容编辑器可自动获得字段补全与校验
             "$schema": "https://sing-box.sagernet.org/schema.json",
             "log": {
-                "level": "info",
+                // P1 修复：见 generate_minimal_config 同名注释（370 节点下
+                // info 级逐连接日志导致 1.7MB/天 + 每行一次文件开关系统调用）。
+                "level": "warn",
                 "timestamp": true
             },
             "dns": {
@@ -762,6 +800,10 @@ impl ConfigBuilder {
                 // 待代理域名由 dns.rules 尾部规则 route 到 fakeip，此处 final 保持为真实 remote DoH 承担内部兜底
                 "final": "remote",
                 "strategy": "prefer_ipv4",
+                // P2 优化：DNS LRU 容量。内核默认取 max(cache_capacity, 1024)
+                // （dns/client.go NewClient），1024 条在 370 节点 + 日常浏览
+                // 场景下容易触顶重解析。4096 足以覆盖一个高频使用会话。
+                "cache_capacity": 4096,
                 // 1.14.0：乐观缓存（过期立即返回+后台刷新）与查询超时（快速失败）
                 "optimistic": self.dns_optimistic_cache,
                 "timeout": format!("{}s", self.dns_timeout_secs.max(1))
@@ -771,7 +813,11 @@ impl ConfigBuilder {
                     "type": "mixed",
                     "tag": "mixed-in",
                     "listen": if self.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
-                    "listen_port": self.mixed_port
+                    "listen_port": self.mixed_port,
+                    // P2 优化：TCP Fast Open（shared/listen.md tcp_fast_open）。
+                    // 代理入口是本机应用 → 内核的高频短连接路径（浏览器并发建连），
+                    // TFO 可省掉一个 RTT 的握手延迟。
+                    "tcp_fast_open": true
                     // 注意：严禁在此添加 sniff/sniff_override_destination ——
                     // 这两个入站字段在 sing-box 1.13 已移除，1.14 直接拒载整份配置；
                     // 嗅探由 route.rules 首条 {"action":"sniff"} 承担
@@ -1038,7 +1084,11 @@ pub fn build_full_route_rules_filtered(
     valid_tags: Option<&std::collections::HashSet<String>>,
 ) -> Vec<Value> {
     let mut rules = vec![
-        json!({ "action": "sniff" }),
+        // P2 优化：限定嗅探协议范围。默认 `{"action":"sniff"}` 会启用全部
+        // 嗅探器（route/sniff.md 共 11 种，含 bittorrent/rdp/ssh/dtls/ntp/stun），
+        // 对本项目的分流需求（域名识别 + QUIC 识别）没有额外贡献，却是每连接
+        // 的固定 CPU 开销。只保留实际会用到 的四种。
+        json!({ "action": "sniff", "sniffer": ["http", "tls", "quic", "dns"] }),
         json!({ "protocol": "dns", "action": "hijack-dns" }),
     ];
     let has_tag = |tag: &str| valid_tags.map_or(true, |tags| tags.contains(tag));
@@ -1681,33 +1731,54 @@ mod tests {
         )
         .unwrap();
 
-        // 查找项目内置 sidecar 二进制进行内核级合法性校验
+        // 查找项目内置 sidecar 二进制进行内核级合法性校验。
+        // 不硬编码版本号（此前写死 sing-box-1.14.0，内核每次升级都要改测试代码；
+        // 一旦漏改，`if exists()` 会静默跳过校验，最有价值的回归防线形同虚设）。
+        // 复用 core_paths::resolve_core_binary（按 mtime 取最新的内核本体）——
+        // 与运行时 SidecarManager 走同一解析逻辑，测试校验的就是实际会跑的那个二进制。
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let sidecar_bin = manifest_dir.join("sidecar-bin/macos-arm64/sing-box-1.14.0");
-
-        if sidecar_bin.exists() {
-            let out_fakeip = std::process::Command::new(&sidecar_bin)
-                .args(["check", "-c", &path_fakeip.to_string_lossy()])
-                .output()
-                .expect("执行 sing-box check fakeip 应该成功");
-            let stderr_fakeip = String::from_utf8_lossy(&out_fakeip.stderr);
-            assert!(
-                out_fakeip.status.success(),
-                "sing-box check fakeip 必须成功，stderr: {}",
-                stderr_fakeip
-            );
-
-            let out_realip = std::process::Command::new(&sidecar_bin)
-                .args(["check", "-c", &path_realip.to_string_lossy()])
-                .output()
-                .expect("执行 sing-box check realip 应该成功");
-            let stderr_realip = String::from_utf8_lossy(&out_realip.stderr);
-            assert!(
-                out_realip.status.success(),
-                "sing-box check realip 必须成功，stderr: {}",
-                stderr_realip
-            );
+        // resolve_core_binary 的候选目录含相对路径（相对 CWD），测试运行时 CWD
+        // 不保证是仓库根，故先切到 manifest_dir 再解析，随后还原。
+        let prev_cwd = std::env::current_dir().ok();
+        std::env::set_current_dir(&manifest_dir).ok();
+        let sidecar_bin = crate::core_paths::resolve_core_binary();
+        if let Some(prev) = prev_cwd {
+            let _ = std::env::set_current_dir(prev);
         }
+
+        // 找不到内核时给出显式提示而非静默跳过——静默跳过会让这道
+        // 最关键的回归防线（内核级配置校验）在 CI/新环境里形同虚设。
+        let Some(sidecar_bin) = sidecar_bin else {
+            panic!(
+                "未找到 sing-box 内核二进制（已查找 {}）；\
+                 请先执行 `npm run download:sing-box` 后再跑测试",
+                manifest_dir.join("sidecar-bin").display()
+            );
+        };
+
+        let out_fakeip = std::process::Command::new(&sidecar_bin)
+            .args(["check", "-c", &path_fakeip.to_string_lossy()])
+            .output()
+            .expect("执行 sing-box check fakeip 应该成功");
+        let stderr_fakeip = String::from_utf8_lossy(&out_fakeip.stderr);
+        assert!(
+            out_fakeip.status.success(),
+            "sing-box check fakeip 必须成功（内核 {}），stderr: {}",
+            sidecar_bin.display(),
+            stderr_fakeip
+        );
+
+        let out_realip = std::process::Command::new(&sidecar_bin)
+            .args(["check", "-c", &path_realip.to_string_lossy()])
+            .output()
+            .expect("执行 sing-box check realip 应该成功");
+        let stderr_realip = String::from_utf8_lossy(&out_realip.stderr);
+        assert!(
+            out_realip.status.success(),
+            "sing-box check realip 必须成功（内核 {}），stderr: {}",
+            sidecar_bin.display(),
+            stderr_realip
+        );
 
         let _ = std::fs::remove_file(path_fakeip);
         let _ = std::fs::remove_file(path_realip);
@@ -1905,9 +1976,111 @@ mod tests {
         assert_eq!(jp["url"], "https://example.com/jp");
         assert_eq!(jp["interval"], "60s");
         assert_eq!(jp["tolerance"], 7);
-        assert_eq!(balance["type"], "urltest");
-        assert_eq!(balance["url"], "https://example.com/balance");
-        assert_eq!(balance["interval"], "70s");
-        assert_eq!(balance["tolerance"], 9);
+        // P1 修复（2026-09-27）：balance 型自定义组不再生成 urltest。
+        // 原实现按 urltest 发出与同成员 urltest 组重复的健康检查请求，
+        // 现降级为 selector（零探测开销），因此不再有 url/interval/tolerance。
+        // 该组仍保留全部成员，可由用户在面板手动改选。
+        assert_eq!(balance["type"], "selector");
+        assert!(balance.get("url").is_none());
+        assert!(balance.get("interval").is_none());
+        assert!(balance.get("tolerance").is_none());
+        assert_eq!(balance["outbounds"], json!(["日本节点"]));
+    }
+
+    /// P0 回归（2026-09-27）：节点出站必须自带 domain_resolver，
+    /// 且 route 上不得再有 default_domain_resolver——
+    /// 后者会让出站解析绕过 dns.rules（详见 build() 阶段1 注释）。
+    #[test]
+    fn test_node_outbounds_bind_bootstrap_resolver() {
+        let config = ConfigBuilder::new(vec![make_node("🇯🇵 日本-01")])
+            .build()
+            .expect("build config 应该成功");
+
+        assert!(
+            config["route"].get("default_domain_resolver").is_none(),
+            "route 不得保留 default_domain_resolver（会使出站解析绕过 dns.rules）"
+        );
+
+        let outbounds = config["outbounds"].as_array().unwrap();
+        let node = outbounds
+            .iter()
+            .find(|o| o["tag"] == "🇯🇵 日本-01")
+            .expect("应包含节点出站");
+        assert_eq!(
+            node["domain_resolver"], "bootstrap",
+            "节点出站必须显式绑定 bootstrap（直连 DoH），否则 1.14 拒载"
+        );
+
+        let direct = outbounds
+            .iter()
+            .find(|o| o["tag"] == "direct")
+            .expect("应包含 direct 出站");
+        assert_eq!(
+            direct["domain_resolver"], "local",
+            "direct 同样必须自带解析器"
+        );
+    }
+
+    /// P1 回归（2026-09-27）：balance 组改为 selector，
+    /// 每轮 urltest 探测请求数应从「auto + balance 全量重复」降为单份。
+    #[test]
+    fn test_balance_group_is_selector_without_probing() {
+        let config = ConfigBuilder::new(vec![
+            make_node("🇯🇵 日本-01"),
+            make_node("🇺🇸 美国-01"),
+        ])
+        .build()
+        .expect("build config 应该成功");
+
+        let outbounds = config["outbounds"].as_array().unwrap();
+        let balance = outbounds
+            .iter()
+            .find(|o| o["tag"] == "balance")
+            .expect("应包含 balance 组");
+
+        assert_eq!(
+            balance["type"], "selector",
+            "balance 不应再是 urltest（会与 auto 重复发探测）"
+        );
+        assert_eq!(balance["default"], "auto", "默认仍走全局最优");
+        // selector 不发健康检查，故不应带 urltest 专属字段
+        for field in ["url", "interval", "tolerance", "idle_timeout"] {
+            assert!(
+                balance.get(field).is_none(),
+                "selector 组不应携带 urltest 字段 {field}"
+            );
+        }
+
+        // 探测总量断言：urltest 组数应只剩 auto + 各地区组，
+        // 不再出现与 auto 成员完全相同的第二个全量组。
+        let auto_members: Vec<&str> = outbounds
+            .iter()
+            .find(|o| o["tag"] == "auto")
+            .and_then(|o| o["outbounds"].as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .expect("auto 组应存在");
+        let balance_members: Vec<&str> = balance["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_ne!(
+            balance_members, auto_members,
+            "balance 成员不应与 auto 完全相同（那正是重复探测的根因）"
+        );
+    }
+
+    /// P1 回归（2026-09-27）：应用级流量统计依赖 ClashAPI processPath，
+    /// 而内核仅在 needFindProcess 时才做进程搜索。
+    #[test]
+    fn test_route_enables_find_process_for_app_traffic() {
+        let config = ConfigBuilder::new(vec![make_node("🇯🇵 日本-01")])
+            .build()
+            .expect("build config 应该成功");
+        assert_eq!(
+            config["route"]["find_process"], true,
+            "必须开启 find_process，否则无 App-Matrix 规则时 processPath 恒空"
+        );
     }
 }

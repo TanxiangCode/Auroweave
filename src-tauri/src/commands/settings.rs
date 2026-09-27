@@ -470,11 +470,15 @@ pub fn rebuild_config_from_settings(
     {
         inbounds.clear();
         // 混合代理入口
+        // P2 优化：开启 TCP Fast Open（shared/listen.md tcp_fast_open）。
+        // 代理入口是本机应用 → 内核的短连接高频路径（浏览器并发建连），
+        // TFO 可省掉一个 RTT 的握手延迟。
         inbounds.push(serde_json::json!({
             "type": "mixed",
             "tag": "mixed-in",
             "listen": if settings.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
-            "listen_port": settings.mixed_port
+            "listen_port": settings.mixed_port,
+            "tcp_fast_open": true
         }));
 
         // TUN 模式入口 (如果启用)
@@ -700,11 +704,15 @@ pub fn rebuild_config_from_settings(
         );
         route.insert("rules".to_string(), serde_json::json!(full_rules));
 
-        // P0 修复（与 ConfigBuilder::build 同步，防两路径漂移）：
-        // 移除 route.default_domain_resolver——1.14 中该字段一旦指定 tag，
-        // 出站解析会被 dialer 固定绑定并绕过 dns.rules（详见 config_builder.rs
-        // 同位置注释）。节点域名改由各出站自带 domain_resolver 承担。
+        // P0/P1 修复（与 ConfigBuilder::build 同步，防两路径漂移）：
+        // 1) 移除 route.default_domain_resolver——1.14 中该字段一旦指定 tag，
+        //    出站解析会被 dialer 固定绑定并绕过 dns.rules（详见 config_builder.rs
+        //    同位置注释）。节点域名改由各出站自带 domain_resolver 承担。
+        // 2) 开启 find_process——应用级流量统计依赖 ClashAPI 的 processPath，
+        //    App-Matrix 为空（无 process 规则）时内核不建进程搜索器，
+        //    processPath 恒为空串，统计全部落成 Unknown。
         route.remove("default_domain_resolver");
+        route.insert("find_process".to_string(), serde_json::json!(true));
 
         // 同步 rule_set 注册：geosite 与 geoip 各自独立判断（与 build_full_route_rules
         // 的独立布尔语义对齐；旧实现 geoip 被 geosite 门控，geosite 丢失而 geoip
@@ -764,9 +772,15 @@ pub fn rebuild_config_from_settings(
         modified = true;
     }
 
-    // 4. 移除 log.output 以便统一使用系统日志收集 stdout
+    // 4. 移除 log.output 以便统一使用系统日志收集 stdout；
+    //    并把 level 收敛到 warn（370 节点下 info 级逐连接日志会产出
+    //    MB 级文件且每行触发一次文件开关系统调用，见 config_builder.rs 注释）
     if let Some(log) = config_val.get_mut("log").and_then(|l| l.as_object_mut()) {
         if log.remove("output").is_some() {
+            modified = true;
+        }
+        if log.get("level").and_then(|v| v.as_str()) != Some("warn") {
+            log.insert("level".to_string(), serde_json::json!("warn"));
             modified = true;
         }
     }
@@ -782,6 +796,13 @@ pub fn rebuild_config_from_settings(
 
         if !dns.contains_key("strategy") {
             dns.insert("strategy".to_string(), serde_json::json!("prefer_ipv4"));
+            modified = true;
+        }
+
+        // P2 优化：DNS LRU 容量（内核默认 max(cache_capacity,1024)=1024，
+        // 370 节点 + 日常浏览易触顶重解析）。与 ConfigBuilder::build 同值。
+        if dns.get("cache_capacity").and_then(|v| v.as_u64()) != Some(4096) {
+            dns.insert("cache_capacity".to_string(), serde_json::json!(4096));
             modified = true;
         }
 

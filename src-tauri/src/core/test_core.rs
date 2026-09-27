@@ -81,9 +81,10 @@ pub fn build_test_config(
         }));
         let mut raw = node.raw_json.clone();
         raw["tag"] = json!(format!("t-node-{i}"));
-        // P0 修复（与主配置同源）：显式绑定 domain_resolver。1.14 中
-        // route.default_domain_resolver 一旦指定 tag 会绕过 dns.rules，
-        // 而此处 dns 段只有一个 local server，指定它没有收益。因此每个出站
+        // P0 修复（与主配置同源）：显式绑定 domain_resolver。
+        // 1.14 中 route.default_domain_resolver 一旦指定 tag 会绕过 dns.rules，
+        // 而此处测试实例的 dns 段只有一个 local server，指定它没有收益，
+        // 反而让"去掉该字段"这条更干净的路径不可行。因此这里给每个节点
         // 显式绑定，direct 同样显式绑定——两者都不依赖 default 字段。
         raw["domain_resolver"] = json!("local");
         outbounds.push(raw);
@@ -100,8 +101,8 @@ pub fn build_test_config(
     Ok(json!({
         // 探测是海量短连接，info 级会刷日志；warn 足够暴露配置错误
         "log": { "level": "warn" },
-        // 极简 DNS：仅提供 default_domain_resolver 引用的 local 解析器
-        // （实测 1.14.0：无 dns 段时 resolver "local" 不存在，启动直接 FATAL）。
+        // 极简 DNS：仅提供各出站 domain_resolver 引用的 local 解析器
+        // （实测：无 dns 段时 resolver "local" 不存在，启动直接 FATAL）。
         // 节点域名由远端解析（代理协议 CONNECT 主机名透传），本地解析器
         // 只兜底规则/直连出站的域名字段。
         "dns": {
