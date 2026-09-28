@@ -126,13 +126,27 @@ jobs:
           echo "--- 签名信息 ---"
           base64 -d < "$BUNDLE/macos/Auroweave.app.tar.gz.sig" | grep -a "trusted comment"
 
+      # 先把产物收拢到一个扁平目录再上传。
+      # upload-artifact 对多文件 path 会保留其相对目录层级
+      # （解包后变成 artifacts/target/release/...），导致下游按
+      # artifacts/Auroweave.app.tar.gz 取文件必然 not found。
+      - name: 收集产物到扁平目录
+        run: |
+          set -euo pipefail
+          STAGE=artifacts
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          cp target/release/bundle/macos/Auroweave.app.tar.gz "$STAGE/"
+          cp target/release/bundle/macos/Auroweave.app.tar.gz.sig "$STAGE/"
+          # dmg 用通配避免没有匹配时 cp 报错（macOS-only 构建时本就没有）
+          shopt -s nullglob
+          for f in target/release/bundle/dmg/*.dmg; do cp "$f" "$STAGE/"; done
+          echo "--- 收集结果 ---"
+          ls -la "$STAGE"
+
       - uses: actions/upload-artifact@v4
         with:
           name: auroweave-macos-arm64
-          path: |
-            target/release/bundle/macos/Auroweave.app.tar.gz
-            target/release/bundle/macos/Auroweave.app.tar.gz.sig
-            target/release/bundle/dmg/*.dmg
+          path: artifacts
           retention-days: 7
           if-no-files-found: error
 
@@ -193,13 +207,17 @@ jobs:
             echo "Release $TAG 已存在，删除后重建"
             gh release delete "$TAG" --yes --cleanup-tag
           fi
+          # dmg 可能不存在（当前仅 macOS 构建），用数组收集避免把
+          # 字面量 "artifacts/*.dmg" 传给 gh 导致 no such file 报错
+          ASSETS=(artifacts/Auroweave.app.tar.gz artifacts/Auroweave.app.tar.gz.sig latest.json)
+          shopt -s nullglob
+          for f in artifacts/*.dmg; do ASSETS+=("$f"); done
+          echo "--- 待上传附件 ---"
+          printf '%s\n' "${ASSETS[@]}"
           gh release create "$TAG" \
             --title "Auroweave v${VERSION}" \
             --generate-notes \
-            artifacts/Auroweave.app.tar.gz \
-            artifacts/Auroweave.app.tar.gz.sig \
-            artifacts/*.dmg \
-            latest.json
+            "${ASSETS[@]}"
           echo "✅ Release 已发布：$TAG"
 
       - name: 验证 updater 端点可访问
