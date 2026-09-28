@@ -23,9 +23,29 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const ROOT = path.resolve(process.cwd());
-const BUNDLE_DIR = path.join(ROOT, "src-tauri", "target", "release", "bundle");
 const APP_NAME = "Auroweave";
 const MAC_APP_DIR = "/Applications";
+
+/**
+ * 定位 tauri build 的产物目录。
+ *
+ * 候选路径不能写死：项目根有 `[workspace]`（members 含 src-tauri），
+ * cargo 的 target 目录因此在**仓库根**而非 src-tauri 下。但若将来改成
+ * src-tauri 独立构建（或用 CARGO_TARGET_DIR 覆盖），路径又会变。
+ * 故运行时探测，取第一个存在的。
+ */
+function resolveBundleDir(): string {
+  const candidates = [
+    path.join(ROOT, "target", "release", "bundle"),
+    path.join(ROOT, "src-tauri", "target", "release", "bundle"),
+  ];
+  const found = candidates.find((p) => fs.existsSync(p));
+  if (found) return found;
+  // 都不存在时返回首选（--skip-build 时由调用方给出可读报错）
+  return candidates[0];
+}
+
+let BUNDLE_DIR = resolveBundleDir();
 
 const args = process.argv.slice(2);
 const skipBuild = args.includes("--skip-build");
@@ -78,6 +98,10 @@ function buildApp() {
   log("开始 tauri build（release）…");
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   run(npm, ["run", "build:installer"]);
+  // 构建前 BUNDLE_DIR 可能不存在（探测会落到 fallback），
+  // 构建后必须重新探测，否则会用错路径去找产物
+  BUNDLE_DIR = resolveBundleDir();
+  log(`产物目录：${path.relative(ROOT, BUNDLE_DIR)}`);
 }
 
 function installWindows() {

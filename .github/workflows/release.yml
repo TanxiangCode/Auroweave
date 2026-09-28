@@ -110,25 +110,29 @@ jobs:
       - name: 校验更新产物与签名
         run: |
           set -euo pipefail
-          BUNDLE=src-tauri/target/release/bundle
+          BUNDLE=target/release/bundle
           echo "--- 产物 ---"
           find "$BUNDLE" -maxdepth 2 \( -name "*.app" -o -name "*.dmg" \
             -o -name "*.tar.gz" -o -name "*.sig" \) | sort
           test -d "$BUNDLE/macos/Auroweave.app" || (echo "::error::缺少 .app"; exit 1)
           test -f "$BUNDLE/macos/Auroweave.app.tar.gz" || (echo "::error::缺少更新包"; exit 1)
           test -f "$BUNDLE/macos/Auroweave.app.tar.gz.sig" || (echo "::error::缺少更新签名"; exit 1)
-          # 签名必须由 tauri 密钥生成：校验 trusted comment 里带版本号，
-          # 否则 updater 端会因签名不匹配拒绝安装
-          head -2 "$BUNDLE/macos/Auroweave.app.tar.gz.sig" | base64 -d | grep -q "version:" \
-            || (echo "::error::签名格式异常"; exit 1)
+          # 签名必须由 tauri 密钥生成，且 trusted comment 需带版本号——
+          # 否则 updater 端会因签名不匹配拒绝安装。
+          # 注意：.sig 是**单行无换行**的 base64，不能用 head -2 截行，
+          # 必须整份 base64 -d 后再解码。
+          base64 -d < "$BUNDLE/macos/Auroweave.app.tar.gz.sig" | grep -q "version:" \
+            || (echo "::error::签名格式异常或缺少版本号"; exit 1)
+          echo "--- 签名信息 ---"
+          base64 -d < "$BUNDLE/macos/Auroweave.app.tar.gz.sig" | grep -a "trusted comment"
 
       - uses: actions/upload-artifact@v4
         with:
           name: auroweave-macos-arm64
           path: |
-            src-tauri/target/release/bundle/macos/Auroweave.app.tar.gz
-            src-tauri/target/release/bundle/macos/Auroweave.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/Auroweave.app.tar.gz
+            target/release/bundle/macos/Auroweave.app.tar.gz.sig
+            target/release/bundle/dmg/*.dmg
           retention-days: 7
           if-no-files-found: error
 
@@ -210,9 +214,9 @@ jobs:
 
           name: auroweave-macos-arm64
           path: |
-            src-tauri/target/release/bundle/macos/Auroweave.app.tar.gz
-            src-tauri/target/release/bundle/macos/Auroweave.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/Auroweave.app.tar.gz
+            target/release/bundle/macos/Auroweave.app.tar.gz.sig
+            target/release/bundle/dmg/*.dmg
           retention-days: 7
           if-no-files-found: error
 
