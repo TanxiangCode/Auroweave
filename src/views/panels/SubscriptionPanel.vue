@@ -27,7 +27,7 @@
         <div class="setting-item">
           <div class="item-label">
             <span>自动整理地区分组</span>
-            <span class="sub-label">导入订阅时自动识别 HK/JP/US 等地区并生成 urltest 延迟优选组</span>
+            <span class="sub-label">导入订阅时自动识别 HK/JP/US 等地区并生成对应的自动优选组</span>
           </div>
           <input type="checkbox" v-model="settingsStore.settings.auto_group_on_import" class="switch" @change="save" />
         </div>

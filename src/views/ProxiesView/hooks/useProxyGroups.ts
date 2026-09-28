@@ -37,13 +37,20 @@ export function useProxyGroups() {
     return groups.value.filter((g) => systemGroupTags.includes(g.tag));
   });
 
-  /** 地区分组（非系统分组、非自定义真实组的 urltest 类型） */
+  /**
+   * 地区分组
+   *
+   * 判据为「tag 以 `-auto` 结尾」而非 `type === "urltest"`：
+   * 2026-09-28 探测面改造后 `auto` / 地区组 / 自定义组全部由 urltest 降级为
+   * selector（内核不再自行发健康检查，改由应用侧探测 + 下发选点），
+   * 按 type 判定会导致所有地区组从侧栏消失。
+   */
   const regionGroups = computed<ProxyGroup[]>(() => {
     return groups.value.filter(
       (g) =>
         !systemGroupTags.includes(g.tag) &&
         !g.tag.startsWith("custom-") &&
-        g.type === "urltest"
+        g.tag.endsWith("-auto")
     );
   });
 

@@ -13,7 +13,6 @@ import { useSettingsStore } from "@/stores/settings.store";
 import { useToast } from "@/composables/useToast";
 import {
   DEFAULT_LATENCY_TEST_INTERVAL_SEC,
-  DEFAULT_LATENCY_TEST_TOLERANCE_MS,
   DEFAULT_SPEED_TEST_URLS,
   SPEED_TEST_PRESETS,
 } from "@/constants";
@@ -128,7 +127,7 @@ async function save() {
         <div class="setting-item">
           <div class="item-label">
             <span>延迟测试目标 URL</span>
-            <span class="sub-label">节点延迟连通性测试与出站 urltest 健康检测的探测端点 (返回 HTTP 204)</span>
+            <span class="sub-label">节点延迟连通性测试与探测面健康检测的探测端点 (返回 HTTP 204)</span>
           </div>
           <input
             v-model="settingsStore.settings.latency_test_url"
@@ -173,7 +172,7 @@ async function save() {
         <div class="setting-item">
           <div class="item-label">
             <span>统一延迟统计</span>
-            <span class="sub-label">通过独立 test-core 预热持久连接，统计第二次请求 RTT；更接近 Mihomo unified-delay，不影响内核后台 URLTest</span>
+            <span class="sub-label">通过独立 test-core 预热持久连接，统计第二次请求 RTT；更接近 Mihomo unified-delay，结果会同时写回探测表供自动优选使用</span>
           </div>
           <input
             v-model="settingsStore.settings.latency_unified_delay"
@@ -199,7 +198,7 @@ async function save() {
         <div class="setting-item">
           <div class="item-label">
             <span>自动优选探测周期 (Interval) <span class="readonly-tag">只读</span></span>
-            <span class="sub-label">内核 URLTest 组后台周期性探测间隔 (默认: {{ DEFAULT_LATENCY_TEST_INTERVAL_SEC }} 秒 / 容差 {{ DEFAULT_LATENCY_TEST_TOLERANCE_MS }}ms)</span>
+            <span class="sub-label">探测面调度间隔 (默认: {{ DEFAULT_LATENCY_TEST_INTERVAL_SEC }} 秒)。探测在独立进程进行，不与用户流量争抢连接；「容差」现由选点器的切换阈值承担</span>
           </div>
           <input type="text" :value="`${DEFAULT_LATENCY_TEST_INTERVAL_SEC}s`" class="text-input readonly" readonly tabindex="-1" />
         </div>
