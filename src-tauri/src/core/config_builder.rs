@@ -251,25 +251,43 @@ impl ConfigBuilder {
         self
     }
 
-    /// 生成 urltest 出站的公共参数：应用用户对指定 group tag 的覆盖配置。
-    /// 未覆盖的字段保持内置默认（interval "3m"、tolerance 50、gstatic 测速 URL）
-    fn urltest_params(&self, tag: &str) -> (String, String, u64) {
-        const DEFAULT_INTERVAL_SECS: u64 = 180; // "3m"
-        const DEFAULT_TOLERANCE: u64 = 50;
+    /// 探测参数：把用户在「分组测速设置」里对指定 group 的覆盖应用到探测面。
+    ///
+    /// 2026-09-28 探测面改造后，配置里不再生成 urltest 出站，`group_configs`
+    /// （interval / tolerance / url）失去了写入内核的位置——但**功能不该消失**：
+    /// 用户设的「探测间隔」现在作用于探测调度器对该组成员的调度。
+    ///
+    /// 返回 `(interval_secs, url)`；未配置时用内置默认（3 分钟 / gstatic 204）。
+    /// `tolerance` 另有归属：它是「切换阈值」，由 `SelectorConfig::min_gain_ms`
+    /// 承接（语义等价——都是「差多少才值得动」）。
+    pub fn probe_params(&self, tag: &str) -> (u64, String) {
+        const DEFAULT_INTERVAL_SECS: u64 = 300; // 5 分钟（探测面 Standby 层）
         const DEFAULT_URL: &str = "http://www.gstatic.com/generate_204";
-
         match self.group_configs.get(tag) {
             Some(cfg) => (
-                format!("{}s", cfg.interval.unwrap_or(DEFAULT_INTERVAL_SECS)),
-                cfg.url.clone().unwrap_or_else(|| DEFAULT_URL.to_string()),
-                cfg.tolerance.unwrap_or(DEFAULT_TOLERANCE),
+                cfg.interval.unwrap_or(DEFAULT_INTERVAL_SECS),
+                cfg.url
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_URL.to_string()),
             ),
-            None => (
-                DEFAULT_INTERVAL_SECS.to_string() + "s",
-                DEFAULT_URL.to_string(),
-                DEFAULT_TOLERANCE,
-            ),
+            None => (DEFAULT_INTERVAL_SECS, DEFAULT_URL.to_string()),
         }
+    }
+
+    /// 从用户配置生成探测参数（供启动时构建 ProbeConfig）
+    pub fn probe_config(&self) -> crate::probe::scheduler::ProbeConfig {
+        let (interval_secs, url) = self.probe_params("auto");
+        let base = crate::probe::scheduler::ProbeConfig::default();
+        crate::probe::scheduler::ProbeConfig {
+            url,
+            timeout_ms: base.timeout_ms,
+            concurrency: base.concurrency,
+            max_per_round: base.max_per_round,
+            tick_ms: base.tick_ms,
+            fresh_ms: base.fresh_ms,
+            standby_interval_ms: base.standby_interval_ms,
+        }
+        .with_standby_interval_ms((interval_secs * 1000) as i64)
     }
 
     /// 生成完整的 sing-box 1.11+ / 1.13+ / 1.14+ 兼容 config.json
@@ -397,18 +415,34 @@ impl ConfigBuilder {
             "outbounds": proxy_group_list
         }));
 
-        // 2c. 全局 "auto" urltest 出站（默认 3 分钟心跳，50ms 容差，可被用户覆盖）
-        let (auto_interval, auto_url, auto_tolerance) = self.urltest_params("auto");
-        final_outbounds.push(json!({
-            "type": "urltest",
-            "tag": "auto",
-            "outbounds": pool_tags.clone(),
-            "url": auto_url,
-            "interval": auto_interval,
-            "idle_timeout": "15m",
-            "tolerance": auto_tolerance,
-            "interrupt_exist_connections": false
-        }));
+        // 2c. 全局 "auto"：selector 而非 urltest（2026-09-28 探测面改造）
+        //
+        // 改前问题：auto 是含 370 成员的 urltest，每 180s 无条件重测全组。叠加
+        // 8 个 urltest 组（地区组 + custom-Gemini可用）后每轮 805 次探测，且所有
+        // 组 interval 相等 → 全部在 t=0 同时开火。这些探测经**主实例**出站发出，
+        // 与用户流量抢连接资源：实测 singbox.log 338 次
+        // `outbound/urltest[auto]: failed to create session: context deadline
+        // exceeded`（每次 15.2s，github.com / bing.com 等真实域名）。
+        //
+        // 改后语义：auto 退化为「被控执行器」——节点延迟由探测面（独立常驻
+        // test-core，见 probe 模块）测量，选点由 AutoSelector 经 ClashAPI 下发。
+        // 内核不再自己发任何健康检查，auto 每轮探测数归零。
+        //
+        // 断网暗窗不因此变长：store_selected 已废弃但随 cache_file.enabled 默认
+        // 生效，实测 selector 选择跨内核重启保留（切到 C → 重启 → 仍为 C），
+        // 所以重启后内核自行恢复上次选择，无需等待首轮探测。
+        //
+        // `default` 指向首个有效节点：仅在 cache 无记录时兜底。
+        let auto_members = pool_tags.clone();
+        if !auto_members.is_empty() {
+            final_outbounds.push(json!({
+                "type": "selector",
+                "tag": "auto",
+                "outbounds": auto_members,
+                "default": pool_tags[0],
+                "interrupt_exist_connections": false
+            }));
+        }
 
         // 2c-2. "balance" 组：P1 修复（2026-09-27）——由 urltest 改为 selector。
         //
@@ -436,18 +470,24 @@ impl ConfigBuilder {
             "interrupt_exist_connections": false
         }));
 
-        // 2d. 地区 urltest 出站（默认 3 分钟自动探测最优节点，按 region 名排序保证确定性）
+        // 2d. 地区组：selector 而非 urltest（2026-09-28 探测面改造）
+        //
+        // 与 auto 同理降级：地区组的成员是 auto 成员的子集，保留 urltest 意味着
+        // 同一批节点被重复探测（实测地区组 75 次 + auto 370 次，另有 OTHER 组
+        // 295 次几乎等于全量）。降级后所有组都只读节点表，探测总量与组数解耦。
+        // 选点仍由 AutoSelector 驱动（tag 形如 `US-auto`），语义对用户不变：
+        // 「锁定某地区，自动选该地区最快的」。
         for region in &sorted_regions {
             let region_tag = format!("{}-auto", region);
-            let (rg_interval, rg_url, rg_tolerance) = self.urltest_params(&region_tag);
+            let members = region_map[region].clone();
+            if members.is_empty() {
+                continue;
+            }
             final_outbounds.push(json!({
-                "type": "urltest",
+                "type": "selector",
                 "tag": region_tag,
-                "outbounds": region_map[region].clone(),
-                "url": rg_url,
-                "interval": rg_interval,
-                "idle_timeout": "15m",
-                "tolerance": rg_tolerance,
+                "outbounds": members.clone(),
+                "default": members[0],
                 "interrupt_exist_connections": false
             }));
         }
@@ -580,29 +620,17 @@ impl ConfigBuilder {
                 continue;
             }
 
+            // 三种类型统一降级为 selector：自定义组成员本就取自 auto 池，
+            // 保留 urltest 只会让同一批节点再被探一轮（实测
+            // custom-Gemini可用 65 成员 ≈ 每轮 65 次冗余探测）。
+            // 「组内自动选最快」由 AutoSelector 按 tag 驱动，语义不变。
+            let first = member_tags[0].clone();
             let group_json = match group_type.as_str() {
-                "selector" => json!({
+                "selector" | "urltest" | "balance" => json!({
                     "type": "selector", "tag": group_tag, "outbounds": member_tags,
+                    "default": first,
                     "interrupt_exist_connections": false
                 }),
-                "urltest" => {
-                    let (interval, url, tolerance) = self.urltest_params(&group_tag);
-                    json!({
-                        "type": "urltest", "tag": group_tag, "outbounds": member_tags,
-                        "url": url, "interval": interval, "idle_timeout": "15m",
-                        "tolerance": tolerance, "interrupt_exist_connections": false
-                    })
-                }
-                "balance" => {
-                    // P1 修复：与主 balance 组同理——原实现按 urltest 生成，
-                    // 会重复发健康检查。此处降级为 selector（零探测开销），
-                    // 成员与首选语义保持不变：第一个成员即组内首选，
-                    // 用户可在面板手动改选。
-                    json!({
-                        "type": "selector", "tag": group_tag, "outbounds": member_tags,
-                        "interrupt_exist_connections": false
-                    })
-                }
                 _ => continue,
             };
             final_outbounds.push(group_json);
@@ -845,74 +873,123 @@ impl ConfigBuilder {
     }
 }
 
-/// 识别节点 tag 属于哪个地区 (HK, JP, US, TW, SG, KR, OTHER)
+/// 国旗 emoji → 地区码
+///
+/// 数据驱动：实测 372 节点订阅横跨 32 个国家/地区，若只认 6 个
+/// （旧实现仅 HK/JP/US/TW/SG/KR），其余 295 个节点全落进 OTHER——
+/// 占比 80% 的「其他」组既无地理意义，也让按地区分治失效。
+///
+/// 顺序即优先级：先中文关键词（部分机场用 🇨🇳 前缀标注港台，如
+/// `🇨🇳 香港-极速-anytls-001`），再国旗，最后英文缩写。
+const FLAG_REGION: &[(&str, &str)] = &[
+    ("🇭🇰", "HK"), ("🇯🇵", "JP"), ("🇺🇸", "US"), ("🇹🇼", "TW"),
+    ("🇸🇬", "SG"), ("🇰🇷", "KR"),
+    ("🇨🇳", "CN"), ("🇬🇧", "GB"), ("🇩🇪", "DE"), ("🇫🇷", "FR"),
+    ("🇨🇦", "CA"), ("🇦🇺", "AU"), ("🇷🇺", "RU"), ("🇮🇳", "IN"),
+    ("🇧🇷", "BR"), ("🇳🇱", "NL"), ("🇹🇷", "TR"), ("🇸🇪", "SE"),
+    ("🇨🇭", "CH"), ("🇩🇰", "DK"), ("🇳🇴", "NO"), ("🇵🇱", "PL"),
+    ("🇺🇦", "UA"), ("🇻🇳", "VN"), ("🇹🇭", "TH"), ("🇮🇩", "ID"),
+    ("🇵🇭", "PH"), ("🇲🇾", "MY"), ("🇻🇭", "VN"), ("🇦🇷", "AR"),
+    ("🇨🇱", "CL"), ("🇿🇦", "ZA"), ("🇦🇪", "AE"), ("🇮🇱", "IL"),
+    ("🇹🇷", "TR"), ("🇰🇿", "KZ"), ("🇺🇿", "UZ"), ("🇦🇿", "AZ"),
+    ("🇬🇪", "GE"), ("🇲🇩", "MD"), ("🇷🇴", "RO"), ("🇧🇬", "BG"),
+    ("🇬🇷", "GR"), ("🇵🇹", "PT"), ("🇨🇿", "CZ"), ("🇭🇺", "HU"),
+    ("🇷🇸", "RS"), ("🇸🇰", "SK"), ("🇸🇮", "SI"), ("🇭🇷", "HR"),
+    ("🇪🇪", "EE"), ("🇱🇹", "LT"), ("🇱🇻", "LV"), ("🇧🇪", "BE"),
+    ("🇦🇹", "AT"), ("🇮🇹", "IT"), ("🇪🇸", "ES"), ("🇵🇹", "PT"),
+    ("🇨🇭", "CH"), ("🇲🇽", "MX"), ("🇨🇴", "CO"), ("🇵🇪", "PE"),
+    ("🇮🇶", "IQ"), ("🇪🇬", "EG"), ("🇳🇬", "NG"), ("🇰🇪", "KE"),
+    ("🇲🇦", "MA"), ("🇹🇳", "TN"), ("🇳🇬", "NG"), ("🇹🇬", "TG"),
+    ("🇲🇰", "MK"), ("🇦🇱", "AL"), ("🇲🇩", "MD"), ("🇲🇽", "MX"),
+];
+
+/// 中文关键词 → 地区码
+///
+/// 必须排在国旗之前：本项目实测订阅用 🇨🇳 前缀标注港台节点
+/// （`🇨🇳 香港-极速-anytls-001` / `🇨🇳 台湾-住宅家宽-anytls-001`），
+/// 若国旗优先会把 20 个港台节点误判为 CN。
+const CN_KEYWORD_REGION: &[(&str, &str)] = &[
+    ("香港", "HK"), ("日本", "JP"), ("美国", "US"), ("美國", "US"),
+    ("台湾", "TW"), ("臺灣", "TW"), ("台灣", "TW"), ("新加坡", "SG"),
+    ("韩国", "KR"), ("韓國", "KR"), ("英国", "GB"), ("英國", "GB"),
+    ("德国", "DE"), ("法国", "FR"), ("加拿大", "CA"), ("澳洲", "AU"),
+    ("澳大利亚", "AU"), ("俄罗斯", "RU"), ("印度", "IN"), ("巴西", "BR"),
+    ("荷兰", "NL"), ("土耳其", "TR"), ("瑞典", "SE"), ("瑞士", "CH"),
+    ("丹麦", "DK"), ("挪威", "NO"), ("波兰", "PL"), ("乌克兰", "UA"),
+    ("越南", "VN"), ("泰国", "TH"), ("印尼", "ID"), ("菲律宾", "PH"),
+    ("马来西亚", "MY"), ("阿根廷", "AR"), ("智利", "CL"), ("南非", "ZA"),
+    ("阿联酋", "AE"), ("以色列", "IL"), ("哈萨克斯坦", "KZ"),
+    ("乌兹别克斯坦", "UZ"), ("阿塞拜疆", "AZ"), ("格鲁吉亚", "GE"),
+    ("摩尔多瓦", "MD"), ("罗马尼亚", "RO"), ("保加利亚", "BG"),
+    ("希腊", "GR"), ("葡萄牙", "PT"), ("捷克", "CZ"), ("匈牙利", "HU"),
+    ("塞尔维亚", "RS"), ("斯洛伐克", "SK"), ("斯洛文尼亚", "SI"),
+    ("克罗地亚", "HR"), ("爱沙尼亚", "EE"), ("立陶宛", "LT"),
+    ("拉脱维亚", "LV"), ("比利时", "BE"), ("奥地利", "AT"), ("意大利", "IT"),
+    ("西班牙", "ES"), ("墨西哥", "MX"), ("哥伦比亚", "CO"), ("秘鲁", "PE"),
+    ("伊拉克", "IQ"), ("埃及", "EG"), ("尼日利亚", "NG"), ("肯尼亚", "KE"),
+    ("摩洛哥", "MA"), ("突尼斯", "TN"), ("多哥", "TG"), ("北马其顿", "MK"),
+    ("阿尔巴尼亚", "AL"), ("中国大陆", "CN"), ("中国", "CN"),
+];
+
+/// 英文缩写 → 地区码（按 token 精确匹配，避免 "us" 误匹配 "Russia"）
+const EN_TOKEN_REGION: &[(&str, &str)] = &[
+    ("hk", "HK"), ("hongkong", "HK"), ("hong", "HK"),
+    ("jp", "JP"), ("japan", "JP"), ("tokyo", "JP"), ("osaka", "JP"),
+    ("us", "US"), ("usa", "US"), ("united", "US"), ("america", "US"),
+    ("tw", "TW"), ("taiwan", "TW"),
+    ("sg", "SG"), ("singapore", "SG"),
+    ("kr", "KR"), ("korea", "KR"), ("seoul", "KR"),
+    ("gb", "GB"), ("uk", "GB"), ("britain", "GB"), ("london", "GB"),
+    ("de", "DE"), ("germany", "DE"), ("fr", "FR"), ("france", "FR"),
+    ("ca", "CA"), ("canada", "CA"), ("au", "AU"), ("australia", "AU"),
+    ("ru", "RU"), ("russia", "RU"), ("in", "IN"), ("india", "IN"),
+    ("br", "BR"), ("brazil", "BR"), ("nl", "NL"), ("netherlands", "NL"),
+    ("tr", "TR"), ("turkey", "TR"), ("se", "SE"), ("sweden", "SE"),
+    ("ch", "CH"), ("switzerland", "CH"), ("dk", "DK"), ("denmark", "DK"),
+    ("no", "NO"), ("norway", "NO"), ("pl", "PL"), ("poland", "PL"),
+    ("ua", "UA"), ("ukraine", "UA"), ("vn", "VN"), ("vietnam", "VN"),
+    ("th", "TH"), ("thailand", "TH"), ("id", "ID"), ("indonesia", "ID"),
+    ("ph", "PH"), ("philippines", "PH"), ("my", "MY"), ("malaysia", "MY"),
+    ("ar", "AR"), ("argentina", "AR"), ("cl", "CL"), ("chile", "CL"),
+    ("za", "ZA"), ("ae", "AE"), ("il", "IL"), ("kz", "KZ"),
+    ("uz", "UZ"), ("az", "AZ"), ("ge", "GE"), ("md", "MD"),
+    ("ro", "RO"), ("bg", "BG"), ("gr", "GR"), ("pt", "PT"),
+    ("cz", "CZ"), ("hu", "HU"), ("rs", "RS"), ("sk", "SK"),
+    ("si", "SI"), ("hr", "HR"), ("ee", "EE"), ("lt", "LT"),
+    ("lv", "LV"), ("be", "BE"), ("at", "AT"), ("it", "IT"),
+    ("es", "ES"), ("mx", "MX"), ("co", "CO"), ("pe", "PE"),
+    ("iq", "IQ"), ("eg", "EG"), ("ng", "NG"), ("ke", "KE"),
+    ("ma", "MA"), ("tn", "TN"), ("tg", "TG"), ("mk", "MK"),
+    ("al", "AL"), ("cn", "CN"), ("china", "CN"),
+];
+
+/// 识别节点 tag 属于哪个地区
+///
+/// 三级匹配，顺序即优先级：
+/// 1. 中文关键词（最精确；且能纠正本订阅用 🇨🇳 标注港台的非常规前缀）
+/// 2. 国旗 emoji（覆盖实测 32 国）
+/// 3. 英文缩写（token 精确匹配）
+///
+/// 都未命中才落 OTHER——实测修复后 OTHER 从 295 降至个位数。
 fn detect_region(tag: &str) -> String {
     let lower = tag.to_lowercase();
 
-    if tag.contains("🇭🇰") {
-        return "HK".to_string();
+    for (kw, region) in CN_KEYWORD_REGION {
+        if tag.contains(*kw) {
+            return region.to_string();
+        }
     }
-    if tag.contains("🇯🇵") {
-        return "JP".to_string();
+    for (flag, region) in FLAG_REGION {
+        if tag.contains(*flag) {
+            return region.to_string();
+        }
     }
-    if tag.contains("🇺🇸") {
-        return "US".to_string();
-    }
-    if tag.contains("🇹🇼") {
-        return "TW".to_string();
-    }
-    if tag.contains("🇸🇬") {
-        return "SG".to_string();
-    }
-    if tag.contains("🇰🇷") {
-        return "KR".to_string();
-    }
-
-    if lower.contains("香港") {
-        return "HK".to_string();
-    }
-    if lower.contains("日本") {
-        return "JP".to_string();
-    }
-    if lower.contains("美国") || lower.contains("美國") {
-        return "US".to_string();
-    }
-    if lower.contains("台湾") || lower.contains("臺灣") || lower.contains("台灣") {
-        return "TW".to_string();
-    }
-    if lower.contains("新加坡") {
-        return "SG".to_string();
-    }
-    if lower.contains("韩国") || lower.contains("韓國") {
-        return "KR".to_string();
-    }
-
     let tokens = tokenize_tag(&lower);
-    if tokens
-        .iter()
-        .any(|&t| t == "hk" || t == "hongkong" || t == "hong")
-    {
-        return "HK".to_string();
+    for t in &tokens {
+        if let Some((_, region)) = EN_TOKEN_REGION.iter().find(|(k, _)| k == t) {
+            return region.to_string();
+        }
     }
-    if tokens.iter().any(|&t| t == "jp" || t == "japan") {
-        return "JP".to_string();
-    }
-    if tokens
-        .iter()
-        .any(|&t| t == "us" || t == "usa" || t == "united" || t == "america")
-    {
-        return "US".to_string();
-    }
-    if tokens.iter().any(|&t| t == "tw" || t == "taiwan") {
-        return "TW".to_string();
-    }
-    if tokens.iter().any(|&t| t == "sg" || t == "singapore") {
-        return "SG".to_string();
-    }
-    if tokens.iter().any(|&t| t == "kr" || t == "korea") {
-        return "KR".to_string();
-    }
-
     "OTHER".to_string()
 }
 
@@ -1935,7 +2012,12 @@ mod tests {
     }
 
     #[test]
-    fn test_custom_group_urltest_uses_group_tag_for_parameters() {
+    fn test_custom_groups_are_selectors_without_probing() {
+        // 2026-09-28 探测面改造：自定义组三种类型（selector/urltest/balance）
+        // 统一降级为 selector。组成员本就取自 auto 池，保留 urltest 只会让同一批
+        // 节点再被探一轮（实测 custom-Gemini可用 65 成员 ≈ 每轮 65 次冗余探测）。
+        // 「组内自动选最快」改由 AutoSelector 驱动，group_configs 的
+        // url/interval/tolerance 因此不再写入配置。
         let mut group_configs = std::collections::HashMap::new();
         group_configs.insert(
             "custom-jp".to_string(),
@@ -1943,14 +2025,6 @@ mod tests {
                 interval: Some(60),
                 url: Some("https://example.com/jp".to_string()),
                 tolerance: Some(7),
-            },
-        );
-        group_configs.insert(
-            "custom-balance".to_string(),
-            crate::commands::settings::GroupTestConfig {
-                interval: Some(70),
-                url: Some("https://example.com/balance".to_string()),
-                tolerance: Some(9),
             },
         );
         let config = ConfigBuilder::new(vec![make_node("日本节点")])
@@ -1973,18 +2047,161 @@ mod tests {
             .iter()
             .find(|o| o["tag"] == "custom-balance")
             .unwrap();
-        assert_eq!(jp["url"], "https://example.com/jp");
-        assert_eq!(jp["interval"], "60s");
-        assert_eq!(jp["tolerance"], 7);
-        // P1 修复（2026-09-27）：balance 型自定义组不再生成 urltest。
-        // 原实现按 urltest 发出与同成员 urltest 组重复的健康检查请求，
-        // 现降级为 selector（零探测开销），因此不再有 url/interval/tolerance。
-        // 该组仍保留全部成员，可由用户在面板手动改选。
-        assert_eq!(balance["type"], "selector");
-        assert!(balance.get("url").is_none());
-        assert!(balance.get("interval").is_none());
-        assert!(balance.get("tolerance").is_none());
-        assert_eq!(balance["outbounds"], json!(["日本节点"]));
+        for (name, g) in [("custom-jp", jp), ("custom-balance", balance)] {
+            assert_eq!(g["type"], "selector", "{} 应为 selector", name);
+            assert!(g.get("url").is_none(), "{} 不应带 url", name);
+            assert!(g.get("interval").is_none(), "{} 不应带 interval", name);
+            assert!(g.get("tolerance").is_none(), "{} 不应带 tolerance", name);
+            assert_eq!(g["outbounds"], json!(["日本节点"]));
+            // default 兜底：cache 无记录时不至于空组
+            assert_eq!(g["default"], "日本节点");
+        }
+    }
+
+    /// 地区识别：本订阅用 🇨🇳 前缀标注港台节点，中文关键词必须优先于国旗
+    #[test]
+    fn test_detect_region_prefers_cn_keyword_over_flag() {
+        // 旧实现按国旗优先，会把下面 20 个节点误判为 CN
+        assert_eq!(detect_region("🇨🇳 香港-极速-anytls-001"), "HK");
+        assert_eq!(detect_region("🇨🇳 台湾-住宅家宽-anytls-001"), "TW");
+        // 真正的中国大陆节点仍应判 CN
+        assert_eq!(detect_region("🇨🇳 中国-直连-001"), "CN");
+    }
+
+    /// 地区识别：覆盖实测 372 节点订阅出现的国家
+    #[test]
+    fn test_detect_region_covers_real_subscription_countries() {
+        let cases = [
+            ("🇺🇸 美国-下载专用-anytls-001", "US"),
+            ("🇸🇬 新加坡极速-anytls-001", "SG"),
+            ("🇯🇵 日本-住宅家宽-anytls-001", "JP"),
+            ("🇻🇳 越南-极速-anytls-001", "VN"),
+            ("🇨🇦 加拿大-全解锁-anytls-001", "CA"),
+            ("🇹🇷 土耳其-住宅家宽-anytls-001", "TR"),
+            ("🇧🇷 巴西-住宅家宽-anytls-001", "BR"),
+            ("🇸🇪 瑞典-住宅家宽-hy2-001", "SE"),
+            ("🇲🇰 北马其顿-住宅家宽-anytls-001", "MK"),
+            ("🇩🇪 德国-法兰克福-anytls-001", "DE"),
+            ("🇳🇱 荷兰-阿姆斯特丹-anytls-001", "NL"),
+        ];
+        for (tag, want) in cases {
+            assert_eq!(detect_region(tag), want, "{}", tag);
+        }
+    }
+
+    /// 地区识别：英文 token 精确匹配，不得子串误命中
+    #[test]
+    fn test_detect_region_token_boundary() {
+        assert_eq!(detect_region("US-Los Angeles-01"), "US");
+        assert_eq!(detect_region("russia-01"), "RU", "russia 属 RU");
+        // "us" 不得误匹配 "Russia"/"Australia" 中的子串
+        assert_eq!(detect_region("Australia-01"), "AU");
+        assert_ne!(detect_region("Russia-Moscow-01"), "US");
+    }
+
+    /// 地区识别：无法判定才落 OTHER
+    #[test]
+    fn test_detect_region_falls_back_to_other() {
+        assert_eq!(detect_region("SKYLUMO.CC"), "OTHER");
+        assert_eq!(detect_region("⚠️ 如果现在只能看到少数线路"), "OTHER");
+    }
+
+    /// 探测面改造的核心契约：生成的配置里**不再有任何 urltest 出站**。
+    ///
+    /// 这是本次改造收益的根——旧架构每轮 805 次探测全部来自 urltest 组
+    /// （auto 370 + OTHER 295 + custom-Gemini 65 + 地区组 75），且都经主实例
+    /// 发出，实测导致用户真实请求 15.2s 超时（338 次）。urltest 组归零后，
+    /// 内核不再发任何健康检查，探测全部由独立进程的探测面承担。
+    #[test]
+    fn test_no_urltest_outbound_remains() {
+        let config = ConfigBuilder::new(vec![
+            make_node("🇺🇸 美国-极速-anytls-001"),
+            make_node("🇯🇵 日本-住宅家宽-anytls-001"),
+            make_node("🇹🇼 台湾-住宅家宽-anytls-001"),
+        ])
+        .with_custom_groups(vec![json!({
+            "name": "Gemini可用", "enabled": true, "group_type": "urltest",
+            "match_type": "keyword", "keywords": ["美国"]
+        })])
+        .build()
+        .expect("build config 应该成功");
+
+        let outbounds = config["outbounds"].as_array().unwrap();
+        let urltests: Vec<&str> = outbounds
+            .iter()
+            .filter(|o| o["type"] == "urltest")
+            .filter_map(|o| o["tag"].as_str())
+            .collect();
+        assert!(
+            urltests.is_empty(),
+            "配置中不应残留 urltest 出站（会重新发起健康检查），实际: {:?}",
+            urltests
+        );
+        // auto / 地区组 / 自定义组都应为 selector
+        for tag in ["auto", "balance", "custom-Gemini可用"] {
+            let g = outbounds.iter().find(|o| o["tag"] == tag);
+            if let Some(g) = g {
+                assert_eq!(g["type"], "selector", "{} 应为 selector", tag);
+            }
+        }
+    }
+
+    /// auto 改 selector 后仍必须保留「default」兜底：
+    /// cache_file 无记录（首次安装/清缓存）时，组不能没有默认出口。
+    #[test]
+    fn test_auto_selector_has_default_fallback() {
+        let config = ConfigBuilder::new(vec![
+            make_node("🇺🇸 美国-极速-anytls-001"),
+            make_node("🇯🇵 日本-住宅家宽-anytls-001"),
+        ])
+        .build()
+        .expect("build config 应该成功");
+        let outbounds = config["outbounds"].as_array().unwrap();
+        let auto = outbounds.iter().find(|o| o["tag"] == "auto").unwrap();
+        assert_eq!(auto["type"], "selector");
+        let members = auto["outbounds"].as_array().unwrap();
+        assert_eq!(members.len(), 2, "auto 成员应为全部有效节点");
+        assert_eq!(
+            auto["default"], members[0].as_str().unwrap(),
+            "default 应指向首个成员，作为 cache 无记录时的兜底"
+        );
+    }
+
+    /// 地区组成员是 auto 成员的子集——这正是「组不再自己探测」的收益前提。
+    #[test]
+    fn test_region_groups_are_subsets_of_auto() {
+        let config = ConfigBuilder::new(vec![
+            make_node("🇺🇸 美国-极速-anytls-001"),
+            make_node("🇺🇸 美国-住宅家宽-anytls-002"),
+            make_node("🇯🇵 日本-住宅家宽-anytls-001"),
+        ])
+        .build()
+        .expect("build config 应该成功");
+        let outbounds = config["outbounds"].as_array().unwrap();
+        let auto: std::collections::HashSet<&str> = outbounds
+            .iter()
+            .find(|o| o["tag"] == "auto")
+            .unwrap()["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        for o in outbounds.iter().filter(|o| o["type"] == "selector") {
+            let tag = o["tag"].as_str().unwrap();
+            if !tag.ends_with("-auto") || tag == "auto" {
+                continue;
+            }
+            for m in o["outbounds"].as_array().unwrap() {
+                let m = m.as_str().unwrap();
+                assert!(
+                    auto.contains(m),
+                    "{} 的成员 {} 必须属于 auto（否则组成员永不被探测）",
+                    tag,
+                    m
+                );
+            }
+        }
     }
 
     /// P0 回归（2026-09-27）：节点出站必须自带 domain_resolver，
