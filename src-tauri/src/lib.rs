@@ -5,12 +5,16 @@ pub mod commands;
 pub mod core;
 pub mod core_paths;
 pub mod fs_utils;
+pub mod probe;
 pub mod speedtest;
 pub mod system;
 
 use core::sidecar::SidecarManager;
 use speedtest::scheduler::SpeedTestScheduler;
 use commands::unlock_check::UnlockCheckScheduler;
+use probe::scheduler::{ProbeConfig, ProbeScheduler};
+use probe::guard::{ActiveHealthGuard, HealthGuardConfig};
+use probe::selector::{AutoSelector, SelectorConfig};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -52,6 +56,13 @@ pub fn run() {
     let sidecar_manager = Arc::new(SidecarManager::new());
     let speedtest_scheduler = Arc::new(SpeedTestScheduler::new());
     let unlock_scheduler = Arc::new(UnlockCheckScheduler::new());
+    // 探测调度器：常驻 test-core + 分层/抖动/退避的延迟测量（唯一真相源）。
+    // 与吞吐测速的短命 test-core 走不同端口段，二者可并存互不阻塞。
+    let probe_scheduler = Arc::new(ProbeScheduler::new(ProbeConfig::default()));
+    let probe_scheduler_for_exit = probe_scheduler.clone();
+    // 健康守卫句柄：setup 启动、Exit 停止。Mutex<Option<>> 因二者分处两个闭包。
+    let guard_for_exit = std::sync::Arc::new(std::sync::Mutex::new(None::<Arc<ActiveHealthGuard>>));
+    let guard_for_exit_in_setup = guard_for_exit.clone();
     // test-core 管理器：Exit 钩子持有（退出清理短命测试内核）；
     // setup 与 run 两个 move 闭包各自捕获一个克隆
     let test_core_manager = Arc::new(core::test_core::TestCoreManager::new());
@@ -61,6 +72,7 @@ pub fn run() {
         .manage(sidecar_manager.clone())
         .manage(speedtest_scheduler.clone())
         .manage(unlock_scheduler.clone())
+        .manage(probe_scheduler.clone())
         // 注册单例插件，确保只运行一个实例
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 如果尝试启动新实例，将其聚焦（可以触发某些事件）
@@ -234,6 +246,48 @@ pub fn run() {
                     log::error!("[app] 核心自愈与拉起发生错误: {}", e);
                 }
 
+                // 探测面启动：与主实例完全隔离的第二进程，探测流量不与用户流量
+                // 抢连接资源（旧架构下 805 次/轮脉冲导致用户请求 15s 超时）。
+                // 放在核心拉起之后：探测面消费的是订阅节点池，与主实例无依赖，
+                // 但先让主实例出网可保证「网络先可用、测量后进行」。
+                let probe = app_handle.state::<Arc<ProbeScheduler>>().inner().clone();
+                match commands::subscription::collect_active_outbounds() {
+                    Ok(nodes) if !nodes.is_empty() => {
+                        if let Err(e) = probe.refresh(nodes, true).await {
+                            log::warn!("[probe] 探测面启动失败（不影响主实例代理）: {}", e);
+                        } else {
+                            // 挂载 auto 组的选点器：auto 已是 selector，
+                            // 「选谁」由 AutoSelector 依据节点表经 ClashAPI 下发。
+                            // 注意此时 auto 已持有内核从 cache 恢复的上次选择，
+                            // 即「网络先可用，优选后收敛」。
+                            let sel = Arc::new(AutoSelector::new(
+                                SelectorConfig::default(),
+                                probe.table(),
+                            ));
+                            probe.attach_selector(sel.clone()).await;
+                            probe.clone().spawn_loop();
+                            // 健康守卫：故障转移的主检测器。每 1s 测一次**主实例**
+                            // 当前节点（用户真实路径），连续 2 次失败即切换。
+                            // 内核做不到这件事——urltest 只在 interval 定时点重测，
+                            // 而 370 节点下缩短 interval 会产生 74 req/s 的探测洪峰
+                            // （实测 10 成员 interval=5s 即 10 req/s），正是本次
+                            // 故障的根源（805 次脉冲 → 用户 15.2s 超时）。
+                            let guard = Arc::new(ActiveHealthGuard::new(
+                                HealthGuardConfig::default(),
+                                probe.table(),
+                                sel,
+                            ));
+                            guard_for_exit_in_setup
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .replace(guard.clone());
+                            guard.spawn_loop();
+                        }
+                    }
+                    Ok(_) => log::info!("[probe] 暂无节点，跳过探测面启动"),
+                    Err(e) => log::warn!("[probe] 读取订阅节点失败，跳过探测面启动: {}", e),
+                }
+
                 // 若开启了开机自启静默启动，隐藏窗口
                 let settings = commands::settings::settings_get_internal(&app_handle);
                 if settings.start_minimized {
@@ -270,6 +324,20 @@ pub fn run() {
                         core.stop().await;
                     });
                 }
+                // 探测面是常驻进程（非短命），退出时必须显式回收，
+                // 否则会残留一个持有 40040+ 端口段的 sing-box
+                {
+                    let probe = probe_scheduler_for_exit.clone();
+                    tauri::async_runtime::block_on(async move {
+                        probe.shutdown().await;
+                    });
+                }
+                // 健康守卫：停止循环（其依赖的主实例此时尚未停止）
+                guard_for_exit
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take()
+                    .map(|g| g.stop());
                 let settings = commands::settings::settings_get_internal(app_handle);
                 if settings.core.run_mode == "service" {
                     log::info!("[app] 服务模式退出：停止系统服务");
