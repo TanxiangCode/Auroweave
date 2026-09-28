@@ -54,10 +54,25 @@ jobs:
         run: npm run version:check
 
       - name: 校验 tag 版本与 package.json 一致
+        # tag 触发时 tag 应与 package.json 版本一致；手动 dispatch 时
+        # GITHUB_REF_NAME 是分支名，不适用此校验，直接跳过。
         run: |
           set -euo pipefail
           PKG=$(node -p "require('./package.json').version")
-          TAG="${GITHUB_REF_NAME}"
+          REF="${GITHUB_REF_NAME}"
+          case "$REF" in
+            v[0-9]*)
+              if [ "${REF#v}" != "$PKG" ]; then
+                echo "::error::tag 版本 (${REF#v}) 与 package.json ($PKG) 不一致"
+                echo "先执行 npm run version:set -- ${REF#v} 再打 tag"
+                exit 1
+              fi
+              echo "✅ tag 版本一致：$REF"
+              ;;
+            *)
+              echo "ℹ️ 非 tag 触发（GITHUB_REF_NAME=$REF），跳过 tag 版本校验"
+              ;;
+          esac
 
   build:
     name: 构建 macOS arm64
@@ -212,11 +227,34 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # TAG 推导必须分清两种触发来源：
+          #   - tag 触发：GITHUB_REF_NAME 就是 v0.8.0，直接用
+          #   - 手动 dispatch：GITHUB_REF_NAME 是**分支名**（如 main），
+          #     拿它当 tag 会建出名为 "main" 的 Release，而 latest.json
+          #     里的 URL 指向 releases/download/v0.8.0/ → 用户端 404。
+          #     故手动触发时一律以 package.json 版本号为准。
+          PKG=$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]+)".*/\1/p' \
+            package.json | head -1)
+          [ -n "$PKG" ] || { echo "::error::无法解析 package.json 版本号"; exit 1; }
+
           TAG="${GITHUB_REF_NAME}"
-          if [ -n "${{ inputs.version }}" ]; then
-            TAG="${{ inputs.version }}"
-          fi
+          case "$TAG" in
+            v[0-9]*)
+              # tag 触发：校验 tag 与 package.json 一致，避免版本漂移
+              if [ "${TAG#v}" != "$PKG" ]; then
+                echo "::error::tag 版本 (${TAG#v}) 与 package.json ($PKG) 不一致"
+                echo "先执行 npm run version:set -- ${TAG#v} 再打 tag"
+                exit 1
+              fi
+              ;;
+            *)
+              # 非 v* 开头 → 手动 dispatch 打在分支上，用包版本号当 tag
+              TAG="v${PKG}"
+              ;;
+          esac
           VERSION="${TAG#v}"
+          echo "发布 tag：$TAG（GITHUB_REF_NAME=${GITHUB_REF_NAME}，PKG=$PKG）"
+
           # tag 已存在时（重跑 workflow）先删掉旧 Release，否则 gh 会报冲突
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，删除后重建"
@@ -253,22 +291,3 @@ jobs:
           done
           echo "::error::updater 端点 $URL 不可访问，线上用户将无法收到更新"
           exit 1
-
-          name: auroweave-macos-arm64
-          path: |
-            target/release/bundle/macos/Auroweave.app.tar.gz
-            target/release/bundle/macos/Auroweave.app.tar.gz.sig
-            target/release/bundle/dmg/*.dmg
-          retention-days: 7
-          if-no-files-found: error
-
-          if [ -n "${{ inputs.version }}" ]; then
-            TAG="${{ inputs.version }}"
-          fi
-          TAG_VER="${TAG#v}"
-          if [ "$TAG_VER" != "$PKG" ]; then
-            echo "::error::tag 版本 ($TAG_VER) 与 package.json ($PKG) 不一致"
-            echo "先执行 npm run version:set -- $TAG_VER 再打 tag"
-            exit 1
-          fi
-          echo "✅ 版本一致：$TAG_VER"
