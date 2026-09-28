@@ -111,16 +111,6 @@ jobs:
         # hdiutil 偶发失败而阻塞整个发布——而 dmg 对自更新毫无作用。
         run: npx tauri build --bundles app
 
-      - name: 打包 DMG（可选，失败不阻塞发布）
-        continue-on-error: true
-        # `tauri bundle` 复用上一步已编译好的二进制，不会重新编译 Rust。
-        # 用 `|| true` 而非仅靠 continue-on-error，是为了让本步骤末尾的
-        # 提示信息也能正常打印。
-        run: |
-          npx tauri bundle --bundles dmg || {
-            echo "::warning::DMG 打包失败（GitHub runner 上 hdiutil 偶发问题），继续发布；dmg 不影响自更新"
-          }
-
       - name: 校验更新产物与签名
         run: |
           set -euo pipefail
@@ -139,6 +129,17 @@ jobs:
             || (echo "::error::签名格式异常或缺少版本号"; exit 1)
           echo "--- 签名信息 ---"
           base64 -d < "$BUNDLE/macos/Auroweave.app.tar.gz.sig" | grep -a "trusted comment"
+
+      # DMG 必须排在上面的校验之后：`tauri bundle` 打完 dmg 会顺手删掉
+      # bundle/macos/Auroweave.app（只留 .app.tar.gz 与 .sig），若放在
+      # 校验之前，上面的 `test -d ... .app` 必然失败。
+      - name: 打包 DMG（可选，失败不阻塞发布）
+        continue-on-error: true
+        # `tauri bundle` 复用上一步已编译好的二进制，不会重新编译 Rust。
+        run: |
+          npx tauri bundle --bundles dmg || {
+            echo "::warning::DMG 打包失败（GitHub runner 上 hdiutil 偶发问题），继续发布；dmg 不影响自更新"
+          }
 
       # 先把产物收拢到一个扁平目录再上传。
       # upload-artifact 对多文件 path 会保留其相对目录层级
