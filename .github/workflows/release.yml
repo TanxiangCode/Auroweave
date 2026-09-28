@@ -59,7 +59,9 @@ jobs:
         run: |
           set -euo pipefail
           PKG=$(node -p "require('./package.json').version")
-          REF="${GITHUB_REF_NAME}"
+          # workflow_dispatch 时 GITHUB_REF_NAME 可能未定义，
+          # `set -u` 下直接引用会 unbound variable 退出，故加 :- 兜底
+          REF="${GITHUB_REF_NAME:-}"
           case "$REF" in
             v[0-9]*)
               if [ "${REF#v}" != "$PKG" ]; then
@@ -237,7 +239,7 @@ jobs:
             package.json | head -1)
           [ -n "$PKG" ] || { echo "::error::无法解析 package.json 版本号"; exit 1; }
 
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${GITHUB_REF_NAME:-}"
           case "$TAG" in
             v[0-9]*)
               # tag 触发：校验 tag 与 package.json 一致，避免版本漂移
@@ -253,7 +255,7 @@ jobs:
               ;;
           esac
           VERSION="${TAG#v}"
-          echo "发布 tag：$TAG（GITHUB_REF_NAME=${GITHUB_REF_NAME}，PKG=$PKG）"
+          echo "发布 tag：$TAG（GITHUB_REF_NAME=${GITHUB_REF_NAME:-<未定义>}，PKG=$PKG）"
 
           # tag 已存在时（重跑 workflow）先删掉旧 Release，否则 gh 会报冲突
           if gh release view "$TAG" >/dev/null 2>&1; then
