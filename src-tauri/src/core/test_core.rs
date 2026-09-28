@@ -16,12 +16,51 @@ use tokio::process::Child;
 use tokio::sync::Mutex;
 use log::{info, warn};
 
-/// 单批次节点上限（同时占用的端口数）：批次越大进程重启越少，但单配置
-/// 出站数过多会拖慢 sing-box 启动（去重/校验随节点数线性）。32 为经验平衡值。
-pub const TEST_CORE_BATCH_SIZE: usize = 32;
+/// 端口布局（三段互不重叠，各自独立成环）
+///
+/// 探测面（常驻）与吞吐测速（短命）历史上共用 40040 基址：探测面一旦常驻，
+/// 吞吐测速再在同一段起进程必然撞端口。改为三段隔离后，探测面常驻不再阻塞
+/// 吞吐测速，二者可并存（各自独立生命周期，无需互斥等待）。
+///
+/// 段边界与节点规模：探测面段容量 = SINGLE_NODE_PORT_BASE - PROBE_PLANE_PORT_BASE
+/// = 2000，远超任何现实订阅规模；`probe_plane::spawn` 另有显式越界校验。
+pub const PROBE_PLANE_PORT_BASE: u16 = 40040;
+pub const THROUGHPUT_PORT_BASE: u16 = 41040;
+pub const SINGLE_NODE_PORT_BASE: u16 = 42040;
 
-/// 默认端口基址（settings.test_core_port_base 可覆盖）
-pub const DEFAULT_PORT_BASE: u16 = 40040;
+/// 单批次节点上限（吞吐测速路径的出站/入站对数）。
+///
+/// 原值 32 的理由是注释所述「单配置出站数过多会拖慢 sing-box 启动」，该假设已
+/// 被实测推翻（2026-09-28，sing-box 1.14.2 / macOS-arm64，370 节点真实订阅）：
+///
+/// ```text
+/// $ sing-box check -c <372 inbounds + 373 outbounds + 372 rules>
+/// real 0m0.061s
+/// $ sing-box run   -c <同上>
+/// 372 个端口全部 LISTEN，就绪 < 100ms
+/// ```
+///
+/// 启动开销对节点数近线性且常数极小，远小于「每 32 个重启一次进程」的代价
+/// ——370 节点在旧配置下要拉起 12 次进程、经历 12 轮「最多 3s 就绪」上限。
+/// 现默认一次装下全部节点（受段容量 2000 约束，见上）。
+pub const TEST_CORE_BATCH_SIZE: usize = 480;
+
+/// 默认端口基址（settings.test_core_port_base 可覆盖；作用于吞吐测速段）
+pub const DEFAULT_PORT_BASE: u16 = THROUGHPUT_PORT_BASE;
+
+/// 单节点检测专用基址：与吞吐测速段错开 1000 端口。
+/// 调用方仍必须持有 test-core 全局锁保护共享配置文件。
+pub fn single_node_port_base(port_base: u16) -> u16 {
+    if port_base == THROUGHPUT_PORT_BASE {
+        SINGLE_NODE_PORT_BASE
+    } else {
+        port_base.wrapping_add(1000)
+    }
+}
+
+/// 探测面段可容纳的最大节点数（端口号连续占用，1 节点 = 1 端口）
+pub const PROBE_PLANE_MAX_NODES: usize =
+    (SINGLE_NODE_PORT_BASE - PROBE_PLANE_PORT_BASE) as usize;
 
 /// test-core 全局互斥锁（解锁检测/吞吐测速两调度器共享）：
 /// 不同调度器各自 new 的 TestCoreManager 并发 spawn 会端口打架（同一基址
@@ -33,15 +72,28 @@ pub async fn acquire_global_lock() -> tokio::sync::MutexGuard<'static, ()> {
     TEST_CORE_GLOBAL_LOCK.lock().await
 }
 
-/// 单节点检测专用基址：批量走 test_core_port_base，单节点错开 500 端口段，
-/// 与批量端口段错开；调用方仍必须持有 test-core 全局锁保护共享配置文件。
-pub fn single_node_port_base(port_base: u16) -> u16 {
-    port_base.wrapping_add(500)
-}
-
 // ============================================================
 // N-1 测试配置生成
 // ============================================================
+
+/// 节点集合指纹（FNV-1a 64，tag 排序后计算）
+///
+/// 用于探测面判断「常驻实例是否已覆盖当前节点集」：订阅未变时直接复用常驻
+/// 进程（零重启），变了才重建。顺序无关——传入顺序不同但集合相同则指纹相同。
+pub fn node_fingerprint(nodes: &[crate::core::parser::ParsedOutbound]) -> u64 {
+    let mut tags: Vec<&str> = nodes.iter().map(|n| n.tag.as_str()).collect();
+    tags.sort_unstable();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for t in tags {
+        for b in t.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x1000_0000_01b3);
+        }
+        h ^= 0xff; // tag 边界分隔，避免 "ab"+"c" 与 "a"+"bc" 同指纹
+        h = h.wrapping_mul(0x1000_0000_01b3);
+    }
+    h
+}
 
 /// 节点索引分片（32/批；返回原节点列表的下标分批，避免克隆 raw_json）
 pub fn plan_batches(len: usize, batch_size: usize) -> Vec<Vec<usize>> {
@@ -124,9 +176,17 @@ pub fn build_test_config(
     }))
 }
 
-/// 测试配置文件路径（config_test.json，与主配置同目录便于相对定位二进制）
+/// 测试配置文件路径（与主配置同目录便于相对定位二进制）
+///
+/// 按端口段分文件：探测面常驻、吞吐测速短命，若共用同一文件，两者同时存在时
+/// 后写者会覆盖前者配置，被覆盖一方随后重启即加载到错误的节点集。
 pub fn test_config_path() -> PathBuf {
-    crate::get_config_dir().join("config_test.json")
+    test_config_path_for(THROUGHPUT_PORT_BASE)
+}
+
+/// 指定端口段对应的测试配置文件路径
+pub fn test_config_path_for(port_base: u16) -> PathBuf {
+    crate::get_config_dir().join(format!("config_test_{port_base}.json"))
 }
 
 /// 批次端口可用性预检：TcpListener 试占全部端口后立即释放
@@ -169,6 +229,9 @@ pub struct TestCoreManager {
 struct TestCoreInner {
     child: Option<Child>,
     status: TestCoreStatus,
+    /// 常驻实例消费的节点集指纹（Idle 时为 0）；`ensure_running` 据此判定
+    /// 「节点集未变 → 复用常驻进程，零重启」
+    fingerprint: u64,
 }
 
 impl TestCoreManager {
@@ -181,14 +244,14 @@ impl TestCoreManager {
                 .map_err(|e| warn!("[test-core] 创建 Job Object 失败（退出兜底退化为 Exit 钩子）: {}", e))
                 .ok();
             Self {
-                inner: Arc::new(Mutex::new(TestCoreInner { child: None, status: TestCoreStatus::Idle })),
+                inner: Arc::new(Mutex::new(TestCoreInner { child: None, status: TestCoreStatus::Idle, fingerprint: 0 })),
                 lifecycle_lock: Arc::new(Mutex::new(())),
                 job,
             }
         }
         #[cfg(not(target_os = "windows"))]
         Self {
-            inner: Arc::new(Mutex::new(TestCoreInner { child: None, status: TestCoreStatus::Idle })),
+            inner: Arc::new(Mutex::new(TestCoreInner { child: None, status: TestCoreStatus::Idle, fingerprint: 0 })),
             lifecycle_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -238,8 +301,9 @@ impl TestCoreManager {
         }
 
         // 生成 + 原子写配置（复用 fs_utils；写盘在 async 上下文但量小可忽略）
+        // 按端口段分文件：探测面常驻时不被短命的吞吐测速覆盖
         let config = build_test_config(nodes, effective_base)?;
-        let path = test_config_path();
+        let path = test_config_path_for(effective_base);
         crate::fs_utils::atomic_write(&path, &serde_json::to_vec_pretty(&config).unwrap_or_default())
             .map_err(|e| AppError::Io(format!("写入测试配置失败: {}", e)))?;
 
@@ -310,6 +374,7 @@ impl TestCoreManager {
             *inner = TestCoreInner {
                 child: Some(child),
                 status: TestCoreStatus::Running { port_base: effective_base, node_count: count },
+                fingerprint: node_fingerprint(nodes),
             };
         }
 
@@ -317,13 +382,44 @@ impl TestCoreManager {
         Ok(effective_base)
     }
 
+    /// 常驻语义拉取：节点集未变则复用现有进程，变了才重建
+    ///
+    /// 探测面在应用生命周期内常驻，每次调度 tick 都可能调用本方法。订阅未刷新
+    /// 时节点集指纹不变 → 直接返回既有基址，**零进程重启**（这是常驻架构相对
+    /// 「每批重启」的核心收益：370 节点原本每轮要拉起 12 次进程）。
+    ///
+    /// 返回实际使用的端口基址；调用方按 `base + index` 映射节点端口。
+    pub async fn ensure_running(
+        &self,
+        nodes: &[crate::core::parser::ParsedOutbound],
+        port_base: u16,
+    ) -> Result<u16, AppError> {
+        let fp = node_fingerprint(nodes);
+        {
+            let inner = self.inner.lock().await;
+            if let TestCoreStatus::Running { port_base: base, node_count } = inner.status {
+                if inner.fingerprint == fp && node_count == nodes.len() {
+                    return Ok(base);
+                }
+            }
+        }
+        // 节点集变了（或进程已死）：先回收再重建
+        self.stop().await;
+        self.spawn(nodes, port_base).await
+    }
+
     /// 停止测试内核（幂等）：kill + wait(3s) + 删配置文件
     pub async fn stop(&self) {
         let _lifecycle = self.lifecycle_lock.lock().await;
-        let child = {
+        let (child, used_base) = {
             let mut inner = self.inner.lock().await;
+            let used_base = match inner.status {
+                TestCoreStatus::Running { port_base, .. } => Some(port_base),
+                TestCoreStatus::Idle => None,
+            };
             inner.status = TestCoreStatus::Idle;
-            inner.child.take()
+            inner.fingerprint = 0;
+            (inner.child.take(), used_base)
         };
         if let Some(mut child) = child {
             if let Err(e) = child.kill().await {
@@ -334,7 +430,11 @@ impl TestCoreManager {
                 Err(_) => warn!("[test-core] 测试内核 3 秒内未退出，进程可能残留"),
             }
         }
-        let _ = std::fs::remove_file(test_config_path());
+        // 只删本实例实际写过的那个段的文件：误删另一段（探测面常驻）的配置
+        // 会让对方下次重启前配置缺失
+        if let Some(base) = used_base {
+            let _ = std::fs::remove_file(test_config_path_for(base));
+        }
     }
 }
 
@@ -372,6 +472,80 @@ mod tests {
                 "password": "test"
             }),
         }
+    }
+
+    #[test]
+    fn port_segments_are_disjoint_and_ordered() {
+        // 探测面 / 吞吐 / 单节点三段必须互不重叠且升序——重叠会导致常驻探测面
+        // 与短命吞吐测速抢同一批端口（实测 370 节点时表现为后者起不来）
+        assert!(PROBE_PLANE_PORT_BASE < THROUGHPUT_PORT_BASE);
+        assert!(THROUGHPUT_PORT_BASE < SINGLE_NODE_PORT_BASE);
+        // 探测面段容量须覆盖现实订阅规模（本项目实测 370~380 节点）
+        assert!(
+            PROBE_PLANE_MAX_NODES >= 1000,
+            "探测面段容量 {} 过小，370 节点订阅会越界",
+            PROBE_PLANE_MAX_NODES
+        );
+        // 单节点基址在默认吞吐基址下映射到独立段，不落在探测面段内
+        let single = single_node_port_base(DEFAULT_PORT_BASE);
+        assert!(single >= SINGLE_NODE_PORT_BASE);
+        assert!(
+            (PROBE_PLANE_PORT_BASE..PROBE_PLANE_PORT_BASE + PROBE_PLANE_MAX_NODES as u16)
+                .all(|p| p != single),
+            "单节点端口不得落入探测面段"
+        );
+    }
+
+    #[test]
+    fn single_batch_covers_realistic_pool_without_restart() {
+        // 370 节点真实订阅：旧配置（batch=32）要拉起 12 次进程；
+        // 现配置一次装下 → 常驻架构每轮零重启
+        let plan = plan_batches(370, TEST_CORE_BATCH_SIZE);
+        assert_eq!(plan.len(), 1, "370 节点应落在单个批次内");
+        assert_eq!(plan[0].len(), 370);
+    }
+
+    #[test]
+    fn fingerprint_is_order_independent_and_change_sensitive() {
+        let a = mock_node("HK-01", "a.example.com");
+        let b = mock_node("JP-01", "b.example.com");
+        let c = mock_node("US-01", "c.example.com");
+
+        // 顺序无关：ensure_running 据此复用常驻进程
+        assert_eq!(
+            node_fingerprint(&[a.clone(), b.clone(), c.clone()]),
+            node_fingerprint(&[c.clone(), a.clone(), b.clone()])
+        );
+        // 集合变化 → 指纹变化（订阅刷新后必须重建）
+        assert_ne!(
+            node_fingerprint(&[a.clone(), b.clone()]),
+            node_fingerprint(&[a.clone(), b.clone(), c.clone()])
+        );
+        // tag 是身份：同名节点即便 server 不同也视为同一节点（订阅原地更新参数
+        // 不应触发探测面重建——那是刷新路径显式 stop 的职责）
+        assert_eq!(
+            node_fingerprint(&[a.clone()]),
+            node_fingerprint(&[mock_node("HK-01", "other.example.com")])
+        );
+        // 空集有稳定指纹（非 0，避免与 Idle 的 0 哨兵混淆）
+        assert_ne!(node_fingerprint(&[]), 0);
+    }
+
+    #[test]
+    fn fingerprint_does_not_conflate_tag_boundaries() {
+        // 无分隔符拼接会让 "ab"+"c" 与 "a"+"bc" 同指纹 → 误判常驻实例可复用
+        let ab_c = vec![mock_node("ab", "x.example.com"), mock_node("c", "y.example.com")];
+        let a_bc = vec![mock_node("a", "x.example.com"), mock_node("bc", "y.example.com")];
+        assert_ne!(node_fingerprint(&ab_c), node_fingerprint(&a_bc));
+    }
+
+    #[test]
+    fn test_config_paths_are_per_segment() {
+        // 常驻探测面与短命吞吐测速必须写不同文件，否则互相覆盖节点集
+        let probe = test_config_path_for(PROBE_PLANE_PORT_BASE);
+        let tp = test_config_path_for(THROUGHPUT_PORT_BASE);
+        assert_ne!(probe, tp);
+        assert_eq!(test_config_path(), tp, "默认路径应指向吞吐测速段");
     }
 
     #[test]
