@@ -141,6 +141,11 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      # 必须 checkout：latest.json 需要读 package.json 里的版本号。
+      # 本 job 跑在 ubuntu 上（产物来自 macOS runner 的 artifact），
+      # 只有拉下代码才能取到版本号。
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: auroweave-macos-arm64
@@ -151,7 +156,11 @@ jobs:
       - name: 生成 latest.json
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
+          # 用 grep/sed 而非 `node -p`：ubuntu runner 未装 node，
+          # 也不值得为读一个字段去 setup-node
+          VERSION=$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]+)".*/\1/p' \
+            package.json | head -1)
+          [ -n "$VERSION" ] || { echo "::error::无法从 package.json 解析版本号"; exit 1; }
           SIGNATURE=$(cat artifacts/Auroweave.app.tar.gz.sig)
           REPO="${GITHUB_REPOSITORY}"
           cat > latest.json <<EOF
