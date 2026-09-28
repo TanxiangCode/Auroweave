@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 批量延迟测试取消标志
 static LATENCY_CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -74,6 +74,31 @@ pub async fn speedtest_run_latency(
         ));
     }
 
+    let clash_client = Arc::new(ClashApiClient::default());
+
+    // 防御：剔除「策略组」tag。组不是可测延迟的真实出口，测它会得到组当前
+    // 所选节点的延迟，并被当成该节点的结果写库——实测历史库中出现过
+    // `auto` / `SG-auto` 两条组 tag 记录（stats.dat delay_ms=0），
+    // 污染节点存活趋势并让后续统计失真。
+    // 前端已按 type 过滤，这里是后端兜底（单节点测速入口无此前端过滤）。
+    let node_tags = match filter_out_group_tags(&clash_client, node_tags).await {
+        Ok(v) => v,
+        Err(e) => {
+            // 读不到类型时保守放行：内核可能尚未就绪，不该因此让整个测速不可用
+            log::warn!("[speedtest] 读取策略组类型失败，跳过组 tag 过滤: {}", e);
+            return Ok(ApiResponse::err(
+                AppError::Network(format!("无法校验节点列表（策略组类型读取失败）: {}", e)),
+                502,
+            ));
+        }
+    };
+    if node_tags.is_empty() {
+        return Ok(ApiResponse::err(
+            AppError::Validation("节点列表中不含可测试的真实节点".to_string()),
+            400,
+        ));
+    }
+
     // 重置取消标志
     LATENCY_CANCELLED.store(false, Ordering::Relaxed);
 
@@ -96,7 +121,6 @@ pub async fn speedtest_run_latency(
     }
 
     let total = node_tags.len();
-    let clash_client = Arc::new(ClashApiClient::default());
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
     let mut join_set = tokio::task::JoinSet::new();
 
@@ -125,18 +149,31 @@ pub async fn speedtest_run_latency(
                 return (tag, 0u16);
             }
 
-            let mut delay = match client.get_node_delay(&tag, &url, timeout_ms).await {
-                Ok(d) => d,
+            let first = client.get_node_delay(&tag, &url, timeout_ms).await;
+            let mut delay = match &first {
+                Ok(d) => *d,
                 Err(e) => {
-                    log::debug!("[speedtest] 节点 [{}] 延迟测试初次失败: {}", tag, e);
+                    log::debug!("[speedtest] 节点 [{}] 延迟测试失败: {}", tag, e);
                     0u16
                 }
             };
 
-            // 偶发抖动退避重试（若超时且未取消，等待 400ms 退避重试 1 次，过滤网络瞬态丢包）
+            // 仅对「值不值得重试」的失败做一次重试。
+            //
+            // 旧实现对**所有**失败统一「退避 400ms 重试 1 次」。实测该订阅延迟
+            // p50=803ms / p90=1437ms / max=2975ms，超时预算 3000ms——超时的节点
+            // 重试仍然超时，这 400ms + 3s 纯属把整批耗时翻倍：
+            // 370 节点 ÷ 并发 20 = 19 波 × (3s+0.4s+3s) ≈ 121s 最坏耗时。
+            //
+            // 现改为按失败分类决策：只有传输层瞬态错误值得立刻重试；
+            // 超时/不可达/DNS 属确定性失败，直接判失败——探测面会按分类退避后
+            // 在独立进程上重试，既不占用户带宽也不拖慢本批。
             if delay == 0 && !LATENCY_CANCELLED.load(Ordering::Relaxed) {
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                if !LATENCY_CANCELLED.load(Ordering::Relaxed) {
+                let transient = match &first {
+                    Err(e) => is_transient_delay_error(e),
+                    Ok(_) => false,
+                };
+                if transient {
                     if let Ok(retry_d) = client.get_node_delay(&tag, &url, timeout_ms).await {
                         delay = retry_d;
                     }
@@ -198,14 +235,38 @@ pub async fn speedtest_run_latency(
         });
     }
 
-    // 若当前为 auto / urltest 策略组，显式触发 sing-box 内核进行策略组级优选刷新
-    if !group_tag.is_empty() && (group_tag == "auto" || group_tag == "balance" || group_tag.ends_with("-auto")) {
-        let client = clash_client.clone();
-        let gt = group_tag.clone();
-        let url = test_url.clone();
-        tokio::spawn(async move {
-            let _ = client.trigger_urltest_group_delay(&gt, &url, timeout_ms).await;
-            log::info!("[speedtest] 已触发 URLTest 策略组 [{}] 内部最优节点重选", gt);
+    // 不再触发内核 URLTest 组级重选。
+    //
+    // 旧实现在前端刚探完 370 个节点之后，又让内核对该组再全量探一次
+    // （trigger_urltest_group_delay），与 180s 周期心跳撞在一起，等于把探测量
+    // 翻倍；而选点职责现已归探测面（唯一真相源 + 独立进程），内核侧重复测量
+    // 只会重新把探测流量压回主实例——正是 15s 超时的成因。
+    //
+    // 同时把本批结果灌回探测表：用户手动点「测延迟」是一次高意图全量测量，
+    // 不应让这些结果只停留在 speedtest_history 而与调度器状态脱节。
+    let probe_state: Option<std::sync::Arc<crate::probe::scheduler::ProbeScheduler>> =
+        app_handle.try_state::<std::sync::Arc<crate::probe::scheduler::ProbeScheduler>>().map(|s| s.inner().clone());
+    if let Some(sch) = probe_state {
+        let table = sch.table();
+        let snapshot: Vec<(String, u16)> = results
+            .iter()
+            .map(|(t, d)| (t.clone(), *d))
+            .collect();
+        tauri::async_runtime::spawn(async move {
+            let mut t = table.write().await;
+            let now = chrono::Utc::now().timestamp_millis();
+            for (tag, d) in snapshot {
+                if let Some(n) = t.get_mut(&tag) {
+                    if d > 0 {
+                        n.record_success(d, now);
+                    } else {
+                        n.record_failure(
+                            crate::probe::table::FailureClass::Timeout,
+                            now,
+                        );
+                    }
+                }
+            }
         });
     }
 
@@ -216,6 +277,79 @@ pub async fn speedtest_run_latency(
     );
 
     Ok(ApiResponse::ok(results))
+}
+
+/// 剔除列表中的「策略组」tag，只保留真实节点
+///
+/// 组（selector / urltest / fallback）不是可测延迟的出口：对它取 delay 得到的是
+/// **组当前所选节点**的延迟，写库后会被当成该节点自己的结果。实测历史库中因此
+/// 出现过 `auto` / `SG-auto` 两条组 tag 记录（delay_ms=0）。
+///
+/// 内核不可达时返回 Err，由调用方决定策略（当前实现选择明确失败而非静默放行，
+/// 因为放行等于把「未知是否为组」当作「是节点」处理，正是本函数要防的事）。
+async fn filter_out_group_tags(
+    client: &ClashApiClient,
+    tags: Vec<String>,
+) -> Result<Vec<String>, AppError> {
+    let json = client.get_proxies().await?;
+    let proxies = json
+        .get("proxies")
+        .and_then(|p| p.as_object())
+        .ok_or_else(|| AppError::Network("ClashAPI /proxies 响应缺少 proxies 字段".into()))?;
+
+    // 读不到类型的 tag 一律剔除：宁可少测，也不能把组当节点测
+    let mut kept = Vec::with_capacity(tags.len());
+    let mut dropped = Vec::new();
+    for tag in tags {
+        match proxies.get(&tag).and_then(|v| v.get("type")).and_then(|t| t.as_str()) {
+            Some(t) if is_group_type(t) => dropped.push(tag),
+            Some(_) => kept.push(tag),
+            None => dropped.push(tag),
+        }
+    }
+    if !dropped.is_empty() {
+        log::info!(
+            "[speedtest] 剔除 {} 个非节点 tag（策略组或已下线）: {:?}",
+            dropped.len(),
+            &dropped[..dropped.len().min(5)]
+        );
+    }
+    Ok(kept)
+}
+
+/// sing-box ClashAPI 报告的策略组类型（不是可测延迟的真实出口）
+fn is_group_type(t: &str) -> bool {
+    matches!(
+        t.to_ascii_lowercase().as_str(),
+        "selector" | "urltest" | "fallback" | "loadbalance"
+            | "direct" | "block" | "reject" | "dns"
+    )
+}
+
+/// 判定延迟测试失败是否为「传输层瞬态错误」（值得立即重试一次）
+///
+/// 与探测面 `FailureClass::worth_retry_now` 保持同一判据：只有 TLS 握手类
+/// 瞬态错误值得重试；超时 / 不可达 / DNS 失败都是确定性结果，重试只会让
+/// 整批耗时翻倍（实测 370 节点最坏 121s）。
+fn is_transient_delay_error(e: &AppError) -> bool {
+    let AppError::Network(msg) = e else {
+        return false;
+    };
+    let m = msg.to_lowercase();
+    // 504 = 内核侧探测超时（确定性：节点就是慢/死）
+    // 503 = 不可达（确定性）
+    // 握手/证书类瞬态错误才重试
+    !m.contains("504")
+        && !m.contains("503")
+        && !m.contains("超时")
+        && !m.contains("timeout")
+        && !m.contains("不可达")
+        && (m.contains("tls")
+            || m.contains("handshake")
+            || m.contains("握手")
+            || m.contains("证书")
+            || m.contains("connection reset")
+            || m.contains("reset by peer"))
 }
 
 fn build_unified_probe_client(port: u16, timeout_ms: u64) -> Option<reqwest::Client> {
@@ -318,10 +452,13 @@ fn record_latency_result(
     pending.push((tag, delay));
 }
 
-/// test-core 统一延迟全量流程：每 32 节点一批，复用同一 HTTP 客户端连接测二次 RTT。
+/// test-core 统一延迟全量流程：每批一组，复用同一 HTTP 客户端连接测二次 RTT。
+///
+/// 注：`group_tag` 已不再用于触发内核组级重选（探测流量不得回到主实例），
+/// 保留参数是为了不改动调用方签名与既有日志语义。
 async fn run_unified_latency_test(
     app: AppHandle,
-    group_tag: String,
+    #[allow(unused_variables)] group_tag: String,
     node_tags: Vec<String>,
     concurrency: usize,
     timeout_ms: u64,
@@ -438,17 +575,7 @@ async fn run_unified_latency_test(
     }
     emit_latency_terminal(&app, total);
 
-    if !group_tag.is_empty()
-        && (group_tag == "auto" || group_tag == "balance" || group_tag.ends_with("-auto"))
-    {
-        let client = ClashApiClient::default();
-        let url = test_url.clone();
-        tokio::spawn(async move {
-            let _ = client
-                .trigger_urltest_group_delay(&group_tag, &url, timeout_ms)
-                .await;
-        });
-    }
+    // 同上：不再触发内核 URLTest 组级重选（探测流量不得回到主实例）
     log::info!(
         "[speedtest] unified-delay 完成: 成功 {} / 失败 {} / 总计 {}",
         results.values().filter(|&&delay| delay > 0).count(),
@@ -639,6 +766,21 @@ pub async fn speedtest_get_history(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn group_type_detection_covers_all_sing_box_group_kinds() {
+        // 策略组一律不可测延迟：对它取 delay 得到的是「组当前所选节点」的延迟，
+        // 写库后会被当成该节点的结果（实测历史库出现过 auto / SG-auto 两条）
+        for t in ["Selector", "URLTest", "Fallback", "LoadBalance", "Direct", "Block", "Reject", "DNS"] {
+            assert!(is_group_type(t), "{} 应被识别为组", t);
+        }
+        // 真实节点类型不得被误判为组
+        for t in ["AnyTLS", "Hysteria2", "Shadowsocks", "Trojan", "VMess", "VLESS", "TUIC"] {
+            assert!(!is_group_type(t), "{} 是真实节点，不应被剔除", t);
+        }
+        // 大小写不敏感（ClashAPI 返回大小写不统一）
+        assert!(is_group_type("selector") && is_group_type("URLTEST"));
+    }
+
     use super::*;
     use crate::core::test_core::single_node_port_base;
     use std::sync::atomic::{AtomicUsize, Ordering};

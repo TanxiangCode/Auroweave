@@ -93,6 +93,24 @@ fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // 探测面状态表（2026-09-28）：节点延迟表的持久化。
+    //
+    // 目的：重启后不必把 370 个节点全部重探一遍。旧架构每次重启都要等
+    // 「首次 urltest 轮完成」才能选出可用节点（实测批量优选 7 天未跑完一次），
+    // 持久化后启动即可用历史延迟做决策，只对过期的少数节点复探。
+    //
+    // 语义：每个节点一行（node_tag 主键），存最近一次成功的延迟与失败计数。
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS probe_state (
+            node_tag TEXT PRIMARY KEY,
+            rtt_ms INTEGER,          /* null=从未成功/已失效 */
+            last_ok_at INTEGER,      /* 最近成功时间戳(ms) */
+            fail_streak INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
     // 历史保留期裁剪（plan-O O-3）：unlock/speedtest 两表只增不删会无限膨胀，
     // 且趋势查询本就 LIMIT 20——90 天外数据无消费者。开库一次，幂等（<10ms）
     if let Err(e) = prune_history(conn) {
@@ -269,6 +287,98 @@ pub fn add_speedtest_records_batch(records: Vec<(String, u64, u64, Option<u64>)>
         Ok(())
     }) {
         log::warn!("[stats_db] 批量写入测速历史失败: {}", e);
+    }
+}
+
+// ============================================================
+// 探测面状态持久化（2026-09-28）
+// ============================================================
+
+/// 持久化的单节点探测态
+#[derive(Debug, Clone)]
+pub struct ProbeStateRecord {
+    pub node_tag: String,
+    pub rtt_ms: Option<u16>,
+    pub last_ok_at: Option<i64>,
+    pub fail_streak: u32,
+}
+
+/// 批量写入探测态（单事务；探测轮结束时调用）
+///
+/// 只写「本轮有变化的」节点——稳态下每轮变化的是少数到期节点，
+/// 全量写 370 行会白白产生 fsync。
+pub fn upsert_probe_states(records: Vec<ProbeStateRecord>) {
+    if records.is_empty() {
+        return;
+    }
+    let now = chrono::Utc::now().timestamp_millis();
+    if let Err(e) = with_conn(|conn| {
+        conn.execute_batch("BEGIN;")?;
+        {
+            let mut stmt = conn.prepare(
+                "INSERT INTO probe_state (node_tag, rtt_ms, last_ok_at, fail_streak, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(node_tag) DO UPDATE SET
+                     rtt_ms = excluded.rtt_ms,
+                     last_ok_at = excluded.last_ok_at,
+                     fail_streak = excluded.fail_streak,
+                     updated_at = excluded.updated_at",
+            )?;
+            for r in &records {
+                stmt.execute(rusqlite::params![
+                    r.node_tag,
+                    r.rtt_ms.map(|v| v as i64),
+                    r.last_ok_at,
+                    r.fail_streak as i64,
+                    now
+                ])?;
+            }
+        }
+        conn.execute_batch("COMMIT;")?;
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 写入探测状态失败: {}", e);
+    }
+}
+
+/// 读回全部探测态（启动时回填节点表）
+pub fn load_probe_states() -> HashMap<String, ProbeStateRecord> {
+    with_conn(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT node_tag, rtt_ms, last_ok_at, fail_streak FROM probe_state",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ProbeStateRecord {
+                node_tag: row.get(0)?,
+                rtt_ms: row.get::<_, Option<i64>>(1)?.map(|v| v as u16),
+                last_ok_at: row.get(2)?,
+                fail_streak: row.get::<_, i64>(3)? as u32,
+            })
+        })?;
+        let mut map = HashMap::new();
+        for r in rows {
+            let rec = r?;
+            map.insert(rec.node_tag.clone(), rec);
+        }
+        Ok(map)
+    })
+    .unwrap_or_default()
+}
+
+/// 清除探测态（订阅删除联动清理，避免孤儿数据在下次回填时复活）
+pub fn delete_probe_states(tags: &[String]) {
+    if tags.is_empty() {
+        return;
+    }
+    if let Err(e) = with_conn(|conn| {
+        let mut stmt =
+            conn.prepare("DELETE FROM probe_state WHERE node_tag = ?1")?;
+        for t in tags {
+            stmt.execute(rusqlite::params![t])?;
+        }
+        Ok(())
+    }) {
+        log::warn!("[stats_db] 清理探测状态失败: {}", e);
     }
 }
 

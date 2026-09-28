@@ -602,58 +602,32 @@ async fn build_and_apply_config(
         log::warn!("[subscription] ClashAPI 在 3 秒内未就绪，后续代理列表可能暂时为空");
     }
 
-    // 关键修复：配置重载后自动触发 URLTest 组测速，使其能选择最优节点
-    // 避免用户看不到 auto 组当前使用的节点
+    // 节点表刷新：探测面消费生成时刻的订阅快照。
+    //
+    // 这里**不再**逐组触发 URLTest 测速。旧实现对每个「尚无 now」的 urltest 组
+    // 串行发一次组级测速（每组 10s 超时上限），实测 8 组串行耗时 23s
+    // （auroweave.log 07:11:29→07:11:52），而这些组互为子集、测的又是同一批
+    // 节点，纯属重复劳动；更糟的是它阻塞在「网络已重载、组还没选出节点」的
+    // 窗口里，正是用户感知「恢复网络很慢」的那段。
+    //
+    // 现在改为：把新节点集交给探测面（常驻 test-core，独立进程），延迟测量
+    // 与选择都不再占用主实例，也不阻塞订阅刷新返回。
     if api_ready {
-        let urltest_groups = match clash_client.get_proxies().await {
-            Ok(json) => {
-                if let Some(proxies) = json.get("proxies").and_then(|p| p.as_object()) {
-                    proxies
-                        .iter()
-                        .filter(|(_, v)| {
-                            v.get("type").and_then(|t| t.as_str()) == Some("URLTest")
-                                && !v
-                                    .get("now")
-                                    .and_then(|n| n.as_str())
-                                    .map(|s| !s.is_empty())
-                                    .unwrap_or(false)
-                        })
-                        .map(|(name, _)| name.clone())
-                        .collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                }
+        let probe = app_handle.state::<std::sync::Arc<crate::probe::scheduler::ProbeScheduler>>();
+        match collect_active_outbounds() {
+            Ok(nodes) if !nodes.is_empty() => {
+                let sch = probe.inner().clone();
+                // 订阅刷新是同步语义，但重建常驻内核需 await；
+                // 此处只投递刷新意图，实际重建在探测循环内完成
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = sch.refresh(nodes, false).await {
+                        log::warn!("[subscription] 探测面刷新失败（不影响代理可用性）: {}", e);
+                    }
+                });
+                log::info!("[subscription] 已将节点集交由探测面，延迟测量不再阻塞刷新");
             }
-            Err(e) => {
-                log::warn!("[subscription] 获取 URLTest 组失败: {}", e);
-                Vec::new()
-            }
-        };
-
-        if !urltest_groups.is_empty() {
-            let test_count = urltest_groups.len();
-            log::info!(
-                "[subscription] 检测到 {} 个未选择节点的 URLTest 组，开始自动测速",
-                test_count
-            );
-
-            for group_tag in urltest_groups {
-                log::info!("[subscription] 触发 URLTest 组 {} 的自动测速", group_tag);
-                // 调用新添加的 trigger_urltest_group_delay 方法
-                let delay_url = "http://www.gstatic.com/generate_204";
-                let _ = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(10),
-                    clash_client.trigger_urltest_group_delay(&group_tag, delay_url, 5000),
-                )
-                .await;
-
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-
-            log::info!(
-                "[subscription] 已触发 {} 个 URLTest 组的自动测速，使其选择最优节点",
-                test_count
-            );
+            Ok(_) => log::info!("[subscription] 订阅无有效节点，跳过探测面刷新"),
+            Err(e) => log::warn!("[subscription] 读取节点失败，跳过探测面刷新: {}", e),
         }
     }
 
