@@ -90,6 +90,94 @@ impl FailureClass {
     }
 }
 
+/// 节点延迟画像 —— 区分「天生慢」与「抖动大」
+///
+/// # 全部使用相对量纲，不含任何绝对毫秒阈值
+///
+/// 早期版本用「中位 > 1500ms 算慢」「floor = 2000ms」这类**绝对阈值**，
+/// 那是照着某一个机场的样本反推的，直接换订阅就失效：
+///
+/// ```text
+/// 欧洲订阅（median 50ms）→ floor 2000ms 成了唯一约束，
+///                          50ms 的节点也要等 2×2000=4s 才判死
+/// 跨太平洋专线（median 800ms 稳定）→ 3×800=2400ms 勉强够，
+///                          但若该线路 p50=1200ms 就逼近 ceil
+/// ```
+///
+/// 故此处只用**比值**：节点自身的离散度、以及它与全体节点中位数的相对位置。
+/// 绝对毫秒值一律由观测数据推导（fleet median），不写死。
+///
+/// # 两个关键量
+///
+/// - `jitter` = (p95 − median) / median：该节点自身的波动幅度。**无量纲**，
+///   与机场无关
+/// - `rel_slow` = median / fleet_median：该节点比同订阅其他节点慢多少倍。
+///   **无量纲**，自动适配「整体很快」或「整体很慢」的订阅
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LatencyProfile {
+    /// 样本不足，无法判断
+    Unknown,
+    /// 与全体节点同步（既不特别慢也不特别抖）
+    Typical,
+    /// 明显比同订阅其他节点慢，但自身稳定 → 天生慢线路
+    RelativelySlow,
+    /// 自身波动大 → 抖动
+    Jittery,
+}
+
+impl LatencyProfile {
+    /// 判定所需的最少样本
+    const MIN_SAMPLES: usize = 4;
+    /// 相对全体中位数慢到此倍数以上即判「天生慢」（2× = 明显更慢）
+    const REL_SLOW_RATIO: f64 = 2.0;
+    /// 自身离散度超过此值即判「抖动」（p95 达中位数的 2 倍）
+    const JITTER_RATIO: f64 = 1.0;
+
+    /// 由样本 + 全体中位数判定画像
+    ///
+    /// `fleet_median_ms` 为全体节点成功延迟的中位数（0 = 尚无全局样本）。
+    pub fn classify(samples: &[u16], fleet_median_ms: u64) -> Self {
+        if samples.len() < Self::MIN_SAMPLES {
+            return LatencyProfile::Unknown;
+        }
+        let mut v: Vec<u64> = samples.iter().map(|s| *s as u64).collect();
+        v.sort_unstable();
+        let median = v[v.len() / 2] as f64;
+        if median <= 0.0 {
+            return LatencyProfile::Unknown;
+        }
+        let p95 = v[((v.len() as f64) * 0.95).min(v.len() as f64 - 1.0) as usize] as f64;
+        // 自身波动：无量纲
+        let jitter = (p95 - median) / median;
+        // 相对全体：与订阅整体对比，自动适配整体快/慢
+        let rel_slow = if fleet_median_ms > 0 {
+            median / fleet_median_ms as f64
+        } else {
+            1.0
+        };
+
+        if jitter >= Self::JITTER_RATIO {
+            LatencyProfile::Jittery
+        } else if fleet_median_ms > 0 && rel_slow >= Self::REL_SLOW_RATIO {
+            LatencyProfile::RelativelySlow
+        } else {
+            LatencyProfile::Typical
+        }
+    }
+
+    /// 该画像下的余量倍数调整
+    ///
+    /// - `RelativelySlow`：基线本身就大，按同一倍数算出的超时可能撞上
+    ///   `ceil` 而失去区分度，故额外 +1 档
+    /// - 其余：基准倍数（抖动已由「按倍数而非按绝对值放宽」天然覆盖）
+    pub fn slack_adjust(self, base_slack: u32) -> u32 {
+        match self {
+            LatencyProfile::RelativelySlow => base_slack.saturating_add(1),
+            _ => base_slack,
+        }
+    }
+}
+
 /// 自适应超时策略 —— 按节点自身历史 RTT 推导探测超时
 ///
 /// # 为什么不能用固定值
@@ -130,40 +218,43 @@ impl FailureClass {
 /// 再放大只会拖慢故障检测。
 #[derive(Debug, Clone)]
 pub struct AdaptiveTimeout {
-    /// 无节点历史、无全局样本时的回退基准（毫秒）
-    pub default_baseline_ms: u32,
     /// 全局 RTT 指数滑动均值（跨节点共享，作为新节点先验）
     global_ewma_ms: Arc<AtomicU32>,
     /// 余量倍数
     pub slack: u32,
-    /// 下限（毫秒）：再快的节点也不低于此，避免抖动误判
-    pub floor_ms: u64,
-    /// 上限（毫秒）：再慢的节点也不超过此，否则故障检测失去意义
-    pub ceil_ms: u64,
+    /// 下限相对 fleet 中位数的倍数：再快的节点也不低于 fleet×此值
+    ///
+    /// 用倍数而非绝对毫秒，才能同时适配「欧洲 50ms 节点」与
+    /// 「跨太平洋 800ms 专线」两类订阅——绝对值只对采样时那一家有效。
+    pub floor_ratio: f64,
+    /// 上限相对 fleet 中位数的倍数：保证故障检测延迟有上界
+    pub ceil_ratio: f64,
+    /// 冷启动兜底：连一个样本都没有时用（毫秒）。
+    /// 仅在首轮探测前生效，一旦有任意样本即被 fleet 中位数取代。
+    pub cold_start_ms: u64,
 }
 
 impl Default for AdaptiveTimeout {
     fn default() -> Self {
         Self {
-            default_baseline_ms: 1500, // 实测 p90=1402，取整留余量
             global_ewma_ms: Arc::new(AtomicU32::new(0)),
             slack: 3,
-            floor_ms: 2000,
-            ceil_ms: 6000,
+            // 2× / 8× fleet 中位数：既不为极快节点设过高的绝对下限，
+            // 也不给极慢节点无限放宽
+            floor_ratio: 2.0,
+            ceil_ratio: 8.0,
+            cold_start_ms: 5000,
         }
     }
 }
 
 impl AdaptiveTimeout {
-    /// 覆盖超时上下界（供上层按配置或测试调整）
+    /// 覆盖冷启动兜底值（首轮探测前、尚无任何样本时使用）
     ///
     /// 用 builder 而非结构体更新语法：`global_ewma_ms` 刻意保持私有
     /// （它是跨节点共享的运行时状态，不该被外部随手重置）。
-    pub fn with_bounds(mut self, floor_ms: u64, ceil_ms: u64) -> Self {
-        let floor = floor_ms.max(1);
-        self.floor_ms = floor;
-        // ceil 必须 ≥ floor，否则 clamp 会产出倒挂区间
-        self.ceil_ms = ceil_ms.max(floor);
+    pub fn with_cold_start(mut self, ms: u64) -> Self {
+        self.cold_start_ms = ms.max(1);
         self
     }
 
@@ -204,6 +295,26 @@ impl AdaptiveTimeout {
     /// `node` 的延迟是该节点自己的最近一次成功值——它反映「这条线路有多快」，
     /// 比全局统计更能预测「它现在还该不该在这个时间内回应」。
     pub fn timeout_ms_for(&self, node: Option<&NodeProbe>) -> u64 {
+        self.timeout_ms_for_with(node, None)
+    }
+
+    /// 画像感知版：传入该节点近期的成功延迟样本后自动选择余量
+    ///
+    /// 样本不足时画像为 `Unknown`，用基准倍数——此时**无法**区分「天生慢」
+    /// 与「抖动」，保守起见不额外放宽。这是有意的：宁可少优化，也不能在
+    /// 信息不足时做出错误判断。
+    pub fn timeout_ms_for_with(
+        &self,
+        node: Option<&NodeProbe>,
+        samples: Option<&[u16]>,
+    ) -> u64 {
+        let profile = LatencyProfile::classify(
+            samples.unwrap_or(&[]),
+            self.global_baseline_ms() as u64,
+        );
+        // 画像修正余量：相对慢的节点基线本就大，需成比例放宽
+        let slack = profile.slack_adjust(self.slack);
+
         let baseline = node
             .and_then(|n| n.rtt_ms)
             .map(|r| r as u32)
@@ -215,13 +326,30 @@ impl AdaptiveTimeout {
                     None
                 }
             })
-            .unwrap_or(self.default_baseline_ms);
+            .unwrap_or(self.cold_start_ms as u32);
+
+        // 上下界由 **fleet 中位数 × 比例** 导出，而非写死毫秒数。
+        // 这是跨机场自适应的关键：fleet 50ms → floor 100ms（快节点快速判定）；
+        // fleet 800ms → floor 1600ms（慢节点不会被自身速度误杀）。
+        // 500ms 绝对下限兜底「fleet 极快时 floor 退化到毫秒级」的极端情况。
+        let anchor = if self.global_baseline_ms() > 0 {
+            self.global_baseline_ms() as f64
+        } else {
+            // 冷启动：用当前节点自身基线当锚，避免全部退化为兜底值
+            baseline as f64
+        };
+        let floor = (anchor * self.floor_ratio).max(500.0);
+        // `RelativelySlow` 已证实在「稳定地慢」，多等一会远小于误杀可用节点
+        let ceil = match profile {
+            LatencyProfile::RelativelySlow => (anchor * self.ceil_ratio * 2.0).max(floor),
+            _ => (anchor * self.ceil_ratio).max(floor),
+        };
 
         // 连续失败时收紧：失效节点通常立即失败（连接被拒），无需等满余量。
         // 封顶 1 倍——收到 floor 保护，且不把偶发抖动误判为快速失效。
         let shrink = 1u32 << node.map(|n| n.fail_streak).unwrap_or(0).min(1);
-        let raw = baseline.saturating_mul(self.slack) / shrink;
-        (raw as u64).clamp(self.floor_ms, self.ceil_ms)
+        let raw = baseline.saturating_mul(slack) / shrink;
+        (raw as f64).clamp(floor, ceil) as u64
     }
 }
 
@@ -243,7 +371,19 @@ pub struct NodeProbe {
     pub next_due_at: i64,
     /// 分层间隔基准（用户可配；随节点走以支持按组差异化）
     pub intervals: TierIntervals,
+    /// 近期成功延迟样本（环形缓冲，容量 `RTT_SAMPLE_CAP`）
+    ///
+    /// 用途：`LatencyProfile` 据此区分「天生慢」与「抖动大」——这是自适应
+    /// 超时能自动适配任意机场（而非只适配本机实测数据）的关键。
+    /// 只存成功样本：失败节点没有「延迟」可言。
+    pub rtt_samples: Vec<u16>,
 }
+
+/// RTT 样本环形容量
+///
+/// 8 个样本足够让 median 与 p95 稳定（各需 ≥5），又不会让 NodeProbe 随
+/// 节点数×历史无限膨胀：370 节点 × 8 × 2B ≈ 6KB。
+pub const RTT_SAMPLE_CAP: usize = 8;
 
 impl NodeProbe {
     pub fn new(tag: &str, now: i64) -> Self {
@@ -263,7 +403,21 @@ impl NodeProbe {
             next_due_at: now
                 + Self::jitter_offset(tag, intervals.standby_ms),
             intervals,
+            rtt_samples: Vec::with_capacity(RTT_SAMPLE_CAP),
         }
+    }
+
+    /// 记入一条 RTT 样本（环形，满则丢弃最旧的）
+    fn push_sample(&mut self, rtt_ms: u16) {
+        if self.rtt_samples.len() >= RTT_SAMPLE_CAP {
+            self.rtt_samples.remove(0);
+        }
+        self.rtt_samples.push(rtt_ms);
+    }
+
+    /// 该节点的延迟画像（`fleet_median_ms` 为全体节点中位数，0 = 尚无全局样本）
+    pub fn latency_profile(&self, fleet_median_ms: u64) -> LatencyProfile {
+        LatencyProfile::classify(&self.rtt_samples, fleet_median_ms)
     }
 
     /// 本层基准间隔（读用户覆盖，非硬编码）
@@ -298,6 +452,7 @@ impl NodeProbe {
 
     /// 记录一次成功
     pub fn record_success(&mut self, rtt_ms: u16, now: i64) {
+        self.push_sample(rtt_ms);
         self.rtt_ms = Some(rtt_ms);
         self.last_ok_at = Some(now);
         self.fail_streak = 0;
@@ -314,6 +469,7 @@ impl NodeProbe {
     /// 比探测面（独立 test-core 进程）更权威——同一进程、同一连接资源。
     /// 顺带把下次探测推后一个间隔，免除探测面对该节点的重复测量。
     pub fn record_observed(&mut self, rtt_ms: u16, now: i64) {
+        self.push_sample(rtt_ms);
         self.rtt_ms = Some(rtt_ms);
         self.last_ok_at = Some(now);
         self.fail_streak = 0;
@@ -783,103 +939,167 @@ mod adaptive_timeout_tests {
 
     const NOW: i64 = 1_700_000_000_000;
 
-    fn node_with_rtt(rtt: Option<u16>) -> NodeProbe {
+    fn node_with(rtt: Option<u16>, samples: &[u16]) -> NodeProbe {
         let mut n = NodeProbe::new("x", NOW);
         n.rtt_ms = rtt;
+        n.rtt_samples = samples.to_vec();
         n
     }
 
-    /// 实测分布（1756 样本）：p50=802 p95=1605 p99=2390 max=2975
-    /// 自适应超时的核心价值：快节点不必等满上界
-    #[test]
-    fn fast_node_gets_far_shorter_timeout_than_slow_node() {
+    /// 喂样本让全局先验（fleet 中位数代理）收敛到目标值
+    fn seeded(target_ms: u16) -> AdaptiveTimeout {
         let a = AdaptiveTimeout::default();
-        // 高速节点（p50 量级）
-        let fast = a.timeout_ms_for(Some(&node_with_rtt(Some(300))));
-        // 慢速节点（p99 量级）
-        let slow = a.timeout_ms_for(Some(&node_with_rtt(Some(2400))));
-        assert_eq!(fast, 2_000, "高速节点应落到 floor");
-        assert_eq!(slow, 6_000, "慢速节点应落到 ceil");
-        assert!(
-            slow > fast * 2,
-            "自适应必须显著区分快慢节点（{slow} vs {fast}）"
-        );
+        for _ in 0..64 {
+            a.observe(target_ms);
+        }
+        a
     }
 
-    /// 相对固定 5000ms 的收益：高速节点的故障检测快一倍以上
+    // ---- 核心：跨机场自适应 ----
+
+    /// 同一个 3×余量，在「快订阅」与「慢订阅」上应给出正比的结果。
+    /// 这是相对量纲改造的立论：写死毫秒只会对采样时那一家有效。
     #[test]
-    fn adaptive_beats_fixed_ceiling_for_most_nodes() {
-        let a = AdaptiveTimeout::default();
-        let fixed = 5_000u64;
-        // 典型分布下多数节点应显著快于固定上界
-        let p50_node = a.timeout_ms_for(Some(&node_with_rtt(Some(802))));
+    fn timeout_scales_with_fleet_speed_not_hardcoded() {
+        let fast = seeded(50); // 欧洲订阅：中位 50ms
+        let slow = seeded(800); // 跨太平洋：中位 800ms
+
+        let t_fast = fast.timeout_ms_for(Some(&node_with(Some(50), &[])));
+        let t_slow = slow.timeout_ms_for(Some(&node_with(Some(800), &[])));
+
         assert!(
-            p50_node < fixed,
-            "p50 节点的探测超时应短于固定上界：{p50_node} vs {fixed}"
+            t_slow > t_fast * 4,
+            "慢订阅的超时应远大于快订阅：{t_slow} vs {t_fast}"
         );
+        // 且慢订阅的超时不应被某个写死的上限压平
+        assert!(t_slow > 2_000, "慢订阅被硬编码上限压平了：{t_slow}");
     }
 
-    /// 无历史的冷启动节点：不得因「拿不到基线」而使用过紧的超时
+    /// 地板：快订阅的节点也必须留抖动余量，但不应像绝对 floor=2000ms 那样
+    /// 让 50ms 的节点白等 4 秒。
     #[test]
-    fn cold_start_node_uses_safe_default() {
+    fn fast_fleet_gets_small_floor() {
+        let a = seeded(50);
+        let t = a.timeout_ms_for(Some(&node_with(Some(50), &[])));
+        assert!(t < 1_000, "快订阅的 floor 过大：{t}ms（应为 ~2×50=100~500）");
+        assert!(t >= 500, "仍需绝对下限防抖：{t}ms");
+    }
+
+    /// 冷启动：零样本时用兜底值，但不得崩溃
+    #[test]
+    fn cold_start_is_safe() {
         let a = AdaptiveTimeout::default();
         let t = a.timeout_ms_for(None);
-        // 无基线时至少要有 floor 保护，不能因缺数据就误杀
-        assert!(t >= a.floor_ms, "冷启动超时 {t} 低于 floor {}", a.floor_ms);
+        assert!(t > 0, "冷启动超时必须为正");
     }
 
-    /// 全局 EWMA 先验：无历史节点应继承其他节点的经验，而非一律用兜底值
+    // ---- 画像：只用相对量纲 ----
+
+    /// 抖动节点：自身 p95 达中位 2 倍
     #[test]
-    fn global_ewma_acts_as_prior_for_new_nodes() {
-        let a = AdaptiveTimeout::default();
-        assert_eq!(a.global_baseline_ms(), 0, "初始无样本");
-        let t_before = a.timeout_ms_for(None);
-        a.observe(2400); // 观测到一个慢节点
-        assert_eq!(a.global_baseline_ms(), 2400);
-        let t_after = a.timeout_ms_for(None);
-        assert!(
-            t_after >= t_before,
-            "先验变慢后超时不应收紧：{t_before} → {t_after}"
+    fn jittery_profile_needs_no_extra_slack() {
+        // 中位 800，p95 1600 → jitter=1.0 → Jittery
+        let p = LatencyProfile::classify(&[800, 820, 780, 1600, 790], 800);
+        assert_eq!(p, LatencyProfile::Jittery);
+        // 抖动已由「按倍数放宽」覆盖，无需再加 slack
+        assert_eq!(p.slack_adjust(3), 3);
+    }
+
+    /// 相对慢：比全体中位数慢 2 倍以上，但自身稳定
+    #[test]
+    fn relatively_slow_profile_gets_extra_slack() {
+        // 中位 1600 稳定，fleet 中位 800 → rel_slow=2.0 → RelativelySlow
+        let p = LatencyProfile::classify(&[1600, 1580, 1620, 1610], 800);
+        assert_eq!(p, LatencyProfile::RelativelySlow);
+        assert_eq!(p.slack_adjust(3), 4, "相对慢的节点需要额外余量");
+    }
+
+    /// 同样的绝对延迟，fleet 不同 → 画像不同。这是相对量纲的核心价值。
+    #[test]
+    fn same_rtt_yields_different_profile_by_fleet() {
+        let samples = [1600, 1580, 1620, 1610];
+        // 混在大池子里（fleet 800）→ 相对慢
+        assert_eq!(
+            LatencyProfile::classify(&samples, 800),
+            LatencyProfile::RelativelySlow
+        );
+        // 混在小池子里（fleet 2000）→ 只是典型
+        assert_eq!(
+            LatencyProfile::classify(&samples, 2000),
+            LatencyProfile::Typical
         );
     }
 
-    /// EWMA 抗抖动：单次极慢观测不应把全局先验带偏太多
+    /// 样本不足时不得妄下判断
+    #[test]
+    fn insufficient_samples_yield_unknown() {
+        assert_eq!(LatencyProfile::classify(&[100, 200], 800), LatencyProfile::Unknown);
+        assert_eq!(LatencyProfile::classify(&[], 800), LatencyProfile::Unknown);
+    }
+
+    /// 中位快但波动大 → Jittery 优先于 RelativelySlow
+    #[test]
+    fn jitter_takes_precedence_over_slow() {
+        // 中位 1600（慢）但 p95 4000（cv=1.5 抖）→ 抖动是主要矛盾
+        let p = LatencyProfile::classify(&[1600, 1610, 1590, 4000, 1605], 800);
+        assert_eq!(p, LatencyProfile::Jittery);
+    }
+
+    // ---- EWMA 先验抗离群 ----
+
     #[test]
     fn ewma_resists_single_outlier() {
         let a = AdaptiveTimeout::default();
-        for _ in 0..10 {
-            a.observe(800);
+        for _ in 0..40 {
+            a.observe(500);
         }
         let before = a.global_baseline_ms();
-        a.observe(9000); // 一次异常
+        a.observe(9000);
         let after = a.global_baseline_ms();
-        // α=1/4 → 单次异常最多拉高 25%
         assert!(
-            after <= before + (before as u32) / 3,
-            "单次异常把先验从 {before} 拉到 {after}，抗抖动不足"
+            after <= before + before / 3,
+            "单次异常从 {before} 拉到 {after}，抗抖动不足"
         );
     }
 
-    /// 连续失败时收紧：失效节点通常立即失败（连接被拒），无需等满余量
+    #[test]
+    fn ewma_acts_as_prior_for_new_nodes() {
+        let a = seeded(2000);
+        let t = a.timeout_ms_for(None);
+        assert!(t > 0);
+        // 新节点继承全体先验，而非冷启动兜底值
+        assert!(t >= 2_000, "新节点未继承先验：{t}");
+    }
+
+    // ---- 失败收缩 ----
+
     #[test]
     fn consecutive_failure_shrinks_timeout() {
-        let a = AdaptiveTimeout::default();
-        let mut n = node_with_rtt(Some(1500));
+        let a = seeded(800);
+        let mut n = node_with(Some(800), &[]);
         let normal = a.timeout_ms_for(Some(&n));
         n.fail_streak = 1;
         let shrunk = a.timeout_ms_for(Some(&n));
-        assert!(
-            shrunk <= normal,
-            "失败后超时应收紧以加速判定：{normal} → {shrunk}"
-        );
+        assert!(shrunk <= normal, "失败后应收紧：{normal} → {shrunk}");
     }
 
-    /// 边界：floor/ceil 配置不得产生倒挂区间
+    /// 相对慢的节点即便连续失败也不得低于地板
     #[test]
-    fn bounds_never_invert() {
-        let a = AdaptiveTimeout::default().with_bounds(5_000, 1_000);
-        assert!(a.ceil_ms >= a.floor_ms, "ceil 必须 >= floor");
-        let t = a.timeout_ms_for(Some(&node_with_rtt(Some(800))));
-        assert!(t >= a.floor_ms && t <= a.ceil_ms, "实际值 {t} 越界");
+    fn shrink_respects_floor() {
+        let a = seeded(2000);
+        let mut n = node_with(Some(2000), &[]);
+        n.fail_streak = 3;
+        let t = a.timeout_ms_for(Some(&n));
+        assert!(t >= 500, "收缩后跌破地板：{t}");
+    }
+
+    /// 样本环容量受控：不会随节点数 × 历史无限膨胀
+    #[test]
+    fn rtt_samples_ring_is_bounded() {
+        let mut n = NodeProbe::new("x", NOW);
+        for i in 0..(RTT_SAMPLE_CAP * 3) {
+            n.push_sample(100 + i as u16);
+        }
+        assert_eq!(n.rtt_samples.len(), RTT_SAMPLE_CAP);
     }
 }

@@ -137,9 +137,9 @@ impl ActiveHealthGuard {
         table: Arc<RwLock<ProbeTable>>,
         selector: Arc<AutoSelector>,
     ) -> Self {
-        // 下界 2000ms：再快的节点也不低于此，避免抖动误判；
-        // 上界取配置值，保证故障检测延迟有硬上界
-        let adaptive = AdaptiveTimeout::default().with_bounds(2_000, cfg.timeout_ms);
+        // 冷启动兜底：首轮探测前（尚无任何样本）使用；一旦有样本，
+        // 上下界改由 fleet 中位数 × 比例自动导出，无需用户配置
+        let adaptive = AdaptiveTimeout::default().with_cold_start(cfg.timeout_ms);
         Self {
             cfg,
             client: Arc::new(ClashApiClient::default()),
@@ -179,8 +179,18 @@ impl ActiveHealthGuard {
         // 2. 测「主实例内该节点出站」——与用户流量同路径。
         //    超时按该节点自身历史 RTT 推导：高速节点不必等满上界（检测更快），
         //    慢速节点自动放宽（不被自身速度误杀）。固定值无法区分二者。
-        let node_snapshot = { self.table.read().await.get(&current).cloned() };
-        let timeout = self.adaptive.timeout_ms_for(node_snapshot.as_ref());
+        // 画像由节点自己积累的 RTT 样本判定——无需用户配置任何参数，
+        // 换一家机场也会自动重新适配
+        let (node_snapshot, samples) = {
+            let t = self.table.read().await;
+            match t.get(&current) {
+                Some(n) => (Some(n.clone()), Some(n.rtt_samples.clone())),
+                None => (None, None),
+            }
+        };
+        let timeout = self
+            .adaptive
+            .timeout_ms_for_with(node_snapshot.as_ref(), samples.as_deref());
         match self.client.get_node_delay(&current, &self.cfg.url, timeout).await {
             Ok(rtt) => {
                 self.fails.store(0, Ordering::Relaxed);
