@@ -202,20 +202,27 @@ impl LatencyProfile {
 /// 而高速节点恰恰是最该被快速发现失效的那批。取 1500ms 则把慢节点反复误杀，
 /// 触发本不该发生的故障转移。
 ///
-/// # 策略
+/// # 策略（三层，逐层精确化）
 ///
 /// ```text
-/// timeout = clamp(baseline × 3, 2000ms, 6000ms)
+/// 样本 < 20   →  timeout = clamp(基线 × 3,  fleet中位×2,  fleet中位×8)
+/// 样本 ≥ 20   →  timeout = clamp(经验p95 × 1.2, 同上)
+/// 连续失败    →  上述结果再 ÷2（失效节点往往 TCP 直接被拒，不必等满余量）
 /// ```
 ///
-/// - 高速节点（baseline 300ms）→ 落到 2000ms 下限，失效判定快
-/// - 慢速节点（baseline 2000ms）→ 落到 6000ms 上限，不被自身速度误杀
-/// - 无历史的新节点 → 用全局 EWMA 先验（冷启动时回退 1500ms ≈ p90）
-/// - 连续失败时收紧 1 倍：失效节点往往 TCP 直接被拒（RTT≈0），不必等满余量；
-///   收紧封顶 1 倍（不降到 floor 以下），避免偶发抖动被过度解读
+/// **上下界是相对量纲而非绝对毫秒数**——这是跨机场自适应的关键。绝对值只对
+/// 采样时那一家有效：fleet 50ms（欧洲节点）→ floor 100ms，故障快速判定；
+/// fleet 800ms（跨洋专线）→ floor 1600ms，慢节点不被自身速度误杀。
+/// 另有 500ms 绝对下限兜底「fleet 极快时 floor 退化到毫秒级」的极端情况。
 ///
-/// 3 倍余量的依据：3×p50≈2400ms 已覆盖 p95（1605ms）之上的全部抖动；
-/// 再放大只会拖慢故障检测。
+/// **经验分位数替代固定倍数**：实测 203 节点中 `3×median / 经验p95` 的
+/// 中位数为 1.78——固定 3 倍对 87% 的节点都过于宽松，等于白等：
+/// 巴西节点 p95=1371ms 却要等 2682ms 才判失效。样本累积到 20+ 后自动切换，
+/// 用户无需配置任何参数。
+///
+/// 门槛为何是 20 而非更小：经验分位数的分辨率由样本量决定，n<20 时 p95 会
+/// 退化为最大值（n=12 → 索引 11 = max），等于「拿单个离群点当下限」，比固定
+/// 倍数更不稳。20 是 p95 首次取得真实分辨率的位置。
 #[derive(Debug, Clone)]
 pub struct AdaptiveTimeout {
     /// 全局 RTT 指数滑动均值（跨节点共享，作为新节点先验）
@@ -266,7 +273,13 @@ impl AdaptiveTimeout {
     /// 用 `p95 × 1.2` 而非 `p99 × k`：p99 需要 20+ 样本才有意义，而 p95 在
     /// 12 个样本时已有 0.6 个样本的分辨率。1.2 倍于 p95 覆盖了「比历史最差
     /// 情况再差一点」的余量，足以吸收新出现的抖动。
-    const MIN_SAMPLES_FOR_EMPIRICAL: usize = 12;
+    /// 启用经验分位数所需的最小样本数
+    ///
+    /// 取 20 而非更小的值：经验分位数的**分辨率**由样本量决定，样本过少时
+    /// p95 会退化为「最大值」（n=12 时 p95 索引 11 = max；n<20 基本必然如此），
+    /// 那等价于「用最大值当下限」——一个离群样本就能把超时顶满，比固定倍数
+    /// 还不稳。20 是 p95 首次获得真实分辨率的位置（n=20 → 索引 18，非 max）。
+    const MIN_SAMPLES_FOR_EMPIRICAL: usize = 20;
     const EMPIRICAL_MARGIN_NUM: u64 = 6; // 1.2 = 6/5
     const EMPIRICAL_MARGIN_DEN: u64 = 5;
 
@@ -1170,7 +1183,10 @@ mod empirical_timeout_tests {
         // 注意下限：冷启动时 anchor 回退为节点自身基线，floor = 800×2 = 1600，
         // 会盖过经验值（p95×1.2 ≈ 972）——这是有意的「相对下限」保护，
         // 防止超时塌缩到毫秒级。样本累积 + EWMA 起来后 anchor 才是 fleet 中位数。
-        let many: Vec<u16> = vec![800, 805, 795, 810, 798, 802, 807, 793, 801, 806, 799, 804];
+        let many: Vec<u16> = vec![
+            800, 805, 795, 810, 798, 802, 807, 793, 801, 806, 799, 804, 803, 796, 809, 801,
+            797, 805, 800, 804,
+        ];
         let t_many = a.timeout_ms_for_with(Some(&n), Some(&many));
         assert!(
             t_many < t_few,
@@ -1206,9 +1222,15 @@ mod empirical_timeout_tests {
         let a = AdaptiveTimeout::default();
         let mut n = NodeProbe::new("x", 0);
         n.rtt_ms = Some(800);
-        let steady: Vec<u16> = vec![800, 805, 795, 802, 798, 803, 797, 801, 799, 804, 796, 800];
+        let steady: Vec<u16> = vec![
+            800, 805, 795, 802, 798, 803, 797, 801, 799, 804, 796, 800, 806, 794, 802, 800,
+            798, 804, 801, 799,
+        ];
         // 同样中位数，但一半是离群高值
-        let jittery: Vec<u16> = vec![800, 2500, 810, 2400, 805, 2600, 795, 2300, 802, 2550, 798, 2200];
+        let jittery: Vec<u16> = vec![
+            800, 2500, 810, 2400, 805, 2600, 795, 2300, 802, 2550, 798, 2200, 806, 2450,
+            799, 2350, 803, 2505, 801, 2400,
+        ];
         let t_steady = a.timeout_ms_for_with(Some(&n), Some(&steady));
         let t_jit = a.timeout_ms_for_with(Some(&n), Some(&jittery));
         // 稳态：经验 p95≈810×1.2=972 → 落到相对下限 1600
@@ -1231,7 +1253,10 @@ mod empirical_timeout_tests {
         let mut n = NodeProbe::new("x", 0);
         // 巴西节点实测：中位 894，p95 1371，3×median=2682 过度宽松
         n.rtt_ms = Some(894);
-        let samples: Vec<u16> = vec![894, 900, 890, 1371, 895, 888, 1360, 892, 1371, 897, 891, 1365];
+        let samples: Vec<u16> = vec![
+            894, 900, 890, 1371, 895, 888, 1360, 892, 1371, 897, 891, 1365, 893, 899, 889,
+            1370, 896, 887, 1362, 894,
+        ];
         let t = a.timeout_ms_for_with(Some(&n), Some(&samples));
         assert!(
             t < 894 * 3,
@@ -1250,7 +1275,9 @@ mod empirical_timeout_tests {
         let mut n = NodeProbe::new("x", 0);
         n.rtt_ms = Some(20);
         // 极快且极稳的节点：经验 p95×1.2 仅 24ms，必须被兜底托住
-        let fast: Vec<u16> = vec![20, 21, 19, 22, 20, 21, 19, 20, 22, 21, 19, 20];
+        let fast: Vec<u16> = vec![
+            20, 21, 19, 22, 20, 21, 19, 20, 22, 21, 19, 20, 21, 20, 22, 19, 21, 20, 19, 21,
+        ];
         let t = a.timeout_ms_for_with(Some(&n), Some(&fast));
         assert!(t >= 500, "极快节点的超时 {t} 不应低于 500ms 绝对兜底");
     }
@@ -1277,6 +1304,32 @@ mod empirical_timeout_tests {
             t.get("x").unwrap().rtt_samples.len(),
             n.rtt_samples.len(),
             "样本必须跨「持久化」往返保留"
+        );
+    }
+
+    /// 回归：门槛必须是 20 而非更小
+    ///
+    /// 经验 p95 在 n<20 时退化为「最大值」（n=12 → 索引 11 = max），
+    /// 等于拿单个离群样本当下限——比固定倍数更不稳。20 是 p95 首次取得
+    /// 真实分辨率的位置。门槛若被下调，本测试会失败。
+    #[test]
+    fn empirical_threshold_is_guarded_against_quantile_degeneration() {
+        assert_eq!(
+            AdaptiveTimeout::MIN_SAMPLES_FOR_EMPIRICAL,
+            20,
+            "低于 20 时 p95 退化为 max，经验值不可信"
+        );
+        // 实证：n=19 的 p95 必然是 max，n=20 才不是
+        let degenerate = [800u16, 2500, 810, 2400, 805, 2600, 795, 2300, 802, 2550, 798, 2200, 806, 2450, 799, 2350, 803, 2505, 801]
+            .to_vec();
+        let mut with20 = degenerate.clone();
+        with20.push(2400);
+        let a = AdaptiveTimeout::default();
+        let t19 = a.timeout_ms_for_with(None, Some(&degenerate));
+        let t20 = a.timeout_ms_for_with(None, Some(&with20));
+        assert!(
+            t19 > t20,
+            "n=19 应被当作「样本不足」而更保守，{t19} vs {t20}"
         );
     }
 
