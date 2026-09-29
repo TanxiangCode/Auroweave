@@ -1722,25 +1722,87 @@ pub fn set_system_proxy_with_backup(
     enabled: bool,
     port: u16,
 ) -> Result<(), String> {
-    // 以 settings 的 mixed_port 作为"本应用写入端口"的判据：
-    // 关闭路径的 port 参数恒为 0，不能用于归属判定
+    set_system_proxy_with_backup_impl(app, enabled, port, true)
+}
+
+/// 静默版写入口：**绝不弹提权框**
+///
+/// 专供两条无人值守路径使用：
+/// - 启动期残留清理（`startup::apply_core_mode_with_fallback` 步骤3）
+/// - 守护的残留收敛（`proxy_guard`，30s 一拍）
+///
+/// 这两条路径的原始约束是"全程静默、不打扰用户"。用普通的
+/// `set_system_proxy_with_backup` 会在 macOS 上经由 osascript 弹出密码框：
+/// 启动时弹一次尚可接受，守护则是**每 30 秒弹一次**且用户无从预期，
+/// 比它要解决的残留代理问题更扰民。
+pub fn set_system_proxy_with_backup_silent(
+    app: &tauri::AppHandle,
+    enabled: bool,
+    port: u16,
+) -> Result<(), String> {
+    set_system_proxy_with_backup_impl(app, enabled, port, false)
+}
+
+fn set_system_proxy_with_backup_impl(
+    app: &tauri::AppHandle,
+    enabled: bool,
+    port: u16,
+    allow_prompt: bool,
+) -> Result<(), String> {
+    // 归属判定要同时看"开关态"与"字段态"：
+    // - 开关态：代理当前开着且指向我们写过的端点
+    // - 字段态：即使开关已关，ProxyServer / 三项代理字段仍指向我们写过的端点
+    // 旧实现只看开关态，导致"开关已关 + 字段仍污染"这一最常见的残留形态
+    // 被判为"不是我们写的"从而跳过还原，快照机制完全失效（F3）。
     let managed = crate::commands::settings::settings_get_internal(app).mixed_port;
     let ours_before = is_own_proxy_endpoint(managed);
+
+    // 字段态探测只在关闭路径需要（决定要不要还原），开启路径不查：
+    // 每次探测在 macOS 上是一次 networksetup 子进程调用（150-400ms），
+    // 开启路径无条件查一遍纯属白付开销
+    let field_polluted_before =
+        !enabled && is_proxy_field_polluted(app);
 
     if enabled && !ours_before {
         capture_backup(app);
     }
 
-    let result = set_system_proxy(enabled, port);
+    // allow_prompt=false 时走静默实现，确保"不弹框"贯穿写与还原两侧
+    let result = if allow_prompt {
+        set_system_proxy(enabled, port)
+    } else {
+        set_system_proxy_silent_impl(enabled, port)
+    };
+    if result.is_ok() {
+        crate::system::proxy_guard::set_desired(enabled);
+    }
 
-    if !enabled && ours_before && result.is_ok() {
-        let backup = crate::commands::settings::settings_get_internal(app).sysproxy_backup;
-        match backup {
-            Some(b) => match restore_backup_fields(&b, true) {
-                Ok(()) => log::info!("[sysproxy] 已还原用户原代理配置字段（开关仍为关闭）"),
-                Err(e) => log::error!("[sysproxy] 还原用户原代理配置失败: {}", e),
-            },
-            None => log::info!("[sysproxy] 无原配置快照可还原"),
+    if enabled {
+        // 回读校验通过才记录：记录一个没真正写进去的端点，会让守护把别人的
+        // 代理误认成自己的并静默关掉
+        if result.is_ok() {
+            persist_applied_endpoint(app, port);
+        }
+    } else if result.is_ok() {
+        // 关闭成功后还原字段。归属闸门放宽到"开关态或字段态任一命中"——
+        // 字段污染本身就是我们造成的，还原它不构成误改。
+        if ours_before || field_polluted_before {
+            let backup = crate::commands::settings::settings_get_internal(app).sysproxy_backup;
+            match backup {
+                Some(b) => match restore_backup_fields(&b, allow_prompt) {
+                    Ok(()) => {
+                        log::info!("[sysproxy] 已还原用户原代理配置字段（开关仍为关闭）");
+                        clear_applied_endpoint(app);
+                    }
+                    // 还原失败：保留 applied 记录，让下次退出/守护还有机会重试，
+                    // 也让"字段仍污染"这一事实不至于被遗忘
+                    Err(e) => log::error!("[sysproxy] 还原用户原代理配置失败: {}", e),
+                },
+                None => {
+                    log::info!("[sysproxy] 无原配置快照可还原");
+                    clear_applied_endpoint(app);
+                }
+            }
         }
     }
 
@@ -1785,22 +1847,33 @@ pub fn get_autoproxy_state() -> (bool, Option<String>) {
 pub fn cleanup_system_proxy_on_exit(app: &tauri::AppHandle) {
     let managed = crate::commands::settings::settings_get_internal(app).mixed_port;
     let ours_before = is_own_proxy_endpoint(managed);
-    if !get_system_proxy_status() && !ours_before {
+    // 退出路径同样要认字段态：崩溃/强杀后可能已是"开关关、字段脏"，
+    // 只看开关会跳过还原，把 127.0.0.1 永久留在系统代理设置里（F3）
+    let field_polluted_before = is_proxy_field_polluted(app);
+
+    // 开关态只查一次并复用：get_system_proxy_status 在 macOS 上是一次
+    // networksetup 批量子进程调用（150-400ms），退出路径查三次就是白等 0.5s
+    let proxy_on = get_system_proxy_status();
+    if !proxy_on && !ours_before && !field_polluted_before {
         return;
     }
 
-    if let Err(e) = set_system_proxy_silent(false, 0) {
-        log::error!("[app] 退出清理系统代理失败（可能残留代理导致断网）: {}", e);
-        return;
-    }
-    // 回读确认：仍开启就不还原字段——代理还指着 127.0.0.1 时把字段改回原值，
-    // 会让流量指向一个无人监听的地址，比不还原更糟
-    if get_system_proxy_status() {
-        log::error!("[app] 退出清理后回读仍为开启，跳过原配置还原");
-        return;
+    // 开关开着才需要先关；纯字段污染时跳过这一步（networksetup 关闭命令
+    // 在已关闭状态下是空操作，白跑一次 150-400ms 的子进程）
+    if proxy_on {
+        if let Err(e) = set_system_proxy_silent(false, 0) {
+            log::error!("[app] 退出清理系统代理失败（可能残留代理导致断网）: {}", e);
+            return;
+        }
+        // 回读确认：仍开启就不还原字段——代理还指着 127.0.0.1 时把字段改回原值，
+        // 会让流量指向一个无人监听的地址，比不还原更糟
+        if get_system_proxy_status() {
+            log::error!("[app] 退出清理后回读仍为开启，跳过原配置还原");
+            return;
+        }
     }
 
-    if !ours_before {
+    if !ours_before && !field_polluted_before {
         return;
     }
     match crate::commands::settings::settings_get_internal(app).sysproxy_backup {
@@ -1809,9 +1882,13 @@ pub fn cleanup_system_proxy_on_exit(app: &tauri::AppHandle) {
                 log::error!("[app] 退出时静默还原原代理配置失败: {}", e);
             } else {
                 log::info!("[app] 退出时已静默还原原代理配置字段");
+                clear_applied_endpoint(app);
             }
         }
-        None => log::info!("[app] 退出时无原配置快照可还原"),
+        None => {
+            log::info!("[app] 退出时无原配置快照可还原");
+            clear_applied_endpoint(app);
+        }
     }
 }
 
@@ -1945,7 +2022,7 @@ pub fn flush_system_dns_cache() {
 mod attribution_tests {
     use super::{endpoint_satisfies, is_loopback_host, parse_proxy_server, AppliedEndpoint};
 
-    /// 归属判定的纯逻辑复刻（与 is_own_proxy_endpoint 保持同源语义）
+    /// 归属判定的纯逻辑复刻（与 is_own_proxy_endpoint_with 保持同源语义）
     ///
     /// 之所以复刻而不是直接调被测函数：后者要读注册表 / 跑 networksetup，
     /// 属集成测试范畴。判据本身是纯函数，单独复刻即可锁住语义，
