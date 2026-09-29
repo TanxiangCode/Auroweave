@@ -4,7 +4,6 @@
 
 **下一代极简跨平台代理客户端**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)](https://github.com/TanxiangCode/gauzeweave)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-orange)](https://tauri.app)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green)](https://vuejs.org)
@@ -27,7 +26,7 @@
 - [开发规范](#开发规范)
 - [路线图](#路线图)
 - [贡献指南](#贡献指南)
-- [许可证](#许可证)
+- [致谢](#致谢)
 
 ---
 
@@ -37,13 +36,18 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 
 它拒绝做旧时代 Clash 的「皮肤壳子」，而是从 Sing-box 底层特性出发进行原生设计，通过**全息可视化**、**智能分流**和**零上传隐私保护**，重新定义代理客户端的使用体验。
 
+> **关于仓库名**：仓库为 `gauzeweave`，应用名为 **Auroweave**。
+> 二者刻意不同：改名会一并改动数据目录、bundle identifier、Windows 服务名
+> （`AuroweaveCoreService`）、命名管道与计划任务名，导致老用户升级后读不到
+> 原配置、订阅与 SQLite 流量库。仓库名可改，这些标识符不能动。
+
 ---
 
 ## 核心理念
 
 | 理念 | 描述 |
 |---|---|
-| **极简至上** | 主界面常驻后台，95% 高频操作通过全局快捷搜索框完成 |
+| **极简至上** | 主界面常驻后台，高频操作通过全局快捷搜索框完成 |
 | **绝对透明** | 分流规则、DNS 解析、链路拓扑完全可视化，打破网络黑盒 |
 | **本地安全** | 订阅解构与规则合并 100% 在前端本地完成，杜绝凭证上传 |
 
@@ -56,14 +60,18 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 
 ## 功能特性
 
-- **中央能量核**：实时网速驱动的流体光环动画，连接状态一目了然
-- **Spotlight 命令框**：全局快捷键呼出，秒级切换节点与模式
-- **智能测速与负载均衡**：延迟、下载、上传三档独立测速，支持批量串行调度
+- **中央能量核**：实时网速驱动的流体光环动画，连接状态一目了然；圆环即代理接管总开关
+- **三种代理模式**：系统代理 / TUN 全接管 / 混合，自由切换且互锁联动
+- **探测面（Probe Plane）**：节点延迟的唯一真相源——样本累积 + 经验分位数，
+  超时阈值按节点 RTT 自适应推导，不对特定机场过拟合
+- **智能测速与负载均衡**：延迟、下载、上传三档独立测速，支持批量并发调度
 - **应用级防火墙分流（App-Matrix）**：为每个指定应用精确分配独立出站节点
 - **语义化安全看板（Audit）**：冰冷的规则与连接自动翻译为自然语言时间流
 - **本地离线订阅转换**：支持 Clash / V2ray / Sing-box / Mihomo 格式，全程无凭证上传
-- **原生安全与持久化**：应用级真实流量持久化统计（SQLite），跨端交互采用 AES-GCM 动态加密
-- **场景自动化**：Wi-Fi SSID 变化自动切换网络策略
+- **系统代理正确性**：写入前校验内核存活、字段态判定、关闭时还原用户原配置——
+  不再出现「显示已开启但整机断网」或「原配置永不还原」
+- **内核与应用自更新**：GUI 内一键升级 sing-box 内核与本应用本体，带签名校验
+- **原生持久化**：应用级真实流量统计（SQLite），跨端交互采用 AES-GCM 动态加密
 - **全平台支持**：Windows / macOS 双端原生守护进程与无边框体验
 
 ---
@@ -81,7 +89,7 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 | **代理核心** | Sing-box 1.14.2 (sidecar 模式) |
 | **进程审计** | Rust `sysinfo` |
 | **日志** | Rust `tracing` |
-| **测试** | Vitest (前端) + Cargo test (Rust) + Playwright (E2E) |
+| **测试** | Vitest（前端单元）+ `cargo test`（Rust 单元 / 集成） |
 
 ---
 
@@ -99,14 +107,20 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 ```bash
 # 克隆仓库
 git clone https://github.com/TanxiangCode/gauzeweave.git
-cd auroweave
+cd gauzeweave
 
 # 安装前端依赖
 npm install
 
+# 下载 sing-box 内核（sidecar，仓库内 .gitignore，构建必需）
+npm run download:sing-box
+
 # 启动开发服务器（同时启动 Tauri 窗口）
 npm run tauri dev
 ```
+
+> ⚠️ 忘记执行 `npm run download:sing-box` 是最常见的「装完就跑不起来」原因：
+> `sidecar-bin/` 不入库，缺失时内核无法启动。
 
 ### 仅运行前端（无 Tauri）
 
@@ -118,12 +132,15 @@ npm run dev
 ### 构建生产包
 
 ```bash
-# Windows (.msi)
-npm run tauri build
-
-# macOS (.dmg, adhoc 自签)
-npm run tauri build
+npm run build:installer   # 等价于 tauri build
 ```
+
+产物位于 `target/release/bundle/`（本仓是 Cargo **workspace**，target 在仓库根，
+不在 `src-tauri/` 下）。
+
+> **Windows 服务模式（可选）**：需要开机自启与 TUN 提权时，
+> `npm run build:svc` 会编译守护进程 `AuroDaemon.exe` 并拷入
+> `src-tauri/resources/`；`npm run uninstall:svc` 卸载。
 
 ### 构建并安装到当前系统
 
@@ -162,7 +179,7 @@ export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""   # 本机密钥无密码
 npx tauri build --bundles app,dmg,nsis
 ```
 
-产物位于 `src-tauri/target/release/bundle/`，其中 `*.sig` 为更新签名，
+产物位于 `target/release/bundle/`，其中 `*.sig` 为更新签名，
 `latest.json` 需作为 Release 附件上传到 `releases/latest/download/latest.json`
 （`tauri.conf.json` 的 `plugins.updater.endpoints` 指向该地址）。
 
@@ -175,31 +192,38 @@ npx tauri build --bundles app,dmg,nsis
 ## 项目结构
 
 ```
-auroweave/
+gauzeweave/
 ├── src/                        # 前端源码 (Vue 3 + TS)
 │   ├── api/                    # IPC 封装层 + WebSocket 客户端
 │   │   ├── ipc/                # Tauri invoke() 封装（禁止组件直接调用）
 │   │   └── clash-ws.ts         # WebSocket 数据流订阅
 │   ├── composables/            # 可复用逻辑
 │   ├── components/             # 通用/业务组件
-│   ├── stores/                 # Pinia 状态管理（5 个领域 store）
+│   ├── stores/                 # Pinia 状态管理（8 个领域 store）
 │   ├── styles/
 │   │   └── tokens.css          # Design Tokens（深色+浅色双主题 CSS 变量）
 │   ├── types/                  # 全局 TS 类型（与 Rust struct 字段对齐）
-│   ├── views/                  # 五个主视图
+│   ├── views/                  # 七个主视图 + panels/ 子面板
 │   ├── constants.ts            # 应用常量（端口、版本号、测速参数等）
 │   └── router/                 # Vue Router 配置
 │
 ├── src-tauri/                  # 后端源码 (Rust)
-│   └── src/
-│       ├── commands/           # Tauri IPC 命令（4 个领域模块）
-│       ├── core/               # sing-box 核心：sidecar / config_builder
-│       └── error.rs            # 统一错误类型与 ApiResponse 结构
+│   ├── src/
+│   │   ├── commands/           # Tauri IPC 命令（按领域拆分）
+│   │   ├── core/               # sing-box 核心：sidecar / config_builder / stats_db
+│   │   ├── probe/              # 探测面：延迟采样、分位数、故障转移、节点表
+│   │   ├── speedtest/          # 上下行并行测速
+│   │   ├── system/             # 系统代理 / TUN / 托盘 / 开机启动
+│   │   ├── core_paths.rs       # 内核二进制路径唯一真源
+│   │   └── error.rs            # 统一错误类型与 ApiResponse 结构
+│   └── tests/                  # Rust 集成测试（含探测面实机验证）
 │
+├── crates/auroweave-svc/       # Windows 守护进程 AuroDaemon（服务模式）
+├── scripts/                    # 构建/发版工具链（tsx 脚本）
 ├── plans/                      # 各模块详细开发计划
 ├── docs/                       # 架构文档、调研报告
-├── tests/                      # 测试（unit / rust / e2e）
-├── TASK.md                     # 主任务追踪
+├── tests/unit/                 # 前端单元测试（Vitest）
+├── Cargo.toml                  # Cargo workspace 根（target 目录在仓库根）
 ├── CHANGELOG.md                # 版本变更记录
 └── CONTRIBUTING.md             # 贡献规范
 ```
@@ -228,7 +252,14 @@ auroweave/
 | M4 分流与审计 | ✅ 已完成 | App-Matrix 进程路由矩阵、语义化全息安全看板 |
 | M5 完整产品 | ✅ 已完成 | 九大分类设置面板、性能模式切换、打包发布 |
 | M6 数据与安全 | ✅ 已完成 | 真实流量本地持久化（SQLite）、IPC 令牌 AES-GCM 加密 |
-| M7 拓扑画布 | 🔵 规划中 | 进阶功能：全局多跳链路可视化拖拽画布 |
+| M7–M14 智能分流 v2 | ✅ 已完成 | DNS 响应级分流、配置编辑器、多源测速（0.2.0 ~ 0.6.0） |
+| 服务模式与自更新 | ✅ 已完成 | Windows 守护进程、服务态内核升级、应用本体自更新（0.7.0） |
+| 探测面重构 | ✅ 已完成 | 延迟唯一真相源、经验分位数、自适应超时（0.8.0） |
+| M15 拓扑画布 | 🔵 规划中 | 进阶功能：全局多跳链路可视化拖拽画布 |
+
+> 版本演进明细见 [CHANGELOG.md](CHANGELOG.md)（0.1.0 ~ 0.8.0）。
+> 版本号只有 2 处真源（`package.json` 与 `Cargo.toml` 的 `[workspace.package]`），
+> 用 `npm run version:check` 校验、`npm run version:set -- <x.y.z>` 改。
 
 ---
 
@@ -238,6 +269,9 @@ auroweave/
 
 ---
 
-## 许可证
+## 致谢
 
-[MIT License](LICENSE) © 2026 TanXiang
+- [Sing-box](https://sing-box.sagernet.org) —— 代理内核
+- [Tauri](https://tauri.app) —— 桌面壳框架
+
+© 2026 TanXiang · 仓库 [TanxiangCode/gauzeweave](https://github.com/TanxiangCode/gauzeweave)

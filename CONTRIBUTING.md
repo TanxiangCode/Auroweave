@@ -52,7 +52,7 @@ xcode-select --install
 
 ```bash
 git clone https://github.com/TanxiangCode/gauzeweave.git
-cd auroweave
+cd gauzeweave
 npm install
 ```
 
@@ -62,10 +62,10 @@ npm install
 npm run tauri dev      # 启动完整 Tauri 开发环境
 npm run dev            # 仅启动前端（无 Tauri，用于 UI 快速迭代）
 npm run build:install  # 打包 release 并安装到当前系统（Win/macOS/Linux 自动分流）
-npm run version:check  # 校验 8 处版本号是否一致（发版前必跑）
+npm run version:check  # 校验版本号是否一致（发版前必跑）
 npm run lint           # ESLint 检查并自动修复
 npm run test:unit      # 运行前端单元测试（vitest）
-cargo test             # 运行 Rust 单元测试（在 src-tauri/ 目录下执行）
+cargo test             # 运行 Rust 测试（在仓库根执行，覆盖整个 workspace）
 ```
 
 ---
