@@ -6,7 +6,7 @@
  *
  * 流程：
  *   1. `tauri build`（可用 --skip-build 跳过，只跑安装）
- *   2. 在 src-tauri/target/release/bundle 下按平台查找产物
+ *   2. 定位产物目录（向 cargo 询问 target_directory，见 resolveBundleDir）
  *   3. 平台化安装：
  *      - Windows: NSIS `*.exe` 走 `/S` 静默（提权），无 NSIS 则退到 MSI（msiexec /qn 提权）
  *      - macOS:   关闭运行中的进程 → 覆盖替换 /Applications/Auroweave.app → 去隔离属性
@@ -27,24 +27,41 @@ const APP_NAME = "Auroweave";
 const MAC_APP_DIR = "/Applications";
 
 /**
- * 定位 tauri build 的产物目录。
+ * 定位 tauri 产物的 bundle 目录。
  *
- * 候选路径不能写死：项目根有 `[workspace]`（members 含 src-tauri），
- * cargo 的 target 目录因此在**仓库根**而非 src-tauri 下。但若将来改成
- * src-tauri 独立构建（或用 CARGO_TARGET_DIR 覆盖），路径又会变。
- * 故运行时探测，取第一个存在的。
+ * 不能写死 `src-tauri/target/release/bundle`：本仓根 Cargo.toml 是 workspace
+ * （成员含 src-tauri 与 crates/auroweave-svc），cargo 会把 target 统一放在
+ * **workspace 根**，即 `target/release/bundle`。写死 src-tauri/target 在
+ * workspace 布局下永远找不到产物。
+ *
+ * 以 `cargo metadata` 的 target_directory 为准（自动覆盖 CARGO_TARGET_DIR 与
+ * 自定义 .cargo/config.toml）；cargo 不可用时退回两个常见布局，并取实际存在的那个。
  */
 function resolveBundleDir(): string {
+  const meta = spawnSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    encoding: "utf8",
+  });
+  if (meta.status === 0 && meta.stdout) {
+    try {
+      const target = JSON.parse(meta.stdout).target_directory as string | undefined;
+      if (target) {
+        return path.join(target, "release", "bundle");
+      }
+    } catch {
+      // metadata 解析失败时走下面的兜底，不该因此中断安装
+    }
+  }
+
   const candidates = [
     path.join(ROOT, "target", "release", "bundle"),
     path.join(ROOT, "src-tauri", "target", "release", "bundle"),
   ];
-  const found = candidates.find((p) => fs.existsSync(p));
-  if (found) return found;
   // 都不存在时返回首选（--skip-build 时由调用方给出可读报错）
-  return candidates[0];
+  return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
 }
 
+// 用 let：buildApp() 会在打包后重新解析一次——构建前目录可能还不存在，
+// 那时探测只能落到 fallback 路径。
 let BUNDLE_DIR = resolveBundleDir();
 
 const args = process.argv.slice(2);
@@ -98,10 +115,6 @@ function buildApp() {
   log("开始 tauri build（release）…");
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   run(npm, ["run", "build:installer"]);
-  // 构建前 BUNDLE_DIR 可能不存在（探测会落到 fallback），
-  // 构建后必须重新探测，否则会用错路径去找产物
-  BUNDLE_DIR = resolveBundleDir();
-  log(`产物目录：${path.relative(ROOT, BUNDLE_DIR)}`);
 }
 
 function installWindows() {
