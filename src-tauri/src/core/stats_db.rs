@@ -111,6 +111,20 @@ fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // RTT 样本列（2026-09-28）：让经验分位数跨重启累积。
+    // 用 ALTER 而非直接写进 CREATE——既有用户库里 probe_state 已存在，
+    // CREATE TABLE IF NOT EXISTS 不会给它补列。
+    if conn
+        .prepare("SELECT rtt_samples FROM probe_state LIMIT 1")
+        .and_then(|mut s| {
+            let _ = s.query([])?;
+            Ok(())
+        })
+        .is_err()
+    {
+        let _ = conn.execute("ALTER TABLE probe_state ADD COLUMN rtt_samples TEXT", []);
+    }
+
     // 历史保留期裁剪（plan-O O-3）：unlock/speedtest 两表只增不删会无限膨胀，
     // 且趋势查询本就 LIMIT 20——90 天外数据无消费者。开库一次，幂等（<10ms）
     if let Err(e) = prune_history(conn) {
@@ -301,6 +315,11 @@ pub struct ProbeStateRecord {
     pub rtt_ms: Option<u16>,
     pub last_ok_at: Option<i64>,
     pub fail_streak: u32,
+    /// 近期成功延迟样本（逗号分隔，样本量少，字符串足够且免 schema 变更）
+    ///
+    /// 持久化的意义：让经验分位数跨重启累积。若样本只留在内存，用户每次
+    /// 重启应用都退回「样本不足」状态，永远无法收敛出稳定的超时。
+    pub rtt_samples: Vec<u16>,
 }
 
 /// 批量写入探测态（单事务；探测轮结束时调用）
@@ -316,12 +335,13 @@ pub fn upsert_probe_states(records: Vec<ProbeStateRecord>) {
         conn.execute_batch("BEGIN;")?;
         {
             let mut stmt = conn.prepare(
-                "INSERT INTO probe_state (node_tag, rtt_ms, last_ok_at, fail_streak, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO probe_state (node_tag, rtt_ms, last_ok_at, fail_streak, rtt_samples, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(node_tag) DO UPDATE SET
                      rtt_ms = excluded.rtt_ms,
                      last_ok_at = excluded.last_ok_at,
                      fail_streak = excluded.fail_streak,
+                     rtt_samples = excluded.rtt_samples,
                      updated_at = excluded.updated_at",
             )?;
             for r in &records {
@@ -330,6 +350,7 @@ pub fn upsert_probe_states(records: Vec<ProbeStateRecord>) {
                     r.rtt_ms.map(|v| v as i64),
                     r.last_ok_at,
                     r.fail_streak as i64,
+                    encode_rtt_samples(&r.rtt_samples),
                     now
                 ])?;
             }
@@ -341,11 +362,30 @@ pub fn upsert_probe_states(records: Vec<ProbeStateRecord>) {
     }
 }
 
+/// 编码 RTT 样本为逗号分隔字符串（空样本存空串）
+fn encode_rtt_samples(samples: &[u16]) -> String {
+    samples
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// 解码 RTT 样本；容忍脏数据（跳过无法解析的项而非整体失败）
+fn decode_rtt_samples(raw: Option<String>) -> Vec<u16> {
+    raw.map(|s| {
+        s.split(',')
+            .filter_map(|p| p.trim().parse::<u16>().ok())
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 /// 读回全部探测态（启动时回填节点表）
 pub fn load_probe_states() -> HashMap<String, ProbeStateRecord> {
     with_conn(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT node_tag, rtt_ms, last_ok_at, fail_streak FROM probe_state",
+            "SELECT node_tag, rtt_ms, last_ok_at, fail_streak, rtt_samples FROM probe_state",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(ProbeStateRecord {
@@ -353,6 +393,7 @@ pub fn load_probe_states() -> HashMap<String, ProbeStateRecord> {
                 rtt_ms: row.get::<_, Option<i64>>(1)?.map(|v| v as u16),
                 last_ok_at: row.get(2)?,
                 fail_streak: row.get::<_, i64>(3)? as u32,
+                rtt_samples: decode_rtt_samples(row.get(4)?),
             })
         })?;
         let mut map = HashMap::new();

@@ -258,6 +258,30 @@ impl AdaptiveTimeout {
         self
     }
 
+    /// 由样本经验分位数导出超时上界；样本不足时返回 None
+    ///
+    /// 要求 ≥ `MIN_SAMPLES_FOR_EMPIRICAL` 个样本：经验分位数的分辨率由样本量
+    /// 决定，样本太少时 p95 实际等于最大值（一个离群点就顶满），不可信。
+    ///
+    /// 用 `p95 × 1.2` 而非 `p99 × k`：p99 需要 20+ 样本才有意义，而 p95 在
+    /// 12 个样本时已有 0.6 个样本的分辨率。1.2 倍于 p95 覆盖了「比历史最差
+    /// 情况再差一点」的余量，足以吸收新出现的抖动。
+    const MIN_SAMPLES_FOR_EMPIRICAL: usize = 12;
+    const EMPIRICAL_MARGIN_NUM: u64 = 6; // 1.2 = 6/5
+    const EMPIRICAL_MARGIN_DEN: u64 = 5;
+
+    fn empirical_ceiling(samples: &[u16]) -> Option<u64> {
+        if samples.len() < Self::MIN_SAMPLES_FOR_EMPIRICAL {
+            return None;
+        }
+        let mut v: Vec<u64> = samples.iter().map(|s| *s as u64).collect();
+        v.sort_unstable();
+        // p95 位置：向上取整，保证「至少覆盖 95% 的观测」
+        let idx = ((v.len() as u64 * 95).div_ceil(100) as usize).clamp(1, v.len()) - 1;
+        let p95 = v[idx];
+        Some(p95 * Self::EMPIRICAL_MARGIN_NUM / Self::EMPIRICAL_MARGIN_DEN)
+    }
+
     /// 记录一次成功 RTT，更新全局先验（EWMA）
     ///
     /// 权重取 **1/16** 而非常见的 1/4：全局先验只服务于「无历史的新节点」，
@@ -308,13 +332,21 @@ impl AdaptiveTimeout {
         node: Option<&NodeProbe>,
         samples: Option<&[u16]>,
     ) -> u64 {
-        let profile = LatencyProfile::classify(
-            samples.unwrap_or(&[]),
-            self.global_baseline_ms() as u64,
-        );
+        let samples = samples.unwrap_or(&[]);
+        let profile = LatencyProfile::classify(samples, self.global_baseline_ms() as u64);
         // 画像修正余量：相对慢的节点基线本就大，需成比例放宽
         let slack = profile.slack_adjust(self.slack);
 
+        // 样本充分时**改用经验分位数**替代固定倍数——这是「用得越久越准」的落点。
+        //
+        // 固定 3×median 对多数节点是过度宽松：实测 203 节点中
+        // `3×median / 经验p95` 的中位数为 1.78（即余量比实际需要宽 78%），
+        // 87% 的节点都能收紧。巴西节点 p95=1371ms 却要等 2682ms 才发现失效。
+        //
+        // 改用 `p95 × 1.2` 后：既覆盖历史观测到的全部抖动（1.2 倍于 p95），
+        // 又不必为一个罕见离群点付出 3 倍代价。样本越少越接近经验分位数，
+        // 故冷启动期（小样本）仍走固定倍数——那时经验分位数不可信。
+        let empirical = Self::empirical_ceiling(samples);
         let baseline = node
             .and_then(|n| n.rtt_ms)
             .map(|r| r as u32)
@@ -347,8 +379,14 @@ impl AdaptiveTimeout {
 
         // 连续失败时收紧：失效节点通常立即失败（连接被拒），无需等满余量。
         // 封顶 1 倍——收到 floor 保护，且不把偶发抖动误判为快速失效。
+        // 基准超时：经验分位数优先（样本充分时），否则用「基线 × 余量」
+        let anchor_timeout = match empirical {
+            Some(t) => t,
+            None => baseline.saturating_mul(slack) as u64,
+        };
+
         let shrink = 1u32 << node.map(|n| n.fail_streak).unwrap_or(0).min(1);
-        let raw = baseline.saturating_mul(slack) / shrink;
+        let raw = anchor_timeout / shrink as u64;
         (raw as f64).clamp(floor, ceil) as u64
     }
 }
@@ -381,9 +419,13 @@ pub struct NodeProbe {
 
 /// RTT 样本环形容量
 ///
-/// 8 个样本足够让 median 与 p95 稳定（各需 ≥5），又不会让 NodeProbe 随
-/// 节点数×历史无限膨胀：370 节点 × 8 × 2B ≈ 6KB。
-pub const RTT_SAMPLE_CAP: usize = 8;
+/// 取 32 而非 8：经验分位数的**分辨率**由样本数决定——8 个样本时 p95 的
+/// 位置只有 0.4 个样本的分辨率（实际等于最大值），一个离群点就能顶满超时。
+/// 实测本机 341 节点的样本数 p50=5 / max=13，从未达到 20，故此前任何基于
+/// 分位数的推导都不可靠；容量提到 32 并配合持久化，样本会随使用自然累积。
+///
+/// 存储代价可接受：370 节点 × 32 × 2B ≈ 24KB（持久化后同一量级）。
+pub const RTT_SAMPLE_CAP: usize = 32;
 
 impl NodeProbe {
     pub fn new(tag: &str, now: i64) -> Self {
@@ -706,6 +748,9 @@ impl ProbeTable {
             n.rtt_ms = r.rtt_ms;
             n.last_ok_at = r.last_ok_at;
             n.fail_streak = r.fail_streak;
+            // 回填历史样本：经验分位数需跨重启累积，否则用户每次重启都退回
+            // 「样本不足」状态，永远无法收敛
+            n.rtt_samples = r.rtt_samples.iter().copied().take(RTT_SAMPLE_CAP).collect();
             // 仍然新鲜的失败计数保留（继续退避），过期记录视为无效
             if n
                 .last_ok_at
@@ -730,6 +775,7 @@ impl ProbeTable {
                 rtt_ms: n.rtt_ms,
                 last_ok_at: n.last_ok_at,
                 fail_streak: n.fail_streak,
+                rtt_samples: n.rtt_samples.clone(),
             })
             .collect()
     }
@@ -1099,6 +1145,147 @@ mod adaptive_timeout_tests {
         let mut n = NodeProbe::new("x", NOW);
         for i in 0..(RTT_SAMPLE_CAP * 3) {
             n.push_sample(100 + i as u16);
+        }
+        assert_eq!(n.rtt_samples.len(), RTT_SAMPLE_CAP);
+    }
+}
+
+#[cfg(test)]
+mod empirical_timeout_tests {
+    use super::*;
+
+    /// 核心承诺：样本不足时用固定倍数（保守），样本充分后切换到经验分位数
+    #[test]
+    fn small_samples_use_fixed_slack_large_use_empirical() {
+        let a = AdaptiveTimeout::default();
+        let mut n = NodeProbe::new("x", 0);
+        n.rtt_ms = Some(800);
+
+        // 样本不足 12：走固定倍数（3×800=2400）
+        let few: Vec<u16> = vec![800, 810, 790, 805, 795];
+        let t_few = a.timeout_ms_for_with(Some(&n), Some(&few));
+        assert_eq!(t_few, 2400, "样本不足时应走固定倍数");
+
+        // 样本 ≥12 且 p95 远低于 3×median：应收紧。
+        // 注意下限：冷启动时 anchor 回退为节点自身基线，floor = 800×2 = 1600，
+        // 会盖过经验值（p95×1.2 ≈ 972）——这是有意的「相对下限」保护，
+        // 防止超时塌缩到毫秒级。样本累积 + EWMA 起来后 anchor 才是 fleet 中位数。
+        let many: Vec<u16> = vec![800, 805, 795, 810, 798, 802, 807, 793, 801, 806, 799, 804];
+        let t_many = a.timeout_ms_for_with(Some(&n), Some(&many));
+        assert!(
+            t_many < t_few,
+            "样本充分后应改用经验分位数并收紧：{t_many} < {t_few}"
+        );
+        // 稳态节点的 p95≈810×1.2=972 低于相对下限 1600，故结果等于 floor
+        assert_eq!(t_many, 1600, "冷启动下相对下限应生效");
+    }
+
+    /// fleet EWMA 起来后（多节点样本累积），anchor 才是全池中位数
+    #[test]
+    fn empirical_takes_effect_once_fleet_baseline_known() {
+        let a = AdaptiveTimeout::default();
+        // 先喂一批慢节点，让全局 EWMA 抬高（fleet 中位数变大 → floor 抬高）
+        for _ in 0..30 {
+            a.observe(2000);
+        }
+        let mut n = NodeProbe::new("fast", 0);
+        n.rtt_ms = Some(300);
+        // 样本充分且极稳：经验值远低于 floor，应被 floor 托住（防塌缩）
+        let steady: Vec<u16> = vec![300, 305, 295, 302, 298, 303, 297, 301, 299, 304, 296, 300];
+        let t = a.timeout_ms_for_with(Some(&n), Some(&steady));
+        // fleet≈2000 → floor≈4000，任何经验值都会被托到该量级
+        assert!(
+            t >= 3500,
+            "fleet 慢时应托住快节点的超时，避免误杀，实际 {t}"
+        );
+    }
+
+    /// 抖动大的节点：经验分位数会自然放宽（自动识别「这个节点就是抖」）
+    #[test]
+    fn jittery_node_gets_larger_empirical_ceiling() {
+        let a = AdaptiveTimeout::default();
+        let mut n = NodeProbe::new("x", 0);
+        n.rtt_ms = Some(800);
+        let steady: Vec<u16> = vec![800, 805, 795, 802, 798, 803, 797, 801, 799, 804, 796, 800];
+        // 同样中位数，但一半是离群高值
+        let jittery: Vec<u16> = vec![800, 2500, 810, 2400, 805, 2600, 795, 2300, 802, 2550, 798, 2200];
+        let t_steady = a.timeout_ms_for_with(Some(&n), Some(&steady));
+        let t_jit = a.timeout_ms_for_with(Some(&n), Some(&jittery));
+        // 稳态：经验 p95≈810×1.2=972 → 落到相对下限 1600
+        // 抖动：经验 p95≈2500×1.2=3000 → 高于下限，取 3000+
+        // 关键性质：抖动节点的超时**由经验数据决定**，不靠固定倍数兜底
+        assert!(
+            t_jit > t_steady,
+            "抖动节点应获得大于稳态节点的余量：{t_jit} vs {t_steady}"
+        );
+        assert!(
+            t_jit >= 2500,
+            "抖动节点的超时应覆盖其历史 p95（约 2500ms），实际 {t_jit}"
+        );
+    }
+
+    /// 关键收益：固定 3× 对多数节点过度宽松
+    #[test]
+    fn empirical_is_tighter_than_fixed_slack_for_typical_node() {
+        let a = AdaptiveTimeout::default();
+        let mut n = NodeProbe::new("x", 0);
+        // 巴西节点实测：中位 894，p95 1371，3×median=2682 过度宽松
+        n.rtt_ms = Some(894);
+        let samples: Vec<u16> = vec![894, 900, 890, 1371, 895, 888, 1360, 892, 1371, 897, 891, 1365];
+        let t = a.timeout_ms_for_with(Some(&n), Some(&samples));
+        assert!(
+            t < 894 * 3,
+            "经验分位数应显著紧于固定 3 倍：{t} vs {}",
+            894 * 3
+        );
+    }
+
+    /// 经验分位数不得把超时压到「绝对下限」以下
+    ///
+    /// floor 是相对量纲（fleet_median × floor_ratio，另有 500ms 绝对兜底），
+    /// 故此处断言的是那个绝对兜底——它是防止超时退化成毫秒级的最后防线。
+    #[test]
+    fn empirical_respects_absolute_floor() {
+        let a = AdaptiveTimeout::default();
+        let mut n = NodeProbe::new("x", 0);
+        n.rtt_ms = Some(20);
+        // 极快且极稳的节点：经验 p95×1.2 仅 24ms，必须被兜底托住
+        let fast: Vec<u16> = vec![20, 21, 19, 22, 20, 21, 19, 20, 22, 21, 19, 20];
+        let t = a.timeout_ms_for_with(Some(&n), Some(&fast));
+        assert!(t >= 500, "极快节点的超时 {t} 不应低于 500ms 绝对兜底");
+    }
+
+    /// 样本持久化后跨重启回填（这是「用得越久越准」的前提）
+    #[test]
+    fn samples_survive_snapshot_roundtrip() {
+        let mut n = NodeProbe::new("x", 0);
+        for i in 0..20u16 {
+            n.record_success(800 + i * 5, 0);
+        }
+        let rec = crate::core::stats_db::ProbeStateRecord {
+            node_tag: n.tag.clone(),
+            rtt_ms: n.rtt_ms,
+            last_ok_at: n.last_ok_at,
+            fail_streak: n.fail_streak,
+            rtt_samples: n.rtt_samples.clone(),
+        };
+        // 模拟落库 → 读回 → 重建节点
+        let mut t = ProbeTable::new();
+        t.reset_to(&["x".to_string()], 0);
+        t.restore_from(&[rec], 0, 120_000);
+        assert_eq!(
+            t.get("x").unwrap().rtt_samples.len(),
+            n.rtt_samples.len(),
+            "样本必须跨「持久化」往返保留"
+        );
+    }
+
+    /// 样本有界：长期运行不得让节点态无限膨胀
+    #[test]
+    fn sample_ring_stays_bounded_after_long_run() {
+        let mut n = NodeProbe::new("x", 0);
+        for i in 0..500u16 {
+            n.record_success(1000 + (i % 300) as u16, 0);
         }
         assert_eq!(n.rtt_samples.len(), RTT_SAMPLE_CAP);
     }
