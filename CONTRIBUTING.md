@@ -51,8 +51,8 @@ xcode-select --install
 ### 初始化项目
 
 ```bash
-git clone https://github.com/TanxiangCode/gauzeweave.git
-cd gauzeweave
+git clone https://github.com/TanxiangCode/Auroweave.git
+cd Auroweave
 npm install
 ```
 

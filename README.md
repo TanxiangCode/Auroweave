@@ -4,7 +4,7 @@
 
 **下一代极简跨平台代理客户端**
 
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)](https://github.com/TanxiangCode/gauzeweave)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey)](https://github.com/TanxiangCode/Auroweave)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-orange)](https://tauri.app)
 [![Vue](https://img.shields.io/badge/Vue-3.x-green)](https://vuejs.org)
 [![Sing-box](https://img.shields.io/badge/sing--box-1.14.2-purple)](https://sing-box.sagernet.org)
@@ -36,10 +36,11 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 
 它拒绝做旧时代 Clash 的「皮肤壳子」，而是从 Sing-box 底层特性出发进行原生设计，通过**全息可视化**、**智能分流**和**零上传隐私保护**，重新定义代理客户端的使用体验。
 
-> **关于仓库名**：仓库为 `gauzeweave`，应用名为 **Auroweave**。
-> 二者刻意不同：改名会一并改动数据目录、bundle identifier、Windows 服务名
-> （`AuroweaveCoreService`）、命名管道与计划任务名，导致老用户升级后读不到
-> 原配置、订阅与 SQLite 流量库。仓库名可改，这些标识符不能动。
+> **关于名称**：仓库名与应用名统一为 **Auroweave**。
+> 但下列标识符**不可改动**——它们与老用户的本地数据绑定，改名会导致升级后
+> 读不到原配置、订阅与 SQLite 流量库：
+> 数据目录、bundle identifier（`com.auroweave.app`）、Windows 服务名
+> （`AuroweaveCoreService`）、命名管道与计划任务名。
 
 ---
 
@@ -106,8 +107,8 @@ Auroweave 是一款基于 **Tauri 2.0 + Vue 3 + Sing-box** 的现代化代理客
 
 ```bash
 # 克隆仓库
-git clone https://github.com/TanxiangCode/gauzeweave.git
-cd gauzeweave
+git clone https://github.com/TanxiangCode/Auroweave.git
+cd Auroweave
 
 # 安装前端依赖
 npm install
@@ -192,7 +193,7 @@ npx tauri build --bundles app,dmg,nsis
 ## 项目结构
 
 ```
-gauzeweave/
+Auroweave/
 ├── src/                        # 前端源码 (Vue 3 + TS)
 │   ├── api/                    # IPC 封装层 + WebSocket 客户端
 │   │   ├── ipc/                # Tauri invoke() 封装（禁止组件直接调用）
@@ -274,4 +275,4 @@ gauzeweave/
 - [Sing-box](https://sing-box.sagernet.org) —— 代理内核
 - [Tauri](https://tauri.app) —— 桌面壳框架
 
-© 2026 TanXiang · 仓库 [TanxiangCode/gauzeweave](https://github.com/TanxiangCode/gauzeweave)
+© 2026 TanXiang · 仓库 [TanxiangCode/Auroweave](https://github.com/TanxiangCode/Auroweave)
