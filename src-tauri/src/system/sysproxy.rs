@@ -68,6 +68,18 @@ pub struct SysProxyBackup {
     pub windows: Option<WinProxyState>,
 }
 
+/// 本应用**实际写入过**的系统代理端点
+///
+/// 为什么不能只靠 `settings.mixed_port` 判定归属：那是"当前配置端口"，而残留
+/// 是"上次写入端口"。用户改过端口后（8890 → 7890），崩溃留下的 `127.0.0.1:8890`
+/// 用新端口比对必然失配 → 守护判定"非本应用写入"而放手 → 残留代理永远没人收敛，
+/// 整机断网。因此在每次写入成功时把真实端点落盘，归属判定以它为准。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AppliedEndpoint {
+    pub host: String,
+    pub port: u16,
+}
+
 #[cfg(target_os = "windows")]
 mod win_sysproxy {
     use std::ptr;
@@ -656,6 +668,22 @@ mod mac_sysproxy {
             .find(|e| e.enabled)
             .filter(|e| !e.server.is_empty() && e.port > 0)
             .map(|e| (e.server, e.port))
+    }
+
+    /// 代理服务器字段是否已被本应用写入的端点污染
+    ///
+    /// 为什么必须与 `enabled_endpoint` 分开：`networksetup -setwebproxy` 会把
+    /// server/port 写进配置，但开关可以独立是 off。开关关着而字段仍指向
+    /// 127.0.0.1:<mixed_port>，用户日后手动打开系统代理就会命中一个无人监听的
+    /// 端口——这正是 SysProxyBackup 快照机制要消灭的残留。判定"字段是否被污染"
+    /// 时不能用开关态代替，否则这类残留永远查不出来、也就永远不会被还原（F3）。
+    ///
+    /// 只认精确匹配（host + port 都等于本应用写入值）：宁可漏判也不误判，
+    /// 避免把用户自己的 127.0.0.1 服务当成残留去还原。
+    pub(super) fn is_field_polluted_by(applied: &super::AppliedEndpoint) -> bool {
+        query_proxy_entries()
+            .into_iter()
+            .any(|e| e.server == applied.host && e.port == applied.port)
     }
 
     /// 原配置快照查询的字段标记前缀
@@ -1484,18 +1512,91 @@ pub fn get_system_proxy_endpoint() -> Option<(String, u16)> {
     }
 }
 
-/// 判断当前开启的系统代理是否为**本应用写入**的残留
-///
-/// 判据：环回地址 + 我们管理的端口（`settings.mixed_port`）——本文件所有平台
-/// 实现都只写 `127.0.0.1:<mixed_port>`，因此"环回 + 端口命中"即可确定归属。
-///
-/// 为什么必须有这道闸：守护的"残留清理"是**无人值守**的自动动作，不看归属
-/// 就关闭，会把用户自己配置的公司代理 / ClashX / Surge 代理静默关掉，且应用内
-/// 没有恢复入口。宁可漏清理（用户点一次开关即收敛），不可误关。
 pub fn is_own_proxy_endpoint(managed_port: u16) -> bool {
     match get_system_proxy_endpoint() {
         Some((host, port)) => port == managed_port && is_loopback_host(&host),
         None => false,
+    }
+}
+
+/// 判断当前开启的系统代理是否为**本应用写入**的残留（含"上次写入端点"）
+///
+/// 在 `is_own_proxy_endpoint` 基础上叠加 `sysproxy_applied`（上次实际写入的
+/// 端点）比对，修复端口变更后归属失配导致残留代理永久断网的问题（F2）。
+/// 调用方迁移完成后由 `is_own_proxy_endpoint` 直接承接本语义，旧签名移除。
+pub fn is_own_proxy_endpoint_with(
+    app: &tauri::AppHandle,
+    managed_port: u16,
+) -> bool {
+    let applied_port = crate::commands::settings::settings_get_internal(app)
+        .sysproxy_applied
+        .map(|a| a.port);
+    match get_system_proxy_endpoint() {
+        Some((host, port)) => {
+            is_loopback_host(&host) && (port == managed_port || Some(port) == applied_port)
+        }
+        None => false,
+    }
+}
+
+/// 代理服务器**字段**（而非开关）当前是否仍被本应用写入的端点污染
+///
+/// 这是 F3 的核心判据：`is_own_proxy_endpoint` 只认"开启态"，而
+/// `SysProxyBackup` 要消灭的残留恰恰大量存在于"开关已关、字段仍指向
+/// 127.0.0.1"这一状态——此时旧逻辑一律 early-return，快照机制形同虚设。
+/// 这里独立读字段（Windows 读 ProxyServer，macOS 读三项代理的 server/port），
+/// 使还原决策不再依赖开关状态。
+pub fn is_proxy_field_polluted(app: &tauri::AppHandle) -> bool {
+    let settings = crate::commands::settings::settings_get_internal(app);
+    // 优先用上次实际写入的端点；无记录时退回当前 mixed_port
+    let applied = settings.sysproxy_applied.clone().unwrap_or(AppliedEndpoint {
+        host: "127.0.0.1".to_string(),
+        port: settings.mixed_port,
+    });
+
+    #[cfg(target_os = "macos")]
+    {
+        mac_sysproxy::is_field_polluted_by(&applied)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // 注册表 ProxyServer 与开关位 ProxyEnable 相互独立：
+        // 即使 ProxyEnable=0，ProxyServer 仍可能留着 127.0.0.1:<port>
+        match win_registry::read_proxy_server()
+            .as_deref()
+            .and_then(parse_proxy_server)
+        {
+            Some((host, port)) => host.eq_ignore_ascii_case(&applied.host) && port == applied.port,
+            None => false,
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = app;
+        false
+    }
+}
+
+/// 记录本应用实际写入的端点（归属判定的权威来源）
+///
+/// 只在写入成功且回读校验通过后调用——记录一个没真正写进去的端点，会让守护
+/// 误把别人的代理认成自己的并关掉。
+pub fn persist_applied_endpoint(app: &tauri::AppHandle, port: u16) {
+    let applied = AppliedEndpoint {
+        host: "127.0.0.1".to_string(),
+        port,
+    };
+    let patch = serde_json::json!({ "sysproxy_applied": applied });
+    if let Err(e) = crate::commands::settings::update_settings_internal(app, patch) {
+        log::warn!("[sysproxy] 持久化已写入端点失败（残留归属判定将退化）: {}", e);
+    }
+}
+
+/// 清除已写入端点记录（代理已关闭且字段已还原后调用）
+pub fn clear_applied_endpoint(app: &tauri::AppHandle) {
+    let patch = serde_json::json!({ "sysproxy_applied": serde_json::Value::Null });
+    if let Err(e) = crate::commands::settings::update_settings_internal(app, patch) {
+        log::warn!("[sysproxy] 清除已写入端点记录失败: {}", e);
     }
 }
 
@@ -1746,12 +1847,25 @@ pub fn set_system_proxy_silent(enabled: bool, port: u16) -> Result<(), String> {
 pub fn ensure_system_proxy_disabled(app: &tauri::AppHandle) -> Result<(), String> {
     crate::system::proxy_guard::set_desired(false);
 
-    if !get_system_proxy_status() {
+    let proxy_on = get_system_proxy_status();
+    // 字段态独立判定：开关已关不代表字段干净。旧实现在这里 early-return，
+    // 使"开关已关 + ProxyServer 仍是 127.0.0.1"这一残留永远得不到还原——
+    // 而它正是 SysProxyBackup 存在的唯一理由（F3）。
+    // 仅在开关已关时才探测：开关还开着时 ours_before 必然为真、字段态是冗余的，
+    // 而每次探测都是一次 150-400ms 的 networksetup 子进程调用。
+    let field_polluted = !proxy_on && is_proxy_field_polluted(app);
+
+    if !proxy_on && !field_polluted {
         return Ok(());
     }
 
-    log::info!("[sysproxy] 回读发现系统代理仍处于开启态，执行关闭（含原配置还原）");
-    // 内含回读校验：Ok 即代表"确实已关闭"
+    if proxy_on {
+        log::info!("[sysproxy] 回读发现系统代理仍处于开启态，执行关闭（含原配置还原）");
+    } else {
+        log::info!("[sysproxy] 开关已关但代理字段仍指向本应用端点，执行字段还原");
+    }
+    // 内含回读校验：Ok 即代表"确实已关闭"（proxy_on 分支）
+    // 或"字段已还原"（纯字段污染分支）
     set_system_proxy_with_backup(app, false, 0)
 }
 
@@ -1829,7 +1943,78 @@ pub fn flush_system_dns_cache() {
 /// 代理归属判定的跨平台单测（不依赖具体平台的系统调用）
 #[cfg(test)]
 mod attribution_tests {
-    use super::{endpoint_satisfies, is_loopback_host, parse_proxy_server};
+    use super::{endpoint_satisfies, is_loopback_host, parse_proxy_server, AppliedEndpoint};
+
+    /// 归属判定的纯逻辑复刻（与 is_own_proxy_endpoint 保持同源语义）
+    ///
+    /// 之所以复刻而不是直接调被测函数：后者要读注册表 / 跑 networksetup，
+    /// 属集成测试范畴。判据本身是纯函数，单独复刻即可锁住语义，
+    /// 且编译期能发现两处实现漂移（改一处忘另一处会在这里暴露）。
+    fn owns(actual: Option<&(String, u16)>, managed_port: u16, applied: Option<&AppliedEndpoint>) -> bool {
+        match actual {
+            Some((host, port)) => {
+                is_loopback_host(host)
+                    && (*port == managed_port
+                        || applied.is_some_and(|a| *port == a.port && *host == a.host))
+            }
+            None => false,
+        }
+    }
+
+    #[test]
+    fn applied_endpoint_survives_port_change() {
+        // F2 回归防线：上次写入 8890，用户把 mixed_port 改成 7890，
+        // 崩溃留下 127.0.0.1:8890。旧实现只比 mixed_port → 失配 →
+        // 守护判定"非本应用写入"而放手 → 残留代理永久断网。
+        let applied = AppliedEndpoint {
+            host: "127.0.0.1".to_string(),
+            port: 8890,
+        };
+        let residual = ("127.0.0.1".to_string(), 8890);
+
+        // 旧判据：只看当前 mixed_port(7890) → 失配
+        assert!(!owns(Some(&residual), 7890, None));
+        // 新判据：叠加上次实际写入端点 → 命中，守护得以清理残留
+        assert!(owns(Some(&residual), 7890, Some(&applied)));
+    }
+
+    #[test]
+    fn applied_endpoint_never_matches_foreign_proxy() {
+        // 防误关闸门：applied 记录不能扩大到"任意环回端口"，
+        // 否则会把关掉用户自己的 127.0.0.1 服务（如本地开发服务器）
+        let applied = AppliedEndpoint {
+            host: "127.0.0.1".to_string(),
+            port: 8890,
+        };
+        // 非环回 + 端口恰好相同 → 仍不认（公司代理用了同号端口）
+        assert!(!owns(Some(&("10.0.0.1".to_string(), 8890)), 7890, Some(&applied)));
+        // 环回但端口既非 managed 也非 applied → 不认
+        assert!(!owns(Some(&("127.0.0.1".to_string(), 3000)), 7890, Some(&applied)));
+    }
+
+    #[test]
+    fn applied_endpoint_requires_host_to_match_exactly() {
+        // 字段污染判定用精确匹配：ipv6 回环写法不同，不应误判为同一端点，
+        // 否则会把用户手动配的 [::1]:8890 当残留还原掉
+        let applied = AppliedEndpoint {
+            host: "127.0.0.1".to_string(),
+            port: 8890,
+        };
+        assert!(!owns(Some(&("::1".to_string(), 8890)), 7890, Some(&applied)));
+        assert!(owns(Some(&("127.0.0.1".to_string(), 8890)), 7890, Some(&applied)));
+    }
+
+    #[test]
+    fn not_enabled_endpoint_is_never_ours() {
+        // 代理没开时 get_system_proxy_endpoint 返回 None —— 开关态判定
+        // 必须为 false。这正是 F3 的由来：字段污染要在别处单独判，
+        // 不能指望这个函数顺带覆盖。
+        let applied = AppliedEndpoint {
+            host: "127.0.0.1".to_string(),
+            port: 8890,
+        };
+        assert!(!owns(None, 8890, Some(&applied)));
+    }
 
     #[test]
     fn endpoint_verify_accepts_only_our_loopback_endpoint() {

@@ -115,6 +115,13 @@ pub struct AppSettings {
     /// Option 而非具体类型：None = 从未接管过（无快照可还原）。
     #[serde(default)]
     pub sysproxy_backup: Option<crate::system::sysproxy::SysProxyBackup>,
+    /// 本应用上次实际写入的系统代理端点（归属判定的权威依据）
+    ///
+    /// 与 `mixed_port` 的区别：后者是"当前配置端口"，改端口后它指向新值，
+    /// 而系统里残留的是"上次写入端口"。崩溃/强杀后靠 mixed_port 判定会失配，
+    /// 导致守护放手不管、残留代理永久断网。见 sysproxy::AppliedEndpoint。
+    #[serde(default)]
+    pub sysproxy_applied: Option<crate::system::sysproxy::AppliedEndpoint>,
     pub tun_enabled: bool,
     /// TUN 虚拟网卡名称，显示 in Windows 网络适配器列表中，默认 Auroweave
     pub tun_interface_name: String,
@@ -258,6 +265,8 @@ impl Default for AppSettings {
             allow_lan: false,
             // 从未接管过系统代理，无原配置快照
             sysproxy_backup: None,
+            // 从未写入过系统代理，无端点归属记录
+            sysproxy_applied: None,
             tun_enabled: false,
 
             tun_interface_name: "Auroweave".to_string(),
