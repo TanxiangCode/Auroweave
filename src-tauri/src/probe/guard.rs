@@ -39,7 +39,7 @@
 /// 单次失败可能是网络抖动，直接切换会造成不必要的连接重建。连续 2 次失败
 /// （约 2s）才判定失效——既过滤抖动，又远快于内核的 180s。
 use super::selector::{AutoSelector, Decision};
-use super::table::{FailureClass, ProbeTable};
+use super::table::{AdaptiveTimeout, FailureClass, ProbeTable};
 use crate::core::clash_api::ClashApiClient;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -125,6 +125,8 @@ pub struct ActiveHealthGuard {
     table: Arc<RwLock<ProbeTable>>,
     /// 选点器（执行故障转移）
     selector: Arc<AutoSelector>,
+    /// 自适应超时：按节点自身历史 RTT 推导本次探测预算
+    adaptive: AdaptiveTimeout,
     fails: AtomicU32,
     stopped: AtomicBool,
 }
@@ -135,14 +137,23 @@ impl ActiveHealthGuard {
         table: Arc<RwLock<ProbeTable>>,
         selector: Arc<AutoSelector>,
     ) -> Self {
+        // 下界 2000ms：再快的节点也不低于此，避免抖动误判；
+        // 上界取配置值，保证故障检测延迟有硬上界
+        let adaptive = AdaptiveTimeout::default().with_bounds(2_000, cfg.timeout_ms);
         Self {
             cfg,
             client: Arc::new(ClashApiClient::default()),
             table,
             selector,
+            adaptive,
             fails: AtomicU32::new(0),
             stopped: AtomicBool::new(false),
         }
+    }
+
+    /// 自适应超时推导器（供测试与调参查看）
+    pub fn adaptive(&self) -> &AdaptiveTimeout {
+        &self.adaptive
     }
 
     /// 供测试注入自定义 ClashAPI（指向受控实例）
@@ -165,14 +176,17 @@ impl ActiveHealthGuard {
             return GuardOutcome::Skipped;
         }
 
-        // 2. 测「主实例内该节点出站」——与用户流量同路径
-        match self
-            .client
-            .get_node_delay(&current, &self.cfg.url, self.cfg.timeout_ms)
-            .await
-        {
+        // 2. 测「主实例内该节点出站」——与用户流量同路径。
+        //    超时按该节点自身历史 RTT 推导：高速节点不必等满上界（检测更快），
+        //    慢速节点自动放宽（不被自身速度误杀）。固定值无法区分二者。
+        let node_snapshot = { self.table.read().await.get(&current).cloned() };
+        let timeout = self.adaptive.timeout_ms_for(node_snapshot.as_ref());
+        match self.client.get_node_delay(&current, &self.cfg.url, timeout).await {
             Ok(rtt) => {
                 self.fails.store(0, Ordering::Relaxed);
+                // 更新全局 EWMA 先验：让「从未探测过的新节点」也能拿到
+                // 合理的初始超时，而非一律用兜底值
+                self.adaptive.observe(rtt);
                 // 实测延迟写回节点表：比探测面更权威（同一进程同一资源），
                 // 且顺带免除探测面对该节点的重复探测
                 if let Some(n) = self.table.write().await.get_mut(&current) {

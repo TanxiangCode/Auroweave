@@ -39,7 +39,7 @@ pub mod guard;
 pub use guard::{ActiveHealthGuard, GuardOutcome, HealthGuardConfig};
 pub use scheduler::ProbeScheduler;
 pub use selector::{AutoSelector, Decision, SelectorConfig};
-pub use table::{FailureClass, NodeProbe, ProbeTable, ProbeTier};
+pub use table::{AdaptiveTimeout, FailureClass, NodeProbe, ProbeTable, ProbeTier};
 
 /// 探测结果事件名（前端实时刷新延迟列表）
 pub const PROBE_PROGRESS_EVENT: &str = "probe-progress";
