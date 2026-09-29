@@ -26,6 +26,14 @@
 
 > 尚未发布的改动将在此累积。
 
+## [0.9.0] — 2026-09-29
+
+> **探测面重构与系统代理正确性修复**：把节点延迟收敛为唯一真相源，
+> 消除冗余探测对用户流量的争抢；同时修掉三处会导致「整机断网」或
+> 「代理永不还原」的严重缺陷。本版本首次真正发布 Release，
+> 应用内自更新自此可用（此前 tag 齐全但无 Release，`latest.json` 404，
+> updater 静默判定为「已是最新」）。
+
 ### Fixed
 
 - **节点优选效率与网络稳定性重构**（370 节点规模实测驱动）
@@ -123,6 +131,32 @@
   避免互相覆盖节点集
 - 侧栏地区分组识别由「type 为 urltest」改为「tag 以 `-auto` 结尾」——所有组降级为
   selector 后，按 type 判定会导致地区分组从侧栏整体消失
+
+### Added
+
+- **`npm run build:install`**：一条命令完成「打包 + 安装到当前系统」，
+  Windows / macOS / Linux 自动分流（NSIS `/S` 静默提权 / 覆盖
+  `/Applications` 并去 quarantine / apt·rpm·AppImage）
+- **`npm run version:check` / `version:set`**：版本号治理工具。
+  版本号从 8 处散落收敛为 2 处真源（`package.json` 与 `Cargo.toml` 的
+  `[workspace.package]`），`tauri.conf.json` 改为直接读 `../package.json`，
+  成员 crate 用 `version.workspace = true` 继承
+
+### Fixed（工具链）
+
+- **`build:install` 产物目录定位错误**：脚本原硬编码
+  `src-tauri/target/release/bundle`，但本仓根 `Cargo.toml` 是 workspace，
+  cargo 把 target 统一放在**仓库根**的 `target/release/bundle`。
+  结果 `--skip-build` 在有真实产物时仍报「未找到 Auroweave.app」并以
+  exit 1 退出——该脚本自 0.8.0 引入起就从未在真实产物上跑通过
+  （当时仅用 `/tmp` 沙箱假 bundle 验证，恰好掩盖了路径错误）。
+  改为以 `cargo metadata` 的 `target_directory` 为准
+- **CI 产物路径同步修正**：`release.yml` 的 `BUNDLE` 同样指向
+  `src-tauri/target/...`，在 workspace 布局下取不到产物
+- **自更新静默失效**：tag 齐全（v0.1.0~v0.8.0）但**从未真正创建 Release**，
+  `releases/latest/download/latest.json` 返回 404，updater 插件据此判定
+  「无更新」——用户点击检查永远显示「已是最新」且不报错。
+  另修正 updater endpoint 指向改名前的旧仓库地址
 
 ---
 
@@ -496,7 +530,8 @@
 
 ---
 
-[Unreleased]: https://github.com/TanxiangCode/Auroweave/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/TanxiangCode/Auroweave/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/TanxiangCode/Auroweave/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/TanxiangCode/Auroweave/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/TanxiangCode/Auroweave/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/TanxiangCode/Auroweave/compare/v0.5.0...v0.6.0

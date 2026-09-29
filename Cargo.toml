@@ -9,4 +9,4 @@ resolver = "2"
 # 这样 `npm run version:set` 只需写 package.json + 本文件，成员 crate 与
 # Cargo.lock 会由 cargo 自动同步，无需手改。
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
