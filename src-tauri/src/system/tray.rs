@@ -120,21 +120,48 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 "toggle_sysproxy" => {
                     // 菜单切换语义：读取当前系统代理状态后翻转（开→关→开），
-                    // 而非旧实现的"点击永远是开启"
+                    // 而非旧实现的"点击永远是开启"。
+                    //
+                    // 开启分支必须先确认内核存活（F4）：系统代理指向
+                    // 127.0.0.1:<mixed_port> 而无人监听 = 整机断网。旧实现
+                    // 直接写代理，回读只看"注册表/networksetup 说开着"就报成功，
+                    // 于是内核没跑也显示"已开启"，用户毫无提示地断网。
+                    // 拒绝开启优于开了再被守护 30s 后悄悄关掉——后者是对用户
+                    // 显式操作的静默回滚，且全程无反馈。
                     let currently_enabled = crate::system::sysproxy::get_system_proxy_status();
                     let target_enabled = !currently_enabled;
-                    if target_enabled {
-                        let (port, _) = crate::speedtest::get_configured_ports(app_handle);
-                        match crate::system::sysproxy::set_system_proxy_with_backup(&app_handle, true, port) {
-                            Ok(_) => info!("[tray] 系统代理已开启: port={}", port),
-                            Err(e) => info!("[tray] 开启系统代理失败: {}", e),
+                    let handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if target_enabled {
+                            let (port, _) = crate::speedtest::get_configured_ports(&handle);
+                            let running = crate::commands::settings::core_query_running(
+                                handle.clone(),
+                            )
+                            .await
+                            .data
+                            .unwrap_or(false);
+                            if !running {
+                                info!(
+                                    "[tray] 内核未运行，拒绝开启系统代理（否则 127.0.0.1:{} 无人监听会导致整机断网）",
+                                    port
+                                );
+                                return;
+                            }
+                            match crate::system::sysproxy::set_system_proxy_with_backup(
+                                &handle, true, port,
+                            ) {
+                                Ok(_) => info!("[tray] 系统代理已开启: port={}", port),
+                                Err(e) => info!("[tray] 开启系统代理失败: {}", e),
+                            }
+                        } else {
+                            match crate::system::sysproxy::set_system_proxy_with_backup(
+                                &handle, false, 0,
+                            ) {
+                                Ok(_) => info!("[tray] 系统代理已关闭"),
+                                Err(e) => info!("[tray] 关闭系统代理失败: {}", e),
+                            }
                         }
-                    } else {
-                        match crate::system::sysproxy::set_system_proxy_with_backup(&app_handle, false, 0) {
-                            Ok(_) => info!("[tray] 系统代理已关闭"),
-                            Err(e) => info!("[tray] 关闭系统代理失败: {}", e),
-                        }
-                    }
+                    });
                 }
                 "restart_kernel" => {
                     let handle = app_handle.clone();
