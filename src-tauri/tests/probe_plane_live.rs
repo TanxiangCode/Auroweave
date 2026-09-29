@@ -302,3 +302,74 @@ async fn guard_fails_over_when_current_node_dies() {
 
 }
 
+
+/// 经验分位数路径的实机行为（默认忽略）
+///
+/// 前一个实机测试只验证「首次探测 → 故障转移」，此时节点样本为 0，走的是固定
+/// 倍数分支。本测试构造足量样本，验证样本累积后的经验分位数路径：
+///
+/// 1. 样本 < 20：p95 退化为 max，经验值不可信 → 走固定倍数
+/// 2. 样本 ≥ 20：改用经验 p95×1.2，且明显紧于固定倍数
+/// 3. 样本持久化往返后仍在（跨重启累积的前提）
+///
+/// 不依赖真实订阅：直接用合成样本驱动 `AdaptiveTimeout` 与 `ProbeTable`。
+#[tokio::test]
+#[ignore = "需要 tokio 运行时（不需 sing-box 二进制）"]
+async fn empirical_timeout_path_converges_as_samples_accumulate() {
+    use auroweave_lib::probe::table::ProbeTable;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    let adaptive = Arc::new(auroweave_lib::probe::AdaptiveTimeout::default());
+    let table = Arc::new(RwLock::new(ProbeTable::new()));
+    let now = chrono::Utc::now().timestamp_millis();
+    table.write().await.reset_to(&["N".to_string()], now);
+
+    // 逐步喂入样本：19 个稳态 + 少量抖动
+    let steady: Vec<u16> = vec![800, 805, 795, 802, 798, 803, 797, 801, 799, 804, 796, 800];
+    let jitter: Vec<u16> = vec![820, 780, 810, 790, 815, 785];
+
+    // ---- 阶段1：样本不足 20，走固定倍数 ----
+    {
+        let mut t = table.write().await;
+        for rtt in steady.iter().chain(jitter.iter()) {
+            t.get_mut("N").unwrap().record_success(*rtt, now);
+        }
+        let n = t.get("N").unwrap().rtt_samples.len();
+        eprintln!("阶段1：样本 {} 个（<20，应走固定倍数）", n);
+        assert!(n < 20);
+    }
+    let t_few = {
+        let t = table.read().await;
+        let node = t.get("N").unwrap().clone();
+        adaptive.timeout_ms_for_with(Some(&node), Some(&node.rtt_samples))
+    };
+
+    // ---- 阶段2：补足到 20+，切经验分位数 ----
+    let t_many = {
+        let mut t = table.write().await;
+        for _ in 0..12 {
+            t.get_mut("N").unwrap().record_success(801, now);
+        }
+        let node = t.get("N").unwrap().clone();
+        eprintln!("阶段2：样本 {} 个（≥20，应走经验 p95）", node.rtt_samples.len());
+        assert!(node.rtt_samples.len() >= 20);
+        adaptive.timeout_ms_for_with(Some(&node), Some(&node.rtt_samples))
+    };
+
+    eprintln!("固定倍数路径 = {}ms，经验分位数路径 = {}ms", t_few, t_many);
+    assert!(
+        t_many <= t_few,
+        "经验分位数应不宽于固定倍数（数据稳定时应收紧）：{t_many} vs {t_few}"
+    );
+
+    // ---- 阶段3：样本持久化往返 ----
+    let snap = table.read().await.snapshot();
+    let before = table.read().await.get("N").unwrap().rtt_samples.len();
+    let mut fresh = ProbeTable::new();
+    fresh.reset_to(&["N".to_string()], now);
+    fresh.restore_from(&snap, now, 120_000);
+    let after = fresh.get("N").unwrap().rtt_samples.len();
+    eprintln!("持久化往返：{} → {} 个样本", before, after);
+    assert_eq!(before, after, "样本必须跨持久化往返保留，否则重启即退回「样本不足」");
+}
