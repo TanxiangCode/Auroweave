@@ -130,14 +130,41 @@ pub async fn apply_core_mode_with_fallback(
     // Windows 额外停止计划任务 TUN
     // 使用静默模式清理，避免启动时弹出 macOS 密码框（后续设置新代理时会覆盖旧设置）
     //
-    // 性能：系统代理清理是 150-400ms 的 networksetup 批量子进程调用——
-    // proxy_guard 期望态已是关闭（上次正常退出/从未开启）时直接跳过，
-    // 全量清理仅在实际残留开启状态时执行。
-    if crate::system::proxy_guard::is_desired_enabled() {
-        // 失败不静默：残留代理 = 整机断网，必须留下线索
-        // （真正的兜底在 direct 快速路径的 finalize_direct_release）
-        if let Err(e) = crate::system::sysproxy::set_system_proxy_silent(false, 0) {
-            error!("[app] 启动前清理系统代理失败: {}", e);
+    // 判据必须是"系统里实际是否存在我们的残留"，而不是进程内的期望态标志：
+    // `is_desired_enabled()` 是 static AtomicBool，冷启动时恒为 false——上一进程
+    // 是崩溃退出还是被资源管理器强杀，都无法跨进程传递这个状态。用它当闸门会让
+    // 本步在**唯一需要它的场景**（上次没来得及清理）里恒不执行，残留代理只能等
+    // 30s 后的守护才收敛，期间整机断网（F1）。
+    //
+    // 归属判定用 is_own_proxy_endpoint（读上次实际写入的端点，端口改过也
+    // 不失配）+ 字段态判定（开关已关但 ProxyServer 仍脏），二者任一命中即清理。
+    //
+    // 性能：networksetup 批量子进程调用 150-400ms，故先做归属判定，
+    // 确认确有残留才真正执行关闭/还原；无残留时零开销（绝大多数启动）。
+    // 代价：确有残留时会多付一次探测（with_backup 内部会重算归属），
+    // 但那本就是异常路径，换来常见路径完全零开销——值得。
+    {
+        let residual_switch =
+            crate::system::sysproxy::is_own_proxy_endpoint(app_handle, settings.mixed_port);
+        let residual_field = crate::system::sysproxy::is_proxy_field_polluted(app_handle);
+        if residual_switch || residual_field {
+            info!(
+                "[app] 启动前检测到上次残留（开关态: {}，字段态: {}），执行静默清理",
+                residual_switch, residual_field
+            );
+            // 走静默版 with_backup：字段污染时同样需要还原原配置，
+            // 且内含回读校验，能暴露"以为清干净了其实没清"。
+            // 必须用 _silent：普通版在 macOS 上会经 osascript 弹密码框，
+            // 而启动期清理的既定约束是静默完成、不打扰用户
+            if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup_silent(
+                app_handle,
+                false,
+                0,
+            ) {
+                // 失败不静默：残留代理 = 整机断网，必须留下线索
+                // （真正的兜底在 direct 快速路径的 finalize_direct_release）
+                error!("[app] 启动前清理系统代理失败: {}", e);
+            }
         }
     }
     #[cfg(target_os = "windows")]

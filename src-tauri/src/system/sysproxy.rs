@@ -1512,22 +1512,20 @@ pub fn get_system_proxy_endpoint() -> Option<(String, u16)> {
     }
 }
 
-pub fn is_own_proxy_endpoint(managed_port: u16) -> bool {
-    match get_system_proxy_endpoint() {
-        Some((host, port)) => port == managed_port && is_loopback_host(&host),
-        None => false,
-    }
-}
-
-/// 判断当前开启的系统代理是否为**本应用写入**的残留（含"上次写入端点"）
+/// 判断当前开启的系统代理是否为**本应用写入**的残留
 ///
-/// 在 `is_own_proxy_endpoint` 基础上叠加 `sysproxy_applied`（上次实际写入的
-/// 端点）比对，修复端口变更后归属失配导致残留代理永久断网的问题（F2）。
-/// 调用方迁移完成后由 `is_own_proxy_endpoint` 直接承接本语义，旧签名移除。
-pub fn is_own_proxy_endpoint_with(
-    app: &tauri::AppHandle,
-    managed_port: u16,
-) -> bool {
+/// 判据：环回地址 + 端口命中。端口取两处来源的并集：
+/// - `sysproxy_applied`：**上次实际写入**的端点（权威来源，端口改过也不失配）
+/// - `managed_port`：当前 `settings.mixed_port`（兼容无 applied 记录的旧安装）
+///
+/// 为什么必须有这道闸：守护的"残留清理"是**无人值守**的自动动作，不看归属
+/// 就关闭，会把用户自己配置的公司代理 / ClashX / Surge 代理静默关掉，且应用内
+/// 没有恢复入口。宁可漏清理（用户点一次开关即收敛），不可误关。
+///
+/// 注意本函数**必须**读 `sysproxy_applied`，不能只比 `managed_port`：用户改过
+/// 端口后（8890 → 7890），崩溃留下的 `127.0.0.1:8890` 用新端口比对必然失配，
+/// 守护会判定"非本应用写入"而放手，残留代理永久断网。
+pub fn is_own_proxy_endpoint(app: &tauri::AppHandle, managed_port: u16) -> bool {
     let applied_port = crate::commands::settings::settings_get_internal(app)
         .sysproxy_applied
         .map(|a| a.port);
@@ -1755,7 +1753,7 @@ fn set_system_proxy_with_backup_impl(
     // 旧实现只看开关态，导致"开关已关 + 字段仍污染"这一最常见的残留形态
     // 被判为"不是我们写的"从而跳过还原，快照机制完全失效（F3）。
     let managed = crate::commands::settings::settings_get_internal(app).mixed_port;
-    let ours_before = is_own_proxy_endpoint(managed);
+    let ours_before = is_own_proxy_endpoint(app, managed);
 
     // 字段态探测只在关闭路径需要（决定要不要还原），开启路径不查：
     // 每次探测在 macOS 上是一次 networksetup 子进程调用（150-400ms），
@@ -1846,7 +1844,7 @@ pub fn get_autoproxy_state() -> (bool, Option<String>) {
 /// （那才会导致断网）——因为还原只写字段、不开开关。
 pub fn cleanup_system_proxy_on_exit(app: &tauri::AppHandle) {
     let managed = crate::commands::settings::settings_get_internal(app).mixed_port;
-    let ours_before = is_own_proxy_endpoint(managed);
+    let ours_before = is_own_proxy_endpoint(app, managed);
     // 退出路径同样要认字段态：崩溃/强杀后可能已是"开关关、字段脏"，
     // 只看开关会跳过还原，把 127.0.0.1 永久留在系统代理设置里（F3）
     let field_polluted_before = is_proxy_field_polluted(app);
@@ -2022,7 +2020,7 @@ pub fn flush_system_dns_cache() {
 mod attribution_tests {
     use super::{endpoint_satisfies, is_loopback_host, parse_proxy_server, AppliedEndpoint};
 
-    /// 归属判定的纯逻辑复刻（与 is_own_proxy_endpoint_with 保持同源语义）
+    /// 归属判定的纯逻辑复刻（与 is_own_proxy_endpoint 保持同源语义）
     ///
     /// 之所以复刻而不是直接调被测函数：后者要读注册表 / 跑 networksetup，
     /// 属集成测试范畴。判据本身是纯函数，单独复刻即可锁住语义，

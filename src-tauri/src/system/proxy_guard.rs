@@ -96,12 +96,14 @@ pub fn start_guard(app_handle: tauri::AppHandle) {
                 // 实际开 + 非"期望开且内核活着"：疑似残留，静默关闭
                 //
                 // 归属闸门：无人值守的自动动作必须先确认"这是我们写的"。
+                // 判据用 is_own_proxy_endpoint —— 它比对 **sysproxy_applied**
+                // （上次实际写入的端点）而不仅是当前 mixed_port。旧实现只认
+                // mixed_port，用户改过端口后残留的 127.0.0.1:<旧端口> 必然失配，
+                // 守护会判定"非本应用写入"而放手，残留代理永久断网（F2）。
                 // Auroweave 只写 127.0.0.1:<mixed_port>，若当前开启的端点不是它，
                 // 说明是用户自己的公司代理 / ClashX / Surge —— 绝不干预。
-                // 代价是"旧端口残留"会漏清理，但用户点一次开关即收敛，
-                // 方向上宁可不作为，也不可误关别人的代理。
                 let port = crate::commands::settings::settings_get_internal(&app_handle).mixed_port;
-                if !crate::system::sysproxy::is_own_proxy_endpoint(port) {
+                if !crate::system::sysproxy::is_own_proxy_endpoint(&app_handle, port) {
                     log::debug!("[proxy_guard] 系统代理由外部配置（非本应用写入），不干预");
                     continue;
                 }
@@ -117,7 +119,16 @@ pub fn start_guard(app_handle: tauri::AppHandle) {
                         reason
                     );
                 }
-                if let Err(e) = crate::system::sysproxy::set_system_proxy_silent(false, 0) {
+                // 走静默版 with_backup：既关开关，也把代理字段还原成用户原值。
+                // 守护同样要履行"环境自洁"职责——否则残留的 127.0.0.1 会一直
+                // 留在系统代理设置里，用户日后手动打开即断网（F3）。
+                // 必须用 _silent：本循环 30s 一拍，普通版会经 osascript 每 30 秒
+                // 弹一次密码框，违反守护"全程静默"的既定约束。
+                if let Err(e) = crate::system::sysproxy::set_system_proxy_with_backup_silent(
+                    &app_handle,
+                    false,
+                    0,
+                ) {
                     if first_hit {
                         log::error!("[proxy_guard] 清理残留系统代理失败（下轮重试）: {}", e);
                     } else {
